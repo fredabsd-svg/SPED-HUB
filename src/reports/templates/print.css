@@ -1,0 +1,290 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPED-HUB Print Styles — WeasyPrint PDF
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@import "tokens.css";
+
+/* ── Page Setup ── */
+@page {
+  size: A4;
+  margin: var(--page-margin-top) var(--page-margin-right)
+          var(--page-margin-bottom) var(--page-margin-left);
+
+  @top-center {
+    content: string(page-header);
+    font-family: var(--font-family);
+    font-size: var(--font-size-xs);
+    color: var(--color-neutral-400);
+  }
+
+  @bottom-center {
+    content: counter(page);
+    font-family: var(--font-family);
+    font-size: var(--font-size-xs);
+    color: var(--color-neutral-400);
+  }
+}
+
+@page :first {
+  @top-center {
+    content: none;
+  }
+}
+
+/* ── Reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Base ── */
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+  color: var(--color-neutral-800);
+  background: white;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ── Typography ── */
+h1 { font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); color: var(--color-primary-700); }
+h2 { font-size: var(--font-size-2xl); font-weight: var(--font-weight-semibold); color: var(--color-neutral-800); }
+h3 { font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); color: var(--color-neutral-700); }
+h4 { font-size: var(--font-size-lg); font-weight: var(--font-weight-medium); color: var(--color-neutral-600); }
+
+/* ── Page Header ── */
+.page-header {
+  string-set: page-header "";
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--space-4);
+  border-bottom: 2px solid var(--color-primary-700);
+  margin-bottom: var(--space-6);
+}
+
+.page-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.page-header-logo {
+  max-height: 28mm;
+  max-width: 60mm;
+  object-fit: contain;
+}
+
+.page-header-info h1 {
+  font-size: var(--font-size-xl);
+  margin-bottom: var(--space-1);
+}
+
+.page-header-info .subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-neutral-500);
+}
+
+.page-header-meta {
+  text-align: right;
+  font-size: var(--font-size-xs);
+  color: var(--color-neutral-500);
+  line-height: var(--line-height-relaxed);
+}
+
+/* ── Info Box ── */
+.info-box {
+  background: var(--color-neutral-50);
+  border: var(--border-width) solid var(--color-neutral-200);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-6);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-8);
+  font-size: var(--font-size-sm);
+}
+
+.info-box dt {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-neutral-500);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--font-size-xs);
+}
+
+.info-box dd {
+  color: var(--color-neutral-800);
+}
+
+/* ── Tables ── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: var(--space-4);
+}
+
+thead th {
+  background: var(--color-primary-700);
+  color: white;
+  font-weight: var(--font-weight-semibold);
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+thead th.right,
+td.right {
+  text-align: right;
+}
+
+thead th.center,
+td.center {
+  text-align: center;
+}
+
+tbody td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: var(--border-width) solid var(--color-neutral-100);
+  vertical-align: top;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--color-neutral-50);
+}
+
+tbody tr.total-row {
+  border-top: 2px solid var(--color-neutral-800);
+  font-weight: var(--font-weight-bold);
+  background: var(--color-primary-50);
+}
+
+tbody tr.total-row td {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+/* ── Indentation for hierarchy ── */
+.indent-0 { padding-left: var(--space-3); }
+.indent-1 { padding-left: calc(var(--space-3) + var(--space-4)); }
+.indent-2 { padding-left: calc(var(--space-3) + var(--space-8)); }
+.indent-3 { padding-left: calc(var(--space-3) + var(--space-12)); }
+.indent-4 { padding-left: calc(var(--space-3) + var(--space-16)); }
+
+/* ── Synthetic vs Analytical ── */
+.synthetic td:first-child {
+  font-weight: var(--font-weight-semibold);
+}
+
+.analytical td:first-child {
+  font-weight: var(--font-weight-normal);
+}
+
+/* ── DRE Steps ── */
+.dre-step td:first-child {
+  font-weight: var(--font-weight-semibold);
+}
+
+.dre-subtotal td {
+  border-top: 1px solid var(--color-neutral-400);
+  font-weight: var(--font-weight-semibold);
+}
+
+.dre-total td {
+  border-top: 2px solid var(--color-neutral-800);
+  border-bottom: 2px solid var(--color-neutral-800);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-md);
+}
+
+/* ── Diário ── */
+.journal-entry {
+  margin-bottom: var(--space-4);
+  page-break-inside: avoid;
+}
+
+.journal-entry-header {
+  background: var(--color-primary-50);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-primary-200);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
+  display: flex;
+  justify-content: space-between;
+}
+
+.journal-entry-body table {
+  margin-bottom: 0;
+}
+
+.journal-entry-body thead th {
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+  font-size: var(--font-size-xs);
+}
+
+/* ── Callouts ── */
+.callout {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+  font-size: var(--font-size-sm);
+}
+
+.callout-info {
+  background: var(--color-info-light);
+  border-left: 4px solid var(--color-info);
+  color: var(--color-info);
+}
+
+.callout-warning {
+  background: var(--color-warning-light);
+  border-left: 4px solid var(--color-warning);
+  color: var(--color-warning);
+}
+
+.callout-error {
+  background: var(--color-error-light);
+  border-left: 4px solid var(--color-error);
+  color: var(--color-error);
+}
+
+/* ── Footer ── */
+.report-footer {
+  margin-top: var(--space-8);
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--color-neutral-200);
+  font-size: var(--font-size-xs);
+  color: var(--color-neutral-400);
+  text-align: center;
+}
+
+/* ── White-label overrides ── */
+:root.wl-custom {
+  /* Overridden by white-label config */
+}
+
+/* ── Utility ── */
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+.text-muted { color: var(--color-neutral-500); }
+.text-error { color: var(--color-error); }
+.text-success { color: var(--color-success); }
+.font-mono { font-family: var(--font-mono); }
+.mt-2 { margin-top: var(--space-2); }
+.mt-4 { margin-top: var(--space-4); }
+.mt-6 { margin-top: var(--space-6); }
+.mb-2 { margin-bottom: var(--space-2); }
+.mb-4 { margin-bottom: var(--space-4); }
+.mb-6 { margin-bottom: var(--space-6); }
+.page-break { page-break-before: always; }
+.no-break { page-break-inside: avoid; }

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Livro Diário</h2>
+
+<div class="info-box">
+  <div>
+    <dt>Período</dt>
+    <dd>{{ ctx.periodo_ref }}</dd>
+  </div>
+  <div>
+    <dt>Total de Lançamentos</dt>
+    <dd>{{ totais.num_lancamentos }}</dd>
+  </div>
+  <div>
+    <dt>Total Débitos</dt>
+    <dd>{{ fmt_moeda(totais.total_debitos) }}</dd>
+  </div>
+  <div>
+    <dt>Total Créditos</dt>
+    <dd>{{ fmt_moeda(totais.total_creditos) }}</dd>
+  </div>
+  {% if ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  <div>
+    <dt>Filtros</dt>
+    <dd>{{ ctx.filtros_descricao }}</dd>
+  </div>
+  {% endif %}
+</div>
+
+<!-- ═══ Termo de Abertura ═══ -->
+<div class="no-break mb-6">
+  <h4>Termo de Abertura</h4>
+  <p style="text-align:justify; font-size: var(--font-size-sm);">
+    Contém o presente livro {{ totais.num_lancamentos }} lançamentos contábeis
+    do período de {{ ctx.periodo_ref }}, numerados sequencialmente,
+    totalizando R$ {{ fmt_moeda(totais.total_debitos) }} em débitos
+    e R$ {{ fmt_moeda(totais.total_creditos) }} em créditos,
+    da empresa {{ ctx.empresa_nome }}, inscrita no CNPJ sob o nº {{ ctx.empresa_cnpj }}.
+  </p>
+</div>
+
+<!-- ═══ Lançamentos ═══ -->
+{% for lanc in lancamentos %}
+<div class="journal-entry">
+  <div class="journal-entry-header">
+    <span>Lançamento nº {{ lanc.num_lcto }} — {{ lanc.data }}</span>
+    <span>
+      {% if lanc.ind_lcto == 'E' %}Encerramento{% elif lanc.ind_lcto == 'X' %}Extemporâneo{% else %}Normal{% endif %}
+    </span>
+  </div>
+  <div class="journal-entry-body">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:15%">Conta</th>
+          <th style="width:40%">Histórico</th>
+          <th class="right" style="width:20%">Débito</th>
+          <th class="right" style="width:20%">Crédito</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in lanc.partidas %}
+        <tr>
+          <td class="font-mono">{{ p.cod_cta }}</td>
+          <td>{{ p.historico }}</td>
+          <td class="right">{{ fmt_moeda(p.debito) if p.debito else '–' }}</td>
+          <td class="right">{{ fmt_moeda(p.credito) if p.credito else '–' }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="background:var(--color-neutral-100); font-weight:var(--font-weight-semibold);">
+          <td colspan="2" class="text-right">Totais do lançamento:</td>
+          <td class="right">{{ fmt_moeda(lanc.total_debito) }}</td>
+          <td class="right">{{ fmt_moeda(lanc.total_credito) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+<!-- ═══ Termo de Encerramento ═══ -->
+<div class="no-break mt-6">
+  <h4>Termo de Encerramento</h4>
+  <p style="text-align:justify; font-size: var(--font-size-sm);">
+    Encerra-se o presente Livro Diário do período de {{ ctx.periodo_ref }},
+    contendo {{ totais.num_lancamentos }} lançamentos, totalizando
+    R$ {{ fmt_moeda(totais.total_debitos) }} em débitos e
+    R$ {{ fmt_moeda(totais.total_creditos) }} em créditos,
+    estando as partidas dobradas conferidas e os saldos reconciliados
+    com o Balancete de Verificação.
+  </p>
+  <p style="text-align:center; margin-top: var(--space-10);">
+    _________________________________________<br>
+    <span class="text-muted">{{ ctx.empresa_nome }}<br>
+    CNPJ {{ ctx.empresa_cnpj }}</span>
+  </p>
+</div>
+
+{% endblock %}

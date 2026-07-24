@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Demonstração do Resultado do Exercício</h2>
+
+<div class="info-box">
+  <div>
+    <dt>Período</dt>
+    <dd>{{ ctx.periodo_ref }}</dd>
+  </div>
+  <div>
+    <dt>Resultado Líquido</dt>
+    <dd class="{{ 'text-success' if totais.resultado_liquido >= 0 else 'text-error' }}">
+      {{ fmt_moeda(totais.resultado_liquido) }}
+    </dd>
+  </div>
+  {% if ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  <div>
+    <dt>Filtros</dt>
+    <dd>{{ ctx.filtros_descricao }}</dd>
+  </div>
+  {% endif %}
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:50%">Descrição</th>
+      <th class="right" style="width:25%">Período Atual</th>
+      <th class="right" style="width:25%">Período Anterior</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for linha in linhas %}
+      {% if linha.tipo == 'step' %}
+      <tr class="dre-step">
+        <td>{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+      </tr>
+      {% elif linha.tipo == 'subtotal' %}
+      <tr class="dre-subtotal">
+        <td>{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+      </tr>
+      {% elif linha.tipo == 'total' %}
+      <tr class="dre-total">
+        <td>{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+      </tr>
+      {% elif linha.tipo == 'detail' %}
+      <tr>
+        <td style="padding-left: var(--space-8)">{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td>{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+      </tr>
+      {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

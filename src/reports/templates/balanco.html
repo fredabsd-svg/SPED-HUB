@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Balanço Patrimonial</h2>
+
+<div class="info-box">
+  <div>
+    <dt>Período</dt>
+    <dd>{{ ctx.periodo_ref }}</dd>
+  </div>
+  <div>
+    <dt>Total Ativo</dt>
+    <dd>{{ fmt_moeda(totais.ativo) }}</dd>
+  </div>
+  <div>
+    <dt>Total Passivo + PL</dt>
+    <dd>{{ fmt_moeda(totais.passivo_pl) }}</dd>
+  </div>
+  {% if ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  <div>
+    <dt>Filtros</dt>
+    <dd>{{ ctx.filtros_descricao }}</dd>
+  </div>
+  {% endif %}
+</div>
+
+{% if totais.diferenca and totais.diferenca > 0.01 %}
+<div class="callout callout-error">
+  ⚠ Ativo ({{ fmt_moeda(totais.ativo) }}) ≠ Passivo + PL ({{ fmt_moeda(totais.passivo_pl) }}).
+  Diferença: {{ fmt_moeda(totais.diferenca) }}
+</div>
+{% endif %}
+
+<!-- ═══ ATIVO ═══ -->
+<h3>Ativo</h3>
+<table>
+  <thead>
+    <tr>
+      <th style="width:15%">Código</th>
+      <th style="width:45%">Descrição</th>
+      <th class="right" style="width:20%">Saldo Atual</th>
+      <th class="right" style="width:20%">Saldo Anterior</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for linha in grupos.ativo %}
+    <tr class="{{ 'synthetic' if linha.ind_cta == 'S' else 'analytical' }}">
+      <td class="indent-{{ linha.nivel - 1 }}">{{ linha.cod_cta }}</td>
+      <td>{{ linha.nome_cta }}</td>
+      <td class="right">{{ fmt_moeda(linha.saldo_atual) }}</td>
+      <td class="right">{{ fmt_moeda(linha.saldo_anterior) }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="total-row">
+      <td colspan="2">Total do Ativo</td>
+      <td class="right">{{ fmt_moeda(totais.ativo) }}</td>
+      <td class="right">{{ fmt_moeda(totais.ativo_anterior) }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ═══ PASSIVO ═══ -->
+<h3 class="mt-6">Passivo</h3>
+<table>
+  <thead>
+    <tr>
+      <th style="width:15%">Código</th>
+      <th style="width:45%">Descrição</th>
+      <th class="right" style="width:20%">Saldo Atual</th>
+      <th class="right" style="width:20%">Saldo Anterior</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for linha in grupos.passivo %}
+    <tr class="{{ 'synthetic' if linha.ind_cta == 'S' else 'analytical' }}">
+      <td class="indent-{{ linha.nivel - 1 }}">{{ linha.cod_cta }}</td>
+      <td>{{ linha.nome_cta }}</td>
+      <td class="right">{{ fmt_moeda(linha.saldo_atual) }}</td>
+      <td class="right">{{ fmt_moeda(linha.saldo_anterior) }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="total-row">
+      <td colspan="2">Total do Passivo</td>
+      <td class="right">{{ fmt_moeda(totais.passivo) }}</td>
+      <td class="right">{{ fmt_moeda(totais.passivo_anterior) }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ═══ PATRIMÔNIO LÍQUIDO ═══ -->
+<h3 class="mt-6">Patrimônio Líquido</h3>
+<table>
+  <thead>
+    <tr>
+      <th style="width:15%">Código</th>
+      <th style="width:45%">Descrição</th>
+      <th class="right" style="width:20%">Saldo Atual</th>
+      <th class="right" style="width:20%">Saldo Anterior</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for linha in grupos.pl %}
+    <tr class="{{ 'synthetic' if linha.ind_cta == 'S' else 'analytical' }}">
+      <td class="indent-{{ linha.nivel - 1 }}">{{ linha.cod_cta }}</td>
+      <td>{{ linha.nome_cta }}</td>
+      <td class="right">{{ fmt_moeda(linha.saldo_atual) }}</td>
+      <td class="right">{{ fmt_moeda(linha.saldo_anterior) }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="total-row">
+      <td colspan="2">Total do Patrimônio Líquido</td>
+      <td class="right">{{ fmt_moeda(totais.pl) }}</td>
+      <td class="right">{{ fmt_moeda(totais.pl_anterior) }}</td>
+    </tr>
+  </tbody>
+</table>
+
+{% endblock %}

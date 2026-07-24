@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>{{ ctx.titulo }} — {{ ctx.empresa_nome }}</title>
+<style>
+  {% include "tokens.css" %}
+  {% include "print.css" %}
+  {% if white_label %}
+  :root {
+    --color-primary-700: {{ white_label.cor_primaria or '#0B4F6C' }};
+    --color-primary-50: {{ white_label.cor_primaria_clara or '#E8F3F7' }};
+  }
+  {% endif %}
+</style>
+</head>
+<body>
+
+<!-- ═══ Page Header ═══ -->
+<div class="page-header">
+  <div class="page-header-left">
+    {% if white_label and white_label.logo_base64 %}
+    <img class="page-header-logo" src="{{ white_label.logo_base64 }}" alt="Logo">
+    {% endif %}
+    <div class="page-header-info">
+      <h1>{{ white_label.escritorio_nome or 'SPED-HUB' }}</h1>
+      <div class="subtitle">Demonstrações Contábeis</div>
+    </div>
+  </div>
+  <div class="page-header-meta">
+    <div>{{ ctx.empresa_nome }}</div>
+    <div>CNPJ: {{ ctx.empresa_cnpj }}</div>
+    <div>Período: {{ ctx.periodo_ref }}</div>
+    <div>Emitido: {{ ctx.data_emissao }}</div>
+  </div>
+</div>
+
+<!-- ═══ Content ═══ -->
+{% block content %}{% endblock %}
+
+<!-- ═══ Footer ═══ -->
+<div class="report-footer">
+  {% if white_label %}
+  {{ white_label.escritorio_nome or 'SPED-HUB' }} —
+  {% endif %}
+  Documento gerado automaticamente. Hash ECD: {{ ctx.hash_ecd[:12] if ctx.hash_ecd else 'N/D' }}
+</div>
+
+</body>
+</html>

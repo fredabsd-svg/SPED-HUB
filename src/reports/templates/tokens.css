@@ -1,0 +1,90 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPED-HUB Design Tokens — Seção 5 do Prompt de Engenharia
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Paleta Principal ── */
+  --color-primary-900: #062A3A;
+  --color-primary-800: #083D54;
+  --color-primary-700: #0B4F6C;
+  --color-primary-600: #0E6285;
+  --color-primary-500: #11759E;
+  --color-primary-400: #3D90B1;
+  --color-primary-300: #6AABC4;
+  --color-primary-200: #97C6D8;
+  --color-primary-100: #C3E0EB;
+  --color-primary-50:  #E8F3F7;
+
+  /* ── Neutros ── */
+  --color-neutral-900: #1A1A2E;
+  --color-neutral-800: #2D2D44;
+  --color-neutral-700: #40405A;
+  --color-neutral-600: #535370;
+  --color-neutral-500: #6B6B85;
+  --color-neutral-400: #8E8EA0;
+  --color-neutral-300: #B1B1BD;
+  --color-neutral-200: #D4D4DA;
+  --color-neutral-100: #E8E8EC;
+  --color-neutral-50:  #F5F5F7;
+
+  /* ── Semânticas ── */
+  --color-success: #1B8553;
+  --color-success-light: #E6F5EE;
+  --color-warning: #C77D20;
+  --color-warning-light: #FDF3E6;
+  --color-error: #C1292E;
+  --color-error-light: #FCEAEA;
+  --color-info: #2B6CB0;
+  --color-info-light: #EBF2FA;
+
+  /* ── Tipografia ── */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --font-size-xs: 0.6875rem;    /* 11px */
+  --font-size-sm: 0.75rem;      /* 12px */
+  --font-size-base: 0.8125rem;  /* 13px */
+  --font-size-md: 0.875rem;     /* 14px */
+  --font-size-lg: 1rem;         /* 16px */
+  --font-size-xl: 1.125rem;     /* 18px */
+  --font-size-2xl: 1.25rem;     /* 20px */
+  --font-size-3xl: 1.5rem;      /* 24px */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  /* ── Espaçamento (grid 4px) ── */
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+
+  /* ── Bordas ── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --border-width: 1px;
+  --border-color: var(--color-neutral-200);
+
+  /* ── Sombras ── */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
+  --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+
+  /* ── Página A4 ── */
+  --page-width: 210mm;
+  --page-height: 297mm;
+  --page-margin-top: 15mm;
+  --page-margin-bottom: 15mm;
+  --page-margin-left: 20mm;
+  --page-margin-right: 15mm;
+}
