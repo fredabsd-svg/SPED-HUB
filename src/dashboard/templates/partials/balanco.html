@@ -1,0 +1,45 @@
+<!-- Balanço Patrimonial (HTMX partial) -->
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Conta</th>
+                <th>Descrição</th>
+                <th class="text-right">Saldo Atual</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for secao, titulo in [("ativo", "ATIVO"), ("passivo", "PASSIVO"), ("pl", "PATRIMÔNIO LÍQUIDO")] %}
+            <tr class="row-section">
+                <td colspan="3">{{ titulo }}</td>
+            </tr>
+            {% for linha in grupos[secao] %}
+            <tr>
+                <td class="font-mono" style="padding-left:{{ linha.nivel * 16 + 12 }}px;">{{ linha.cod_cta }}</td>
+                <td>{{ linha.nome_cta }}</td>
+                <td class="text-right font-mono">{{ fmt_moeda(linha.saldo_atual) }}</td>
+            </tr>
+            {% endfor %}
+            <tr class="row-subtotal">
+                <td colspan="2" class="text-right"><strong>TOTAL {{ titulo }}</strong></td>
+                <td class="text-right font-mono"><strong>{{ fmt_moeda(totais[secao]) }}</strong></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="row-total">
+                <td colspan="2" class="text-right">
+                    Ativo = {{ fmt_moeda(totais.ativo) }} &nbsp;|&nbsp;
+                    Passivo + PL = {{ fmt_moeda(totais.passivo_pl) }}
+                </td>
+                <td class="text-right">
+                    {% if totais.diferenca > 0.01 %}
+                    ⚠️ Dif: {{ fmt_moeda(totais.diferenca) }}
+                    {% else %}
+                    ✅ Fecha
+                    {% endif %}
+                </td>
+            </tr>
+        </tfoot>
+    </table>
+</div>

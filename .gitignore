@@ -1,0 +1,33 @@
+# Banco de dados
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
+
+# Ambiente virtual
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads temporários
+/workspace/uploads/

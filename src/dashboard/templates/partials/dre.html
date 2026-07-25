@@ -1,0 +1,31 @@
+<!-- DRE (HTMX partial) -->
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Descrição</th>
+                <th class="text-right">Valor</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for linha in linhas %}
+            <tr class="{% if linha.tipo == 'subtotal' %}row-subtotal{% elif linha.tipo == 'total' %}row-total{% endif %}">
+                <td>
+                    {% if linha.tipo == 'step' %}
+                    &nbsp;&nbsp;&nbsp;{{ linha.descricao }}
+                    {% else %}
+                    <strong>{{ linha.descricao }}</strong>
+                    {% endif %}
+                </td>
+                <td class="text-right font-mono">{{ fmt_moeda(linha.valor_atual) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="row-total">
+                <td class="text-right"><strong>Resultado Líquido</strong></td>
+                <td class="text-right font-mono"><strong>{{ fmt_moeda(totais.resultado_liquido) }}</strong></td>
+            </tr>
+        </tfoot>
+    </table>
+</div>

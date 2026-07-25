@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SPED-HUB{% endblock %}
+
+{% block content %}
+{% if not data %}
+<!-- ── Empty State ── -->
+<div class="empty-state">
+    <div class="empty-state-icon">📂</div>
+    <h3>Nenhuma ECD importada</h3>
+    <p>Importe um arquivo ECD para visualizar o dashboard com KPIs, gráficos e demonstrações contábeis interativas.</p>
+    <a href="/upload" class="btn btn-primary">📤 Importar ECD</a>
+</div>
+{% else %}
+
+<!-- ── Seletor de ECD ── -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+    <div>
+        <h2 style="font-size:1.25rem;color:var(--gray-800);">{{ data.empresa_nome }}</h2>
+        <p style="font-size:.8rem;color:var(--gray-500);">CNPJ: {{ data.empresa_cnpj }} • Período: {{ data.periodo }}</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+        <select class="form-select" id="ecd-selector"
+                hx-get="/api/kpis"
+                hx-target="#dashboard-content"
+                hx-trigger="change"
+                hx-include="this">
+            {% for e in ecds %}
+            <option value="{{ e.id }}" {% if e.id == ecd_ativo %}selected{% endif %}>
+                {{ e.empresa }} — {{ e.periodo }}
+            </option>
+            {% endfor %}
+        </select>
+        <a href="/upload" class="btn btn-outline btn-sm">+ Nova ECD</a>
+    </div>
+</div>
+
+<!-- ── Dashboard Content (HTMX target) ── -->
+<div id="dashboard-content">
+    {% include "partials/kpis.html" %}
+
+    <!-- ── Gráficos ── -->
+    <div class="charts-grid">
+        <div class="card">
+            <div class="card-header">📈 Evolução Patrimonial</div>
+            <div class="card-body">
+                <canvas id="chart-evolucao" height="280"></canvas>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">🍩 Composição do Ativo</div>
+            <div class="card-body">
+                <canvas id="chart-composicao" height="280"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── DRE Waterfall ── -->
+    <div class="card" style="margin-bottom:24px;">
+        <div class="card-header">🏔️ DRE — Demonstração do Resultado</div>
+        <div class="card-body">
+            <canvas id="chart-dre" height="200"></canvas>
+        </div>
+    </div>
+
+    <!-- ── Tabs: Relatórios ── -->
+    <div class="card">
+        <div class="card-header">📋 Relatórios</div>
+        <div class="card-body">
+            <div class="tabs" x-data="{ tab: 'balanco' }">
+                <button class="tab-btn" :class="{ active: tab === 'balanco' }" @click="tab = 'balanco'">Balanço Patrimonial</button>
+                <button class="tab-btn" :class="{ active: tab === 'dre' }" @click="tab = 'dre'">DRE</button>
+                <button class="tab-btn" :class="{ active: tab === 'diario' }" @click="tab = 'diario'">Livro Diário</button>
+
+                <div class="tab-content" :class="{ active: tab === 'balanco' }" style="width:100%;">
+                    <div style="margin-bottom:12px;">
+                        <button class="btn btn-sm btn-outline"
+                                hx-get="/api/balanco?ecd_id={{ ecd_ativo }}&visao=hierarquica"
+                                hx-target="#tab-balanco"
+                                hx-swap="innerHTML">Visão Hierárquica</button>
+                        <button class="btn btn-sm btn-outline"
+                                hx-get="/api/balanco?ecd_id={{ ecd_ativo }}&visao=publicacao"
+                                hx-target="#tab-balanco"
+                                hx-swap="innerHTML">Visão Publicação</button>
+                    </div>
+                    <div id="tab-balanco" hx-get="/api/balanco?ecd_id={{ ecd_ativo }}" hx-trigger="load">
+                        <div class="spinner"></div> Carregando...
+                    </div>
+                </div>
+
+                <div class="tab-content" :class="{ active: tab === 'dre' }" style="width:100%;">
+                    <div id="tab-dre" hx-get="/api/dre?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
+                        <div class="spinner"></div> Carregando...
+                    </div>
+                </div>
+
+                <div class="tab-content" :class="{ active: tab === 'diario' }" style="width:100%;">
+                    <div id="tab-diario" hx-get="/api/diario?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
+                        <div class="spinner"></div> Carregando...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if data %}
+<script>
+// ── Gráfico: Evolução Patrimonial ──
+(function() {
+    const evolucao = {{ evolucao | tojson }};
+    if (!evolucao || !evolucao.labels || evolucao.labels.length === 0) return;
+
+    const ctx = document.getElementById('chart-evolucao');
+    if (!ctx) return;
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: evolucao.labels,
+            datasets: [
+                {
+                    label: 'Ativo Total',
+                    data: evolucao.ativo,
+                    borderColor: '#0B4F6C',
+                    backgroundColor: 'rgba(11,79,108,.1)',
+                    fill: true,
+                    tension: .3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                },
+                {
+                    label: 'Passivo + PL',
+                    data: evolucao.passivo_pl,
+                    borderColor: '#16A34A',
+                    backgroundColor: 'rgba(22,163,74,.1)',
+                    fill: true,
+                    tension: .3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ctx.dataset.label + ': R$ ' + ctx.raw.toLocaleString('pt-BR', {minimumFractionDigits:2})
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: v => 'R$ ' + (v/1000).toFixed(0) + 'k'
+                    }
+                }
+            }
+        }
+    });
+})();
+
+// ── Gráfico: Composição do Ativo ──
+(function() {
+    const comp = {{ composicao | tojson }};
+    if (!comp || !comp.labels || comp.labels.length === 0) return;
+
+    const ctx = document.getElementById('chart-composicao');
+    if (!ctx) return;
+
+    const colors = ['#0B4F6C','#0E7490','#0891B2','#06B6D4','#22D3EE','#67E8F9','#A5F3FC','#CFFAFE'];
+    new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: comp.labels,
+            datasets: [{
+                data: comp.valores,
+                backgroundColor: colors.slice(0, comp.labels.length),
+                borderWidth: 2,
+                borderColor: '#fff',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ctx.label + ': R$ ' + ctx.raw.toLocaleString('pt-BR', {minimumFractionDigits:2})
+                    }
+                }
+            }
+        }
+    });
+})();
+
+// ── Gráfico: DRE Waterfall ──
+(function() {
+    const dre = {{ dre_waterfall | tojson }};
+    if (!dre || !dre.labels || dre.labels.length === 0) return;
+
+    const ctx = document.getElementById('chart-dre');
+    if (!ctx) return;
+
+    const labels = dre.labels;
+    const valores = dre.valores;
+
+    // Waterfall: cada barra começa onde a anterior terminou
+    const backgrounds = [];
+    let running = 0;
+    const data = [];
+
+    for (let i = 0; i < valores.length; i++) {
+        const v = valores[i];
+        const label = labels[i];
+
+        if (label.startsWith('= ')) {
+            // Subtotal/total — barra invisível ou linha
+            data.push(v);
+            backgrounds.push('rgba(11,79,108,.3)');
+        } else if (v >= 0) {
+            data.push(v);
+            backgrounds.push('#16A34A');
+        } else {
+            data.push(v);
+            backgrounds.push('#DC2626');
+        }
+    }
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Valor (R$)',
+                data: data,
+                backgroundColor: backgrounds,
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => 'R$ ' + ctx.raw.toLocaleString('pt-BR', {minimumFractionDigits:2})
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    ticks: {
+                        callback: v => 'R$ ' + (v/1000).toFixed(0) + 'k'
+                    }
+                },
+                x: {
+                    ticks: { maxRotation: 45, font: { size: 10 } }
+                }
+            }
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

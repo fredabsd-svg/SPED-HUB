@@ -1,0 +1,19 @@
+<!-- KPIs Cards (HTMX partial) -->
+<div class="kpi-grid">
+    {% for kpi in data.kpis %}
+    <div class="kpi-card">
+        <div class="kpi-icon">{{ kpi.icone }}</div>
+        <div class="kpi-titulo">{{ kpi.titulo }}</div>
+        <div class="kpi-valor {% if kpi.tendencia == 'up' %}kpi-tendencia-up{% elif kpi.tendencia == 'down' %}kpi-tendencia-down{% endif %}">
+            {% if kpi.formato == 'moeda' %}
+                R$ {{ "%.2f"|format(kpi.valor) }}
+            {% elif kpi.formato == 'percentual' %}
+                {{ "%.1f"|format(kpi.valor) }}%
+            {% else %}
+                {{ kpi.valor | int }}
+            {% endif %}
+        </div>
+        <div class="kpi-descricao">{{ kpi.descricao }}</div>
+    </div>
+    {% endfor %}
+</div>

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Upload ECD — SPED-HUB{% endblock %}
+
+{% block content %}
+<div style="max-width:640px;margin:0 auto;">
+    <h2 style="font-size:1.25rem;margin-bottom:8px;">📤 Importar Arquivo ECD</h2>
+    <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
+        Faça upload de um arquivo ECD (.txt) para processar e visualizar os dados contábeis.
+    </p>
+
+    <!-- ── Upload Zone ── -->
+    <div id="upload-container">
+        <form id="upload-form"
+              hx-encoding="multipart/form-data"
+              hx-post="/api/upload"
+              hx-target="#upload-result"
+              hx-swap="innerHTML">
+            <label class="upload-zone" id="drop-zone"
+                   x-data="{ dragging: false }"
+                   @dragover.prevent="dragging = true"
+                   @dragleave.prevent="dragging = false"
+                   @drop.prevent="dragging = false; const file = $event.dataTransfer.files[0]; if(file) { const input = document.getElementById('file-input'); const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }"
+                   :class="{ 'dragover': dragging }">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">
+                    <strong>Clique para selecionar</strong> ou arraste o arquivo ECD aqui
+                </div>
+                <div class="upload-hint">Formatos aceitos: .txt, .ecd</div>
+                <input type="file" id="file-input" name="file" accept=".txt,.ecd"
+                       @change="const name = $el.files[0]?.name; if(name) { document.getElementById('file-name').textContent = name; document.getElementById('btn-upload').disabled = false; }">
+            </label>
+
+            <div id="file-name" style="text-align:center;margin:12px 0;font-size:.875rem;color:var(--gray-600);"></div>
+
+            <div style="text-align:center;margin-top:16px;">
+                <button type="submit" id="btn-upload" class="btn btn-primary" disabled
+                        hx-indicator="#upload-spinner">
+                    <span class="htmx-indicator" id="upload-spinner">
+                        <span class="spinner"></span>
+                    </span>
+                    🚀 Processar ECD
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- ── Resultado ── -->
+    <div id="upload-result" style="margin-top:24px;"></div>
+
+    <!-- ── Instruções ── -->
+    <div class="card" style="margin-top:32px;">
+        <div class="card-header">ℹ️ Sobre a ECD</div>
+        <div class="card-body" style="font-size:.875rem;color:var(--gray-600);line-height:1.6;">
+            <p>A <strong>Escrituração Contábil Digital (ECD)</strong> é parte do SPED e substitui a escrituração em papel pela versão digital dos livros:</p>
+            <ul style="margin:12px 0;padding-left:20px;">
+                <li>Livro Diário e seus auxiliares</li>
+                <li>Livro Razão e seus auxiliares</li>
+                <li>Livro Balancetes Diários, Balanços e fichas de lançamento</li>
+            </ul>
+            <p>O SPED-HUB processa o arquivo texto da ECD (leiaute 9), extrai o plano de contas, lançamentos, saldos e gera automaticamente:</p>
+            <ul style="margin:12px 0;padding-left:20px;">
+                <li>✅ Balanço Patrimonial</li>
+                <li>✅ DRE (Demonstração do Resultado)</li>
+                <li>✅ Livro Diário</li>
+                <li>✅ Balancete e Razão</li>
+                <li>✅ KPIs e gráficos interativos</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,67 @@
+<!-- Livro Diário (HTMX partial) -->
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Nº Lcto</th>
+                <th>Data</th>
+                <th>Conta</th>
+                <th>Histórico</th>
+                <th class="text-right">Débito</th>
+                <th class="text-right">Crédito</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for lanc in lancamentos %}
+            {% for partida in lanc.partidas %}
+            <tr>
+                <td class="font-mono">{{ lanc.num_lcto }}</td>
+                <td>{{ lanc.data }}</td>
+                <td class="font-mono">{{ partida.cod_cta }}</td>
+                <td>{{ partida.historico or '' }}</td>
+                <td class="text-right font-mono">
+                    {% if partida.debito and partida.debito > 0 %}
+                    {{ fmt_moeda(partida.debito) }}
+                    {% endif %}
+                </td>
+                <td class="text-right font-mono">
+                    {% if partida.credito and partida.credito > 0 %}
+                    {{ fmt_moeda(partida.credito) }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            <tr style="background:var(--gray-100);">
+                <td colspan="4" class="text-right"><em>Total lançamento {{ lanc.num_lcto }}</em></td>
+                <td class="text-right font-mono"><strong>{{ fmt_moeda(lanc.total_debito) }}</strong></td>
+                <td class="text-right font-mono"><strong>{{ fmt_moeda(lanc.total_credito) }}</strong></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if total_paginas > 1 %}
+<div class="pagination">
+    <button {% if pagina <= 1 %}disabled{% endif %}
+            hx-get="/api/diario?ecd_id={{ ecd_id }}&pagina={{ pagina - 1 }}"
+            hx-target="#tab-diario"
+            hx-swap="innerHTML">← Anterior</button>
+
+    {% for p in range(1, total_paginas + 1) %}
+    <button class="{% if p == pagina %}active{% endif %}"
+            hx-get="/api/diario?ecd_id={{ ecd_id }}&pagina={{ p }}"
+            hx-target="#tab-diario"
+            hx-swap="innerHTML">{{ p }}</button>
+    {% endfor %}
+
+    <button {% if pagina >= total_paginas %}disabled{% endif %}
+            hx-get="/api/diario?ecd_id={{ ecd_id }}&pagina={{ pagina + 1 }}"
+            hx-target="#tab-diario"
+            hx-swap="innerHTML">Próximo →</button>
+</div>
+{% endif %}
+
+<div style="text-align:center;margin-top:12px;color:var(--gray-500);font-size:.8rem;">
+    Total: {{ totais.num_lancamentos }} lançamentos • Página {{ pagina }} de {{ total_paginas }}
+</div>

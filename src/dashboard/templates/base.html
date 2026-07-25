@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SPED-HUB{% endblock %}</title>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.12/dist/htmx.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --primary: #0B4F6C;
+            --primary-light: #E8F3F7;
+            --primary-dark: #073A4F;
+            --success: #16A34A;
+            --warning: #D97706;
+            --danger: #DC2626;
+            --gray-50: #F9FAFB;
+            --gray-100: #F3F4F6;
+            --gray-200: #E5E7EB;
+            --gray-300: #D1D5DB;
+            --gray-400: #9CA3AF;
+            --gray-500: #6B7280;
+            --gray-600: #4B5563;
+            --gray-700: #374151;
+            --gray-800: #1F2937;
+            --gray-900: #111827;
+            --radius: 8px;
+            --shadow: 0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
+            --shadow-md: 0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--gray-50);
+            color: var(--gray-800);
+            min-height: 100vh;
+        }
+
+        .navbar {
+            background: var(--primary);
+            color: white;
+            padding: 0 24px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 4px rgba(0,0,0,.15);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .navbar-brand {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            color: white;
+            text-decoration: none;
+        }
+        .navbar-brand span { color: #7DD3FC; }
+        .navbar-nav { display: flex; gap: 4px; list-style: none; }
+        .navbar-nav a {
+            color: rgba(255,255,255,.85);
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: var(--radius);
+            font-size: .875rem;
+            font-weight: 500;
+            transition: all .15s;
+        }
+        .navbar-nav a:hover, .navbar-nav a.active {
+            background: rgba(255,255,255,.15);
+            color: white;
+        }
+
+        .main-content { max-width: 1280px; margin: 0 auto; padding: 24px; }
+
+        .card {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border: 1px solid var(--gray-200);
+        }
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--gray-200);
+            font-weight: 600;
+            font-size: .95rem;
+            color: var(--gray-700);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .card-body { padding: 20px; }
+
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .kpi-card {
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border: 1px solid var(--gray-200);
+            padding: 20px;
+            transition: box-shadow .2s;
+        }
+        .kpi-card:hover { box-shadow: var(--shadow-md); }
+        .kpi-icon { font-size: 1.5rem; margin-bottom: 8px; }
+        .kpi-titulo {
+            font-size: .75rem;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: var(--gray-500);
+            font-weight: 600;
+        }
+        .kpi-valor {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--gray-900);
+            margin: 4px 0;
+        }
+        .kpi-descricao { font-size: .75rem; color: var(--gray-400); }
+        .kpi-tendencia-up { color: var(--success); }
+        .kpi-tendencia-down { color: var(--danger); }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        @media (max-width: 768px) {
+            .charts-grid { grid-template-columns: 1fr; }
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--gray-200);
+            margin-bottom: 16px;
+        }
+        .tab-btn {
+            padding: 10px 20px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: .875rem;
+            font-weight: 500;
+            color: var(--gray-500);
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all .15s;
+        }
+        .tab-btn:hover { color: var(--gray-700); }
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: .8125rem; }
+        th {
+            background: var(--primary);
+            color: white;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        td { padding: 8px 12px; border-bottom: 1px solid var(--gray-100); }
+        tr:nth-child(even) td { background: var(--gray-50); }
+        tr:hover td { background: var(--primary-light); }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+        .text-muted { color: var(--gray-400); }
+        .font-mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .8rem; }
+        .row-subtotal td { font-weight: 600; border-top: 2px solid var(--gray-300); }
+        .row-total td { font-weight: 700; border-top: 2px solid var(--primary); background: var(--primary-light) !important; }
+        .row-section td { font-weight: 700; background: var(--gray-100) !important; color: var(--primary-dark); }
+
+        .upload-zone {
+            border: 2px dashed var(--gray-300);
+            border-radius: var(--radius);
+            padding: 48px;
+            text-align: center;
+            cursor: pointer;
+            transition: all .2s;
+            background: white;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+        .upload-zone input { display: none; }
+        .upload-icon { font-size: 3rem; margin-bottom: 12px; }
+        .upload-text { color: var(--gray-500); font-size: .95rem; }
+        .upload-hint { color: var(--gray-400); font-size: .8rem; margin-top: 8px; }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: var(--radius);
+            font-size: .875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all .15s;
+            text-decoration: none;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-outline { background: white; color: var(--primary); border-color: var(--primary); }
+        .btn-outline:hover { background: var(--primary-light); }
+        .btn-sm { padding: 4px 10px; font-size: .75rem; }
+        .btn-group { display: flex; gap: 8px; }
+
+        .form-select {
+            padding: 8px 12px;
+            border: 1px solid var(--gray-300);
+            border-radius: var(--radius);
+            font-size: .875rem;
+            background: white;
+            color: var(--gray-700);
+            cursor: pointer;
+        }
+
+        .pagination {
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+            margin-top: 16px;
+        }
+        .pagination button {
+            padding: 6px 12px;
+            border: 1px solid var(--gray-300);
+            background: white;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: .8rem;
+        }
+        .pagination button.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        .pagination button:disabled { opacity: .5; cursor: not-allowed; }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: var(--radius);
+            font-size: .875rem;
+            margin-bottom: 16px;
+        }
+        .alert-success { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+        .alert-error { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
+        .alert-info { background: var(--primary-light); color: var(--primary-dark); border: 1px solid #BAE6FD; }
+
+        .htmx-indicator { opacity: 0; transition: opacity .2s; }
+        .htmx-request .htmx-indicator { opacity: 1; }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--gray-200);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin .6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .empty-state {
+            text-align: center;
+            padding: 64px 24px;
+            color: var(--gray-400);
+        }
+        .empty-state-icon { font-size: 4rem; margin-bottom: 16px; }
+        .empty-state h3 { color: var(--gray-600); margin-bottom: 8px; }
+        .empty-state p { font-size: .9rem; max-width: 400px; margin: 0 auto 24px; }
+
+        .footer {
+            text-align: center;
+            padding: 16px;
+            color: var(--gray-400);
+            font-size: .75rem;
+            border-top: 1px solid var(--gray-200);
+            margin-top: 32px;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <a href="/" class="navbar-brand">SPED<span>-HUB</span></a>
+        <ul class="navbar-nav">
+            <li><a href="/" class="{% if current_page == 'dashboard' %}active{% endif %}">📊 Dashboard</a></li>
+            <li><a href="/upload" class="{% if current_page == 'upload' %}active{% endif %}">📤 Upload</a></li>
+        </ul>
+    </nav>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        SPED-HUB v0.2.0 — Plataforma de Conformidade Fiscal
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,6 +1,6 @@
 [project]
 name = "sped-hub"
-version = "0.1.0"
+version = "0.2.0"
 description = "Plataforma multiempresa de conformidade fiscal para escritórios contábeis"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,6 +17,8 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dateutil>=2.8",
     "unidecode>=1.3",
+    "python-multipart>=0.0.9",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +31,7 @@ dev = [
 
 [project.scripts]
 sped-hub = "src.cli:main"
+sped-hub-dashboard = "src.dashboard.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
