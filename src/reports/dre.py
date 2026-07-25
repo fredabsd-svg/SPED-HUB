@@ -126,6 +126,36 @@ class DRE:
 
         return result
 
+
+    def _get_ecd_anterior(self) -> int | None:
+        """Encontra o ID da ECD do período anterior para a mesma empresa."""
+        from src.db.models import ECD
+        ecd_atual = self.session.get(ECD, self.ecd_id)
+        if not ecd_atual:
+            return None
+        ecd_ant = self.session.execute(
+            select(ECD)
+            .where(
+                ECD.empresa_id == ecd_atual.empresa_id,
+                ECD.dt_ini < ecd_atual.dt_ini,
+                ECD.id != self.ecd_id,
+            )
+            .order_by(ECD.dt_ini.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        return ecd_ant.id if ecd_ant else None
+
+    def _get_saldos_resultado_anteriores(self, ecd_anterior_id: int) -> dict[str, float]:
+        """Carrega saldos de resultado do período anterior."""
+        saldos_ant = self.session.execute(
+            select(SaldoResultado).where(SaldoResultado.ecd_id == ecd_anterior_id)
+        ).scalars().all()
+        result: dict[str, float] = {}
+        for s in saldos_ant:
+            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
+            result[s.cod_cta] = vl
+        return result
+
     def gerar(
         self,
         criterios: FilterCriteria | None = None,
@@ -158,15 +188,25 @@ class DRE:
             vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
             saldo_por_conta[s.cod_cta] = vl
 
-        # Calcula valores por categoria
+        # Busca saldos do período anterior
+        ecd_ant_id = self._get_ecd_anterior()
+        saldo_anterior_por_conta: dict[str, float] = {}
+        if ecd_ant_id:
+            saldo_anterior_por_conta = self._get_saldos_resultado_anteriores(ecd_ant_id)
+
+        # Calcula valores por categoria (atual e anterior)
         cat_valores: dict[str, float] = {}
+        cat_valores_ant: dict[str, float] = {}
         for cat, contas in mapeamentos.items():
             total = sum(saldo_por_conta.get(c, 0.0) for c in contas)
             cat_valores[cat] = total
+            total_ant = sum(saldo_anterior_por_conta.get(c, 0.0) for c in contas)
+            cat_valores_ant[cat] = total_ant
 
         # Monta linhas da DRE
         linhas: list[LinhaDRE] = []
         running = 0.0
+        running_ant = 0.0
 
         for i, degrau in enumerate(DRE_DEFAULT):
             if degrau["categoria"] is None:
@@ -176,31 +216,36 @@ class DRE:
                         tipo=degrau["tipo"],
                         descricao=degrau["descricao"],
                         valor_atual=running,
-                        valor_anterior=0.0,
+                        valor_anterior=running_ant,
                         ordem=i,
                     )
                 )
             else:
                 vl = cat_valores.get(degrau["categoria"], 0.0)
+                vl_ant = cat_valores_ant.get(degrau["categoria"], 0.0)
                 # Aplica sinal: receitas são crédito (negativo interno → positivo na DRE)
                 # despesas são débito (positivo interno → negativo na DRE)
                 if degrau["sinal"] == 1:
                     # Receitas: crédito interno (negativo) → positivo na DRE
                     vl_dre = abs(vl)
+                    vl_dre_ant = abs(vl_ant)
                 elif degrau["sinal"] == -1:
                     # Despesas: débito interno (positivo) → negativo na DRE
                     vl_dre = -abs(vl)
+                    vl_dre_ant = -abs(vl_ant)
                 else:
                     vl_dre = vl
+                    vl_dre_ant = vl_ant
 
                 running += vl_dre
+                running_ant += vl_dre_ant
 
                 linhas.append(
                     LinhaDRE(
                         tipo=degrau["tipo"],
                         descricao=degrau["descricao"],
                         valor_atual=vl_dre,
-                        valor_anterior=0.0,
+                        valor_anterior=vl_dre_ant,
                         ordem=i,
                     )
                 )

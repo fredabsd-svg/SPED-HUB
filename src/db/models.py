@@ -48,7 +48,7 @@ class Usuario(Base):
     ativo: Mapped[bool] = mapped_column(default=True)
     admin: Mapped[bool] = mapped_column(default=False)
     criado_em: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=datetime.datetime.utcnow
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
     )
     ultimo_login: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
@@ -82,7 +82,7 @@ class Sessao(Base):
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False, index=True)
     token: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
     criado_em: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=datetime.datetime.utcnow
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
     )
     expira_em: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
     ip: Mapped[str | None] = mapped_column(String(45))
@@ -96,7 +96,7 @@ class Sessao(Base):
 
     @property
     def expirado(self) -> bool:
-        return datetime.datetime.utcnow() > self.expira_em
+        return datetime.datetime.now(datetime.UTC) > self.expira_em
 
 
 class UsuarioEmpresa(Base):
@@ -161,7 +161,7 @@ class ECD(Base):
     hash_arquivo: Mapped[str | None] = mapped_column(String(64))
     nome_arquivo: Mapped[str | None] = mapped_column(String(255))
     importado_em: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=datetime.datetime.utcnow
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
     )
 
     empresa: Mapped["Empresa"] = relationship(back_populates="ecds")
@@ -429,7 +429,7 @@ class FilterView(Base):
     nome: Mapped[str] = mapped_column(String(100), nullable=False)
     criterios_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
     criado_em: Mapped[datetime.datetime] = mapped_column(
-        DateTime, default=datetime.datetime.utcnow
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
     )
 
     def get_criterios(self) -> dict:

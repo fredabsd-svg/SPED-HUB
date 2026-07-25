@@ -20,6 +20,9 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **Filtros interativos** — Por natureza, nível, período, conta, nome e saldo zero
 - **Exportação direta** — PDF e XLSX para Balanço, DRE e DFC com um clique
 - **4 abas de relatórios** — Balanço Patrimonial, DRE, DFC e Livro Diário
+- **Comparativo entre exercícios** — Coluna de período anterior no Balanço e DRE
+- **Visão de publicação** — Balanço hierárquico J100/J150 conforme Lei 6.404/76
+- **Fontes profissionais** — Inter (Google Fonts) nos PDFs exportados
 - **Navegação entre múltiplas ECDs** importadas
 - **Design responsivo** com tema profissional
 
@@ -28,10 +31,14 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **docker-compose.yml** para produção e desenvolvimento
 - Volume persistente para banco de dados
 
+### CI/CD
+- **GitHub Actions** — lint (ruff), format (black), test (pytest) em Python 3.11/3.12
+- Build da imagem Docker na branch main
+
 ## Instalação
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ### Docker
@@ -70,6 +77,13 @@ sped-hub-dashboard
 # Registre-se em /register e faça login
 ```
 
+## Testes
+
+```bash
+pytest tests/ -v
+# 81 testes — 100% passando
+```
+
 ## Estrutura do Projeto
 
 ```
@@ -79,8 +93,8 @@ src/
 │   └── __init__.py     # AuthService, middleware, sessões
 ├── parsers/            # Parsers de arquivos SPED
 │   ├── ecd.py          # Parser ECD (leiaute 9)
-│   ├── efd.py          # Parser EFD-Contribuições (Fase 5)
-│   └── ecf.py          # Parser ECF (Fase 5)
+│   ├── efd.py          # Parser EFD-Contribuições (Fase 4)
+│   └── ecf.py          # Parser ECF (Fase 4)
 ├── db/                 # Modelos e repositório
 │   ├── models.py       # 17 modelos SQLAlchemy (inclui auth)
 │   └── repository.py   # CRUD + consultas
@@ -90,12 +104,13 @@ src/
 │   ├── base.py         # Convenções e formatação
 │   ├── balancete.py    # Balancete
 │   ├── razao.py        # Razão
-│   ├── balanco.py      # Balanço Patrimonial
-│   ├── dre.py          # DRE
+│   ├── balanco.py      # Balanço Patrimonial (+período anterior, +J100/J150)
+│   ├── dre.py          # DRE (+período anterior)
 │   ├── dfc.py          # DFC — Fluxos de Caixa (Fase 4)
 │   ├── diario.py       # Livro Diário
-│   ├── export_engine.py # Export PDF/XLSX
+│   ├── export_engine.py # Export PDF/XLSX (+fontes Inter)
 │   └── templates/      # Templates HTML para PDF
+│       └── fonts/      # Inter Variable (Fase 5)
 ├── validators/         # Validações
 │   └── integridade.py  # 7 validações
 ├── dashboard/          # Dashboard Web
@@ -115,4 +130,12 @@ src/
 │           └── diario.html
 └── layouts/            # Layouts de registros
     └── ecd_v9.yml      # 30 registros ECD
+
+tests/
+├── test_fase2.py       # Balanço, DRE, Diário, Export (17 testes)
+├── test_filters.py     # Filtros (13 testes)
+├── test_parsers.py     # Parsers (16 testes)
+├── test_reports.py     # Balancete, Razão, Formatação (17 testes)
+├── test_validators.py  # Validações (9 testes)
+└── test_integracao.py  # Integração com ECD grande (9 testes) — Fase 5
 ```

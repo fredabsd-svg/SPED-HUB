@@ -89,7 +89,8 @@ class ExportEngine:
         try:
             from weasyprint import HTML
 
-            HTML(string=html).write_pdf(output_path)
+            base_url = str(Path(__file__).resolve().parent / "templates")
+            HTML(string=html, base_url=base_url).write_pdf(output_path)
             logger.info("PDF gerado: %s", output_path)
             return output_path
         except ImportError:

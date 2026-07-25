@@ -69,7 +69,7 @@ class AuthService:
 
             # Cria sessão
             token = Sessao.gerar_token()
-            agora = datetime.datetime.utcnow()
+            agora = datetime.datetime.now(datetime.UTC)
             sessao = Sessao(
                 usuario_id=usuario.id,
                 token=token,
