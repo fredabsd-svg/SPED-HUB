@@ -15,6 +15,14 @@
       {{ fmt_moeda(totais.variacao_caixa) }}
     </dd>
   </div>
+  {% if totais.tem_anterior %}
+  <div>
+    <dt>Variação Anterior</dt>
+    <dd class="{{ 'text-success' if totais.variacao_caixa_anterior >= 0 else 'text-error' }}">
+      {{ fmt_moeda(totais.variacao_caixa_anterior) }}
+    </dd>
+  </div>
+  {% endif %}
   {% if ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
   <div>
     <dt>Filtros</dt>
@@ -26,8 +34,11 @@
 <table>
   <thead>
     <tr>
-      <th style="width:60%">Descrição</th>
-      <th class="right" style="width:40%">Valor (R$)</th>
+      <th style="width:50%">Descrição</th>
+      <th class="right" style="width:25%">Período Atual (R$)</th>
+      {% if totais.tem_anterior %}
+      <th class="right" style="width:25%">Período Anterior (R$)</th>
+      {% endif %}
     </tr>
   </thead>
   <tbody>
@@ -36,21 +47,31 @@
       <tr class="dre-subtotal">
         <td><strong>{{ linha.descricao }}</strong></td>
         <td></td>
+        {% if totais.tem_anterior %}<td></td>{% endif %}
       </tr>
       {% elif linha.tipo == 'subtotal' %}
       <tr class="dre-subtotal">
         <td>{{ linha.descricao }}</td>
         <td class="right">{{ fmt_moeda(linha.valor) }}</td>
+        {% if totais.tem_anterior %}
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+        {% endif %}
       </tr>
       {% elif linha.tipo == 'total' %}
       <tr class="dre-total">
         <td>{{ linha.descricao }}</td>
         <td class="right">{{ fmt_moeda(linha.valor) }}</td>
+        {% if totais.tem_anterior %}
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+        {% endif %}
       </tr>
       {% else %}
       <tr>
         <td style="padding-left: 24px;">{{ linha.descricao }}</td>
         <td class="right">{{ fmt_moeda(linha.valor) }}</td>
+        {% if totais.tem_anterior %}
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+        {% endif %}
       </tr>
       {% endif %}
     {% endfor %}

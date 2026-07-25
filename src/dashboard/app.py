@@ -55,7 +55,7 @@ logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.3.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.5.0")
 
 # Templates
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -478,6 +478,7 @@ async def api_graficos(ecd_id: int = Query(...)):
     try:
         svc = DashboardService(session, ecd_id)
         return {
+            "evolucao_multi": svc.get_evolucao_multi_periodo(),
             "evolucao": svc.get_evolucao_patrimonial(),
             "composicao": svc.get_composicao_ativo(),
             "dre_waterfall": svc.get_dre_waterfall(),
@@ -746,6 +747,109 @@ async def api_filtros_aplicar(
     finally:
         session.close()
 
+
+
+
+# ── Rotas: Fase 6 ──────────────────────────────────────────────────────────
+
+
+@app.get("/api/evolucao-multi")
+async def api_evolucao_multi(ecd_id: int = Query(...)):
+    """Evolução patrimonial multi-período (Fase 6)."""
+    session = get_session(_get_engine())
+    try:
+        svc = DashboardService(session, ecd_id)
+        data = svc.get_evolucao_multi_periodo()
+        return data or {"labels": [], "ativos": [], "passivos": [], "pls": [], "resultados": [], "num_periodos": 0}
+    finally:
+        session.close()
+
+
+@app.get("/api/notas", response_class=HTMLResponse)
+async def api_notas(request: Request, ecd_id: int = Query(...)):
+    """Notas explicativas automáticas (Fase 6)."""
+    session = get_session(_get_engine())
+    try:
+        svc = DashboardService(session, ecd_id)
+        notas = svc.get_notas_explicativas()
+        return HTMLResponse(jinja_env.get_template("partials/notas.html").render({
+            "request": request, "notas": notas, "ecd_id": ecd_id,
+        }))
+    finally:
+        session.close()
+
+
+@app.get("/api/export/lote")
+async def api_export_lote(
+    ecd_ids: str = Query(...),
+    tipo: str = Query("balanco"),
+):
+    """Exportação de lote: múltiplas ECDs em ZIP (Fase 6)."""
+    import zipfile
+    session = get_session(_get_engine())
+    try:
+        from src.reports.export_engine import ExportEngine, WhiteLabel
+        from src.reports.base import ReportContext
+        from src.db.models import ECD, Empresa
+
+        ids = [int(x.strip()) for x in ecd_ids.split(",") if x.strip().isdigit()]
+        if not ids:
+            return JSONResponse({"status": "erro", "mensagem": "Nenhum ecd_id válido"}, status_code=400)
+        if len(ids) > 10:
+            return JSONResponse({"status": "erro", "mensagem": "Máximo de 10 ECDs por lote"}, status_code=400)
+
+        wl = WhiteLabel()
+        export = ExportEngine()
+        buf = io.BytesIO()
+
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for ecd_id in ids:
+                ecd = session.get(ECD, ecd_id)
+                if not ecd:
+                    continue
+                empresa = session.get(Empresa, ecd.empresa_id)
+                ctx = ReportContext(
+                    titulo="",
+                    empresa_nome=empresa.nome if empresa else "",
+                    empresa_cnpj=empresa.cnpj if empresa else "",
+                    periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}" if ecd else "",
+                )
+
+                if tipo == "balanco":
+                    balanco = BalancoPatrimonial(session, ecd_id)
+                    ctx_rel, grupos, totais = balanco.gerar()
+                    ctx.titulo = ctx_rel.titulo
+                    html = export.render_html("balanco.html", ctx, wl, grupos=grupos, totais=totais)
+                elif tipo == "dre":
+                    dre = DRE(session, ecd_id)
+                    ctx_rel, linhas, totais = dre.gerar()
+                    ctx.titulo = ctx_rel.titulo
+                    html = export.render_html("dre.html", ctx, wl, linhas=linhas, totais=totais)
+                elif tipo == "dfc":
+                    dfc = DFC(session, ecd_id)
+                    ctx_rel, linhas, totais = dfc.gerar()
+                    ctx.titulo = ctx_rel.titulo
+                    html = export.render_html("dfc.html", ctx, wl, linhas=linhas, totais=totais)
+                else:
+                    continue
+
+                from weasyprint import HTML as WHTML
+                pdf_bytes = WHTML(string=html).write_pdf()
+                nome_arquivo = f"{tipo}_{ecd_id}_{empresa.nome[:20] if empresa else }.pdf"
+                zf.writestr(nome_arquivo, pdf_bytes)
+
+        buf.seek(0)
+        return Response(
+            content=buf.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=lote_{tipo}.zip"},
+        )
+
+    except Exception as e:
+        logger.exception("Erro ao exportar lote")
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
+    finally:
+        session.close()
 
 # ── Entry point ─────────────────────────────────────────────────────────────
 

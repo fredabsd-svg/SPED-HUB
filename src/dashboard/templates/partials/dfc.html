@@ -1,4 +1,4 @@
-<!-- DFC Partial (HTMX) -->
+<!-- DFC Partial (HTMX) — Fase 6: +período anterior -->
 <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">
     <button class="btn btn-sm btn-outline"
             hx-get="/api/export/pdf?ecd_id={{ ecd_id }}&tipo=dfc"
@@ -14,7 +14,10 @@
         <thead>
             <tr>
                 <th>Descrição</th>
-                <th class="text-right">Valor (R$)</th>
+                <th class="text-right">Período Atual (R$)</th>
+                {% if totais.tem_anterior %}
+                <th class="text-right">Período Anterior (R$)</th>
+                {% endif %}
             </tr>
         </thead>
         <tbody>
@@ -23,21 +26,31 @@
             <tr class="row-section">
                 <td><strong>{{ l.descricao }}</strong></td>
                 <td></td>
+                {% if totais.tem_anterior %}<td></td>{% endif %}
             </tr>
             {% elif l.tipo == 'subtotal' %}
             <tr class="row-subtotal">
                 <td>{{ l.descricao }}</td>
                 <td class="text-right font-mono">{{ fmt_moeda(l.valor) }}</td>
+                {% if totais.tem_anterior %}
+                <td class="text-right font-mono">{{ fmt_moeda(l.valor_anterior) }}</td>
+                {% endif %}
             </tr>
             {% elif l.tipo == 'total' %}
             <tr class="row-total">
                 <td>{{ l.descricao }}</td>
                 <td class="text-right font-mono">{{ fmt_moeda(l.valor) }}</td>
+                {% if totais.tem_anterior %}
+                <td class="text-right font-mono">{{ fmt_moeda(l.valor_anterior) }}</td>
+                {% endif %}
             </tr>
             {% else %}
             <tr>
                 <td style="padding-left:24px;">{{ l.descricao }}</td>
                 <td class="text-right font-mono">{{ fmt_moeda(l.valor) }}</td>
+                {% if totais.tem_anterior %}
+                <td class="text-right font-mono">{{ fmt_moeda(l.valor_anterior) }}</td>
+                {% endif %}
             </tr>
             {% endif %}
             {% endfor %}
@@ -50,18 +63,30 @@
     <div style="background:var(--primary-light);padding:12px 16px;border-radius:var(--radius);">
         <div style="font-size:.7rem;text-transform:uppercase;color:var(--gray-500);">Operacional</div>
         <div style="font-weight:700;font-size:1.1rem;">{{ fmt_moeda(totais.operacional) }}</div>
+        {% if totais.tem_anterior %}
+        <div style="font-size:.7rem;color:var(--gray-500);">Ant: {{ fmt_moeda(totais.operacional_anterior) }}</div>
+        {% endif %}
     </div>
     <div style="background:var(--primary-light);padding:12px 16px;border-radius:var(--radius);">
         <div style="font-size:.7rem;text-transform:uppercase;color:var(--gray-500);">Investimento</div>
         <div style="font-weight:700;font-size:1.1rem;">{{ fmt_moeda(totais.investimento) }}</div>
+        {% if totais.tem_anterior %}
+        <div style="font-size:.7rem;color:var(--gray-500);">Ant: {{ fmt_moeda(totais.investimento_anterior) }}</div>
+        {% endif %}
     </div>
     <div style="background:var(--primary-light);padding:12px 16px;border-radius:var(--radius);">
         <div style="font-size:.7rem;text-transform:uppercase;color:var(--gray-500);">Financiamento</div>
         <div style="font-weight:700;font-size:1.1rem;">{{ fmt_moeda(totais.financiamento) }}</div>
+        {% if totais.tem_anterior %}
+        <div style="font-size:.7rem;color:var(--gray-500);">Ant: {{ fmt_moeda(totais.financiamento_anterior) }}</div>
+        {% endif %}
     </div>
     <div style="background:var(--primary);padding:12px 16px;border-radius:var(--radius);color:white;">
         <div style="font-size:.7rem;text-transform:uppercase;opacity:.8;">Variação Caixa</div>
         <div style="font-weight:700;font-size:1.1rem;">{{ fmt_moeda(totais.variacao_caixa) }}</div>
+        {% if totais.tem_anterior %}
+        <div style="font-size:.7rem;opacity:.8;">Ant: {{ fmt_moeda(totais.variacao_caixa_anterior) }}</div>
+        {% endif %}
     </div>
 </div>
 {% endif %}

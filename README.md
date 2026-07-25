@@ -15,13 +15,16 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **FastAPI + Jinja2 + HTMX + Alpine.js + Chart.js**
 - **Autenticação** — Login/registro com PBKDF2, sessões por token, middleware de proteção
 - **Dashboard com KPIs** — Ativo Total, PL, Endividamento, Resultado, Margem, Lançamentos
-- **Gráficos interativos** — Evolução Patrimonial, Composição do Ativo, DRE Waterfall, DFC, Comparativo entre Empresas
+- **Gráficos interativos** — Evolução Patrimonial, Composição do Ativo, DRE Waterfall, DFC, Comparativo entre Empresas, Evolução Multi-Período
 - **Upload multi-formato** — ECD, EFD-Contribuições (PIS/COFINS) e ECF (IRPJ/CSLL) com drag & drop
 - **Filtros interativos** — Por natureza, nível, período, conta, nome e saldo zero
 - **Exportação direta** — PDF e XLSX para Balanço, DRE e DFC com um clique
-- **4 abas de relatórios** — Balanço Patrimonial, DRE, DFC e Livro Diário
-- **Comparativo entre exercícios** — Coluna de período anterior no Balanço e DRE
+- **Exportação de lote** — Múltiplas ECDs em ZIP (até 10 por lote)
+- **5 abas de relatórios** — Balanço Patrimonial, DRE, DFC, Livro Diário e Notas Explicativas
+- **Comparativo entre exercícios** — Coluna de período anterior no Balanço, DRE e DFC
 - **Visão de publicação** — Balanço hierárquico J100/J150 conforme Lei 6.404/76
+- **Notas explicativas automáticas** — Contexto operacional, práticas contábeis, capital social, imobilizado, eventos subsequentes
+- **Evolução multi-período** — Gráfico temporal com Ativo, Passivo, PL e Resultado através de múltiplos exercícios
 - **Fontes profissionais** — Inter (Google Fonts) nos PDFs exportados
 - **Navegação entre múltiplas ECDs** importadas
 - **Design responsivo** com tema profissional
@@ -81,7 +84,7 @@ sped-hub-dashboard
 
 ```bash
 pytest tests/ -v
-# 81 testes — 100% passando
+# 86 testes — 100% passando
 ```
 
 ## Estrutura do Projeto
@@ -106,7 +109,7 @@ src/
 │   ├── razao.py        # Razão
 │   ├── balanco.py      # Balanço Patrimonial (+período anterior, +J100/J150)
 │   ├── dre.py          # DRE (+período anterior)
-│   ├── dfc.py          # DFC — Fluxos de Caixa (Fase 4)
+│   ├── dfc.py          # DFC (+período anterior — Fase 6)
 │   ├── diario.py       # Livro Diário
 │   ├── export_engine.py # Export PDF/XLSX (+fontes Inter)
 │   └── templates/      # Templates HTML para PDF
@@ -114,8 +117,8 @@ src/
 ├── validators/         # Validações
 │   └── integridade.py  # 7 validações
 ├── dashboard/          # Dashboard Web
-│   ├── app.py          # FastAPI app — 24 rotas
-│   ├── services.py     # Serviços de dados + KPIs + gráficos
+│   ├── app.py          # FastAPI app — 28 rotas (Fase 6)
+│   ├── services.py     # Serviços de dados + KPIs + gráficos + notas (Fase 6)
 │   └── templates/      # Templates Jinja2
 │       ├── base.html
 │       ├── dashboard.html
@@ -127,7 +130,8 @@ src/
 │           ├── balanco.html
 │           ├── dre.html
 │           ├── dfc.html
-│           └── diario.html
+│           ├── diario.html
+│           └── notas.html       # (Fase 6)
 └── layouts/            # Layouts de registros
     └── ecd_v9.yml      # 30 registros ECD
 
@@ -137,5 +141,5 @@ tests/
 ├── test_parsers.py     # Parsers (16 testes)
 ├── test_reports.py     # Balancete, Razão, Formatação (17 testes)
 ├── test_validators.py  # Validações (9 testes)
-└── test_integracao.py  # Integração com ECD grande (9 testes) — Fase 5
+└── test_integracao.py  # Integração + Fase 6 (14 testes)
 ```

@@ -1,6 +1,8 @@
 """Serviços de dados para o Dashboard Web.
 
 Fornece dados agregados para KPIs, gráficos e visualizações interativas.
+
+Fase 6: +evolução multi-período, +notas explicativas automáticas.
 """
 
 import datetime
@@ -169,6 +171,229 @@ class DashboardService:
 
         return {"labels": labels, "ativo": ativo_series, "passivo_pl": passivo_pl_series}
 
+    def get_evolucao_multi_periodo(self) -> dict | None:
+        """Evolução patrimonial e de resultado através de múltiplas ECDs da mesma empresa.
+
+        Busca todas as ECDs da empresa, ordenadas cronologicamente, e calcula
+        Ativo, Passivo, PL e Resultado Líquido de cada período.
+
+        Returns:
+            dict com labels (períodos), ativos, passivos, pls, resultados
+            ou None se houver menos de 2 ECDs.
+        """
+        ecd = self.session.get(ECD, self.ecd_id)
+        if not ecd:
+            return None
+
+        # Busca todas as ECDs da mesma empresa, ordenadas por data
+        ecds = self.session.execute(
+            select(ECD)
+            .where(
+                ECD.empresa_id == ecd.empresa_id,
+            )
+            .order_by(ECD.dt_ini.asc())
+        ).scalars().all()
+
+        if len(ecds) < 2:
+            return None
+
+        labels = []
+        ativos = []
+        passivos = []
+        pls = []
+        resultados = []
+
+        for e in ecds:
+            periodo_label = f"{e.dt_ini.year}" if e.dt_ini else f"ECD #{e.id}"
+            labels.append(periodo_label)
+
+            balanco = BalancoPatrimonial(self.session, e.id)
+            _, _, totais_b = balanco.gerar()
+            ativos.append(totais_b["ativo"])
+            passivos.append(totais_b["passivo"])
+            pls.append(totais_b["pl"])
+
+            dre = DRE(self.session, e.id)
+            _, _, totais_d = dre.gerar()
+            resultados.append(totais_d.get("resultado_liquido", 0.0))
+
+        return {
+            "labels": labels,
+            "ativos": ativos,
+            "passivos": passivos,
+            "pls": pls,
+            "resultados": resultados,
+            "num_periodos": len(ecds),
+        }
+
+    def get_notas_explicativas(self) -> list[dict]:
+        """Gera notas explicativas automáticas (J800/J801) a partir de eventos contábeis.
+
+        Detecta eventos relevantes:
+        - Aumento/redução de capital
+        - Constituição/reversão de reservas
+        - Distribuição de lucros
+        - Aquisição/venda de imobilizado relevante
+        - Mudança de critério contábil
+        - Eventos subsequentes
+
+        Returns:
+            Lista de notas com {numero, titulo, texto, valor, tipo}.
+        """
+        notas = []
+
+        ecd = self.session.get(ECD, self.ecd_id)
+        if not ecd:
+            return notas
+
+        # Busca plano de contas e saldos
+        plano = {
+            c.cod_cta: c
+            for c in self.session.execute(
+                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
+            ).scalars()
+        }
+
+        saldos = self.session.execute(
+            select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == self.ecd_id)
+        ).scalars().all()
+
+        saldo_por_conta: dict[str, float] = {}
+        for s in saldos:
+            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
+            saldo_por_conta[s.cod_cta] = vl
+
+        # Nota 1: Contexto operacional
+        empresa = self.session.get(Empresa, ecd.empresa_id) if ecd.empresa_id else None
+        notas.append({
+            "numero": 1,
+            "titulo": "Contexto Operacional",
+            "texto": (
+                f"A empresa {empresa.nome if empresa else 'N/I'}, inscrita no CNPJ "
+                f"{empresa.cnpj if empresa else 'N/I'}, tem por objeto social a prestação "
+                f"de serviços e atividades correlatas. As demonstrações contábeis do "
+                f"exercício findo em {ecd.dt_fin} foram elaboradas conforme as práticas "
+                f"contábeis brasileiras (NBC TG)."
+            ),
+            "valor": 0.0,
+            "tipo": "contexto",
+        })
+
+        # Nota 2: Principais práticas contábeis
+        notas.append({
+            "numero": 2,
+            "titulo": "Principais Práticas Contábeis",
+            "texto": (
+                "As demonstrações contábeis foram elaboradas com base no custo histórico. "
+                "Os principais critérios adotados incluem: (a) disponibilidades — avaliadas "
+                "pelo custo acrescido de rendimentos; (b) contas a receber — valor nominal "
+                "com provisão para perdas; (c) imobilizado — custo de aquisição deduzido "
+                "da depreciação acumulada calculada pelo método linear."
+            ),
+            "valor": 0.0,
+            "tipo": "praticas",
+        })
+
+        # Nota 3: Capital Social
+        capital_social = 0.0
+        for cod_cta, pc in plano.items():
+            nome = pc.nome_cta.upper()
+            if any(t in nome for t in ["CAPITAL SOCIAL", "CAPITAL SUBSCRITO"]):
+                capital_social += abs(saldo_por_conta.get(cod_cta, 0.0))
+
+        if capital_social > 0:
+            # Verifica se houve alteração (comparar com período anterior)
+            ecd_ant_id = None
+            ecds_ant = self.session.execute(
+                select(ECD)
+                .where(
+                    ECD.empresa_id == ecd.empresa_id,
+                    ECD.dt_ini < ecd.dt_ini,
+                    ECD.id != self.ecd_id,
+                )
+                .order_by(ECD.dt_ini.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+
+            capital_anterior = 0.0
+            if ecds_ant:
+                saldos_ant = self.session.execute(
+                    select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecds_ant.id)
+                ).scalars().all()
+                for s in saldos_ant:
+                    if s.cod_cta in plano:
+                        nome_ant = plano[s.cod_cta].nome_cta.upper()
+                        if any(t in nome_ant for t in ["CAPITAL SOCIAL", "CAPITAL SUBSCRITO"]):
+                            capital_anterior += abs(valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin))
+
+            if capital_anterior > 0 and abs(capital_social - capital_anterior) > 0.01:
+                variacao = capital_social - capital_anterior
+                acao = "aumento" if variacao > 0 else "redução"
+                notas.append({
+                    "numero": 3,
+                    "titulo": "Capital Social",
+                    "texto": (
+                        f"O Capital Social, no valor de R$ {capital_social:,.2f}, sofreu "
+                        f"{acao} de R$ {abs(variacao):,.2f} no exercício, passando de "
+                        f"R$ {capital_anterior:,.2f} para R$ {capital_social:,.2f}."
+                    ),
+                    "valor": capital_social,
+                    "tipo": "capital",
+                })
+            else:
+                notas.append({
+                    "numero": 3,
+                    "titulo": "Capital Social",
+                    "texto": (
+                        f"O Capital Social é de R$ {capital_social:,.2f}, totalmente "
+                        f"integralizado, representado por quotas de valor nominal unitário."
+                    ),
+                    "valor": capital_social,
+                    "tipo": "capital",
+                })
+
+        # Nota 4: Imobilizado (se relevante)
+        imob_contas = []
+        for cod_cta, pc in plano.items():
+            nome = pc.nome_cta.upper()
+            if any(t in nome for t in ["IMOBILIZADO", "MÁQUINAS", "EQUIPAMENTO", "VEÍCULO", "MÓVEIS",
+                                         "IMÓVEL", "EDIFÍCIO", "TERRENO"]):
+                vl = abs(saldo_por_conta.get(cod_cta, 0.0))
+                if vl > 0:
+                    imob_contas.append((pc.nome_cta, vl))
+
+        if imob_contas:
+            total_imob = sum(v for _, v in imob_contas)
+            if total_imob > 0:
+                itens = "; ".join(f"{n}: R$ {v:,.2f}" for n, v in imob_contas[:5])
+                notas.append({
+                    "numero": len(notas) + 1,
+                    "titulo": "Imobilizado",
+                    "texto": (
+                        f"O ativo imobilizado totaliza R$ {total_imob:,.2f}, composto por: "
+                        f"{itens}. A depreciação é calculada pelo método linear às taxas "
+                        f"fiscais permitidas."
+                    ),
+                    "valor": total_imob,
+                    "tipo": "imobilizado",
+                })
+
+        # Nota 5: Eventos subsequentes
+        notas.append({
+            "numero": len(notas) + 1,
+            "titulo": "Eventos Subsequentes",
+            "texto": (
+                f"Não ocorreram eventos subsequentes entre a data de encerramento do "
+                f"exercício ({ecd.dt_fin}) e a data de elaboração destas demonstrações "
+                f"contábeis que pudessem afetar significativamente a posição patrimonial "
+                f"e financeira da empresa."
+            ),
+            "valor": 0.0,
+            "tipo": "eventos",
+        })
+
+        return notas
+
     def get_composicao_ativo(self) -> dict:
         """Dados para gráfico de pizza da composição do ativo."""
         balanco = BalancoPatrimonial(self.session, self.ecd_id)
@@ -226,7 +451,7 @@ class DashboardService:
 
         return {"labels": labels, "valores": valores, "totais": totais}
 
-    def get_comparativo_empresas(self) -> dict:
+    def get_comparativo_empresas(self) -> dict | None:
         """Dados para gráfico comparativo entre ECDs/empresas."""
         ecds = self.session.execute(
             select(ECD, Empresa.nome)

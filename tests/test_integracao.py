@@ -231,3 +231,67 @@ class TestIntegracaoGrande:
         session, ecd, emp = db_grande
         total = session.query(Partida).join(Lancamento).filter(Lancamento.ecd_id == ecd.id).count()
         assert total == 400  # 2 partidas por lançamento
+
+class TestFase6:
+    """Testes das novas funcionalidades da Fase 6."""
+
+    def test_dfc_valor_anterior(self, db_grande):
+        """DFC deve ter campo valor_anterior (mesmo zerado sem ECD anterior)."""
+        session, ecd, emp = db_grande
+        dfc = DFC(session, ecd.id)
+        ctx, linhas, totais = dfc.gerar()
+
+        assert "tem_anterior" in totais
+        assert totais["tem_anterior"] is False  # só 1 ECD
+        assert "variacao_caixa" in totais
+        assert "variacao_caixa_anterior" in totais
+        # Todas as linhas devem ter valor_anterior
+        for l in linhas:
+            assert hasattr(l, "valor_anterior")
+
+    def test_dfc_totais_subtotais(self, db_grande):
+        """DFC deve ter totais operacional, investimento e financiamento."""
+        session, ecd, emp = db_grande
+        dfc = DFC(session, ecd.id)
+        ctx, linhas, totais = dfc.gerar()
+
+        assert "operacional" in totais
+        assert "investimento" in totais
+        assert "financiamento" in totais
+        assert "operacional_anterior" in totais
+        assert "investimento_anterior" in totais
+        assert "financiamento_anterior" in totais
+
+    def test_evolucao_multi_periodo_sem_anterior(self, db_grande):
+        """Evolução multi-período retorna None com apenas 1 ECD."""
+        session, ecd, emp = db_grande
+        from src.dashboard.services import DashboardService
+        svc = DashboardService(session, ecd.id)
+        result = svc.get_evolucao_multi_periodo()
+        assert result is None  # só 1 ECD
+
+    def test_notas_explicativas(self, db_grande):
+        """Notas explicativas devem retornar lista com pelo menos 2 notas."""
+        session, ecd, emp = db_grande
+        from src.dashboard.services import DashboardService
+        svc = DashboardService(session, ecd.id)
+        notas = svc.get_notas_explicativas()
+        assert isinstance(notas, list)
+        assert len(notas) >= 2  # contexto + práticas contábeis
+        # Verifica estrutura
+        for n in notas:
+            assert "numero" in n
+            assert "titulo" in n
+            assert "texto" in n
+            assert "tipo" in n
+
+    def test_notas_explicativas_tipos(self, db_grande):
+        """Notas devem incluir tipos: contexto, praticas, eventos."""
+        session, ecd, emp = db_grande
+        from src.dashboard.services import DashboardService
+        svc = DashboardService(session, ecd.id)
+        notas = svc.get_notas_explicativas()
+        tipos = {n["tipo"] for n in notas}
+        assert "contexto" in tipos
+        assert "praticas" in tipos
+        assert "eventos" in tipos

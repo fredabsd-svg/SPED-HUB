@@ -5,6 +5,8 @@ Estrutura conforme NBC TG 03 / CPC 03:
   2. Fluxo das Atividades de Investimento
   3. Fluxo das Atividades de Financiamento
   4. Variação Líquida de Caixa e Equivalentes
+
+Fase 6: +período anterior comparativo.
 """
 
 import datetime
@@ -29,6 +31,7 @@ class LinhaDFC:
     tipo: str  # step, detail, subtotal, total
     descricao: str
     valor: float = 0.0
+    valor_anterior: float = 0.0
     ordem: int = 0
 
 
@@ -136,12 +139,41 @@ class DFC:
 
         return result
 
+    def _get_ecd_anterior(self) -> int | None:
+        """Encontra o ID da ECD do período anterior para a mesma empresa."""
+        from src.db.models import ECD
+        ecd_atual = self.session.get(ECD, self.ecd_id)
+        if not ecd_atual:
+            return None
+        ecd_ant = self.session.execute(
+            select(ECD)
+            .where(
+                ECD.empresa_id == ecd_atual.empresa_id,
+                ECD.dt_ini < ecd_atual.dt_ini,
+                ECD.id != self.ecd_id,
+            )
+            .order_by(ECD.dt_ini.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        return ecd_ant.id if ecd_ant else None
+
+    def _get_saldos_anteriores(self, ecd_anterior_id: int) -> dict[str, float]:
+        """Carrega saldos do período anterior."""
+        saldos_ant = self.session.execute(
+            select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecd_anterior_id)
+        ).scalars().all()
+        result: dict[str, float] = {}
+        for s in saldos_ant:
+            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
+            result[s.cod_cta] = vl
+        return result
+
     def gerar(
         self,
         criterios: FilterCriteria | None = None,
         empresa_id: int | None = None,
     ) -> tuple[ReportContext, list[LinhaDFC], dict[str, float]]:
-        """Gera a DFC."""
+        """Gera a DFC com comparativo de período anterior."""
         if criterios is None:
             criterios = FilterCriteria()
 
@@ -152,22 +184,32 @@ class DFC:
 
         mapeamentos = self._get_mapeamentos(empresa_id)
 
-        # Busca saldos
+        # Busca saldos atuais
         saldos = self.engine.aplicar_saldos(criterios)
         saldo_por_conta: dict[str, float] = {}
         for s in saldos:
             vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
             saldo_por_conta[s.cod_cta] = vl
 
-        # Calcula valores por categoria
+        # Busca saldos do período anterior
+        ecd_ant_id = self._get_ecd_anterior()
+        saldo_anterior_por_conta: dict[str, float] = {}
+        if ecd_ant_id:
+            saldo_anterior_por_conta = self._get_saldos_anteriores(ecd_ant_id)
+
+        # Calcula valores por categoria (atual e anterior)
         cat_valores: dict[str, float] = {}
+        cat_valores_ant: dict[str, float] = {}
         for cat, contas in mapeamentos.items():
             total = sum(saldo_por_conta.get(c, 0.0) for c in contas)
             cat_valores[cat] = total
+            total_ant = sum(saldo_anterior_por_conta.get(c, 0.0) for c in contas)
+            cat_valores_ant[cat] = total_ant
 
         # Monta linhas
         linhas: list[LinhaDFC] = []
         running = 0.0
+        running_ant = 0.0
 
         for i, degrau in enumerate(DFC_DEFAULT):
             if degrau["categoria"] is None:
@@ -176,6 +218,7 @@ class DFC:
                         tipo=degrau["tipo"],
                         descricao=degrau["descricao"],
                         valor=running,
+                        valor_anterior=running_ant,
                         ordem=i,
                     ))
                 else:
@@ -183,30 +226,46 @@ class DFC:
                         tipo=degrau["tipo"],
                         descricao=degrau["descricao"],
                         valor=0.0,
+                        valor_anterior=0.0,
                         ordem=i,
                     ))
             else:
                 vl = cat_valores.get(degrau["categoria"], 0.0)
-                vl_dre = vl * degrau["sinal"]
-                running += vl_dre
+                vl_ant = cat_valores_ant.get(degrau["categoria"], 0.0)
+                vl_dfc = vl * degrau["sinal"]
+                vl_dfc_ant = vl_ant * degrau["sinal"]
+                running += vl_dfc
+                running_ant += vl_dfc_ant
                 linhas.append(LinhaDFC(
                     tipo=degrau["tipo"],
                     descricao=degrau["descricao"],
-                    valor=vl_dre,
+                    valor=vl_dfc,
+                    valor_anterior=vl_dfc_ant,
                     ordem=i,
                 ))
 
         totais = {
             "variacao_caixa": running,
+            "variacao_caixa_anterior": running_ant,
             "operacional": next(
                 (l.valor for l in linhas if "Operações" in l.descricao and l.tipo == "subtotal"), 0.0
+            ),
+            "operacional_anterior": next(
+                (l.valor_anterior for l in linhas if "Operações" in l.descricao and l.tipo == "subtotal"), 0.0
             ),
             "investimento": next(
                 (l.valor for l in linhas if "Investimento" in l.descricao and l.tipo == "subtotal"), 0.0
             ),
+            "investimento_anterior": next(
+                (l.valor_anterior for l in linhas if "Investimento" in l.descricao and l.tipo == "subtotal"), 0.0
+            ),
             "financiamento": next(
                 (l.valor for l in linhas if "Financiamento" in l.descricao and l.tipo == "subtotal"), 0.0
             ),
+            "financiamento_anterior": next(
+                (l.valor_anterior for l in linhas if "Financiamento" in l.descricao and l.tipo == "subtotal"), 0.0
+            ),
+            "tem_anterior": ecd_ant_id is not None,
         }
 
         ctx = ReportContext(
