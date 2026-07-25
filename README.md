@@ -1,5 +1,5 @@
 # SPED-HUB
-Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Importa ECDs e XMLs fiscais, gera e valida SPED Contribuições, ECF e ECD, e transforma a escrituração em Balancete, Balanço, DRE, Razão, DFC e indicadores — com filtros avançados, conciliação automática e exportação em PDF e Excel com a marca do escritório.
+Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Importa ECDs, EFD-Contribuições e ECFs, gera e valida SPED, e transforma a escrituração em Balancete, Balanço, DRE, Razão, DFC e indicadores — com filtros avançados, conciliação automática e exportação em PDF e Excel com a marca do escritório.
 
 ## Funcionalidades
 
@@ -13,17 +13,31 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 
 ### Dashboard Web (`sped-hub-dashboard`)
 - **FastAPI + Jinja2 + HTMX + Alpine.js + Chart.js**
-- Dashboard com KPIs (Ativo Total, PL, Endividamento, Resultado, Margem, Lançamentos)
-- Gráficos interativos: Evolução Patrimonial, Composição do Ativo, DRE Waterfall
-- Upload de ECD via interface web com drag & drop
-- Visualização de Balanço Patrimonial, DRE e Livro Diário com tabs
-- Navegação entre múltiplas ECDs importadas
-- Design responsivo com tema profissional
+- **Autenticação** — Login/registro com PBKDF2, sessões por token, middleware de proteção
+- **Dashboard com KPIs** — Ativo Total, PL, Endividamento, Resultado, Margem, Lançamentos
+- **Gráficos interativos** — Evolução Patrimonial, Composição do Ativo, DRE Waterfall, DFC, Comparativo entre Empresas
+- **Upload multi-formato** — ECD, EFD-Contribuições (PIS/COFINS) e ECF (IRPJ/CSLL) com drag & drop
+- **Filtros interativos** — Por natureza, nível, período, conta, nome e saldo zero
+- **Exportação direta** — PDF e XLSX para Balanço, DRE e DFC com um clique
+- **4 abas de relatórios** — Balanço Patrimonial, DRE, DFC e Livro Diário
+- **Navegação entre múltiplas ECDs** importadas
+- **Design responsivo** com tema profissional
+
+### Docker
+- **Dockerfile** multi-stage (builder + runtime) otimizado
+- **docker-compose.yml** para produção e desenvolvimento
+- Volume persistente para banco de dados
 
 ## Instalação
 
 ```bash
 pip install -e .
+```
+
+### Docker
+```bash
+docker compose up -d
+# Acesse http://localhost:8000
 ```
 
 ## Uso
@@ -53,6 +67,7 @@ sped-hub info
 ```bash
 sped-hub-dashboard
 # Acesse http://localhost:8000
+# Registre-se em /register e faça login
 ```
 
 ## Estrutura do Projeto
@@ -60,10 +75,14 @@ sped-hub-dashboard
 ```
 src/
 ├── cli.py              # CLI principal
+├── auth/               # Autenticação (Fase 4)
+│   └── __init__.py     # AuthService, middleware, sessões
 ├── parsers/            # Parsers de arquivos SPED
-│   └── ecd.py          # Parser ECD (leiaute 9)
+│   ├── ecd.py          # Parser ECD (leiaute 9)
+│   ├── efd.py          # Parser EFD-Contribuições (Fase 5)
+│   └── ecf.py          # Parser ECF (Fase 5)
 ├── db/                 # Modelos e repositório
-│   ├── models.py       # 14 modelos SQLAlchemy
+│   ├── models.py       # 17 modelos SQLAlchemy (inclui auth)
 │   └── repository.py   # CRUD + consultas
 ├── filters/            # Motor de filtros
 │   └── engine.py       # 16 tipos de filtro
@@ -73,22 +92,26 @@ src/
 │   ├── razao.py        # Razão
 │   ├── balanco.py      # Balanço Patrimonial
 │   ├── dre.py          # DRE
+│   ├── dfc.py          # DFC — Fluxos de Caixa (Fase 4)
 │   ├── diario.py       # Livro Diário
 │   ├── export_engine.py # Export PDF/XLSX
-│   └── templates/      # Templates HTML
+│   └── templates/      # Templates HTML para PDF
 ├── validators/         # Validações
 │   └── integridade.py  # 7 validações
-├── dashboard/          # Dashboard Web (Fase 3)
-│   ├── app.py          # FastAPI app
-│   ├── services.py     # Serviços de dados
+├── dashboard/          # Dashboard Web
+│   ├── app.py          # FastAPI app — 24 rotas
+│   ├── services.py     # Serviços de dados + KPIs + gráficos
 │   └── templates/      # Templates Jinja2
 │       ├── base.html
 │       ├── dashboard.html
 │       ├── upload.html
+│       ├── login.html
+│       ├── register.html
 │       └── partials/
 │           ├── kpis.html
 │           ├── balanco.html
 │           ├── dre.html
+│           ├── dfc.html
 │           └── diario.html
 └── layouts/            # Layouts de registros
     └── ecd_v9.yml      # 30 registros ECD

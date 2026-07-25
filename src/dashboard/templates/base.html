@@ -60,7 +60,7 @@
             text-decoration: none;
         }
         .navbar-brand span { color: #7DD3FC; }
-        .navbar-nav { display: flex; gap: 4px; list-style: none; }
+        .navbar-nav { display: flex; gap: 4px; list-style: none; align-items: center; }
         .navbar-nav a {
             color: rgba(255,255,255,.85);
             text-decoration: none;
@@ -73,6 +73,11 @@
         .navbar-nav a:hover, .navbar-nav a.active {
             background: rgba(255,255,255,.15);
             color: white;
+        }
+        .navbar-user {
+            font-size: .8rem;
+            color: rgba(255,255,255,.7);
+            margin-right: 8px;
         }
 
         .main-content { max-width: 1280px; margin: 0 auto; padding: 24px; }
@@ -144,6 +149,7 @@
             gap: 0;
             border-bottom: 2px solid var(--gray-200);
             margin-bottom: 16px;
+            flex-wrap: wrap;
         }
         .tab-btn {
             padding: 10px 20px;
@@ -304,6 +310,10 @@
         <ul class="navbar-nav">
             <li><a href="/" class="{% if current_page == 'dashboard' %}active{% endif %}">📊 Dashboard</a></li>
             <li><a href="/upload" class="{% if current_page == 'upload' %}active{% endif %}">📤 Upload</a></li>
+            {% if usuario %}
+            <li><span class="navbar-user">{{ usuario.nome }}</span></li>
+            <li><a href="/logout">🚪 Sair</a></li>
+            {% endif %}
         </ul>
     </nav>
 
@@ -312,7 +322,7 @@
     </main>
 
     <footer class="footer">
-        SPED-HUB v0.2.0 — Plataforma de Conformidade Fiscal
+        SPED-HUB v0.3.0 — Plataforma de Conformidade Fiscal
     </footer>
 
     {% block scripts %}{% endblock %}

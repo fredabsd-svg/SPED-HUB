@@ -1,0 +1,217 @@
+"""Demonstração dos Fluxos de Caixa — DFC (método indireto).
+
+Estrutura conforme NBC TG 03 / CPC 03:
+  1. Fluxo das Atividades Operacionais
+  2. Fluxo das Atividades de Investimento
+  3. Fluxo das Atividades de Financiamento
+  4. Variação Líquida de Caixa e Equivalentes
+"""
+
+import datetime
+from dataclasses import dataclass, field
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from src.db.models import Mapeamento, PlanoConta, SaldoPeriodico
+from src.filters.engine import FilterCriteria, FilterEngine
+from src.reports.base import (
+    ReportContext,
+    fmt_moeda,
+    saldo_por_natureza,
+    valor_sinalizado,
+)
+
+
+@dataclass
+class LinhaDFC:
+    tipo: str  # step, detail, subtotal, total
+    descricao: str
+    valor: float = 0.0
+    ordem: int = 0
+
+
+DFC_DEFAULT = [
+    {"tipo": "section", "descricao": "Fluxo das Atividades Operacionais", "categoria": None, "sinal": 0},
+    {"tipo": "step", "descricao": "Lucro Líquido do Exercício", "categoria": "lucro_liquido", "sinal": 1},
+    {"tipo": "step", "descricao": "(+) Depreciação e Amortização", "categoria": "depreciacao", "sinal": 1},
+    {"tipo": "step", "descricao": "(+/-) Variação em Contas a Receber", "categoria": "var_contas_receber", "sinal": 1},
+    {"tipo": "step", "descricao": "(+/-) Variação em Estoques", "categoria": "var_estoques", "sinal": 1},
+    {"tipo": "step", "descricao": "(+/-) Variação em Fornecedores", "categoria": "var_fornecedores", "sinal": 1},
+    {"tipo": "step", "descricao": "(+/-) Variação em Obrigações Fiscais", "categoria": "var_obrig_fiscais", "sinal": 1},
+    {"tipo": "step", "descricao": "(+/-) Outros Ajustes Operacionais", "categoria": "outros_operacionais", "sinal": 1},
+    {"tipo": "subtotal", "descricao": "= Caixa Gerado nas Operações", "categoria": None, "sinal": 0},
+
+    {"tipo": "section", "descricao": "Fluxo das Atividades de Investimento", "categoria": None, "sinal": 0},
+    {"tipo": "step", "descricao": "(-) Aquisição de Imobilizado", "categoria": "aquisicao_imobilizado", "sinal": -1},
+    {"tipo": "step", "descricao": "(+) Venda de Imobilizado", "categoria": "venda_imobilizado", "sinal": 1},
+    {"tipo": "step", "descricao": "(-) Aquisição de Intangível", "categoria": "aquisicao_intangivel", "sinal": -1},
+    {"tipo": "step", "descricao": "(+/-) Outros Investimentos", "categoria": "outros_investimentos", "sinal": 1},
+    {"tipo": "subtotal", "descricao": "= Caixa das Atividades de Investimento", "categoria": None, "sinal": 0},
+
+    {"tipo": "section", "descricao": "Fluxo das Atividades de Financiamento", "categoria": None, "sinal": 0},
+    {"tipo": "step", "descricao": "(+) Aumento de Capital", "categoria": "aumento_capital", "sinal": 1},
+    {"tipo": "step", "descricao": "(+/-) Empréstimos e Financiamentos", "categoria": "emprestimos", "sinal": 1},
+    {"tipo": "step", "descricao": "(-) Distribuição de Lucros", "categoria": "distribuicao_lucros", "sinal": -1},
+    {"tipo": "subtotal", "descricao": "= Caixa das Atividades de Financiamento", "categoria": None, "sinal": 0},
+
+    {"tipo": "total", "descricao": "= Variação Líquida de Caixa", "categoria": None, "sinal": 0},
+]
+
+
+class DFC:
+    """Gerador de DFC — Demonstração dos Fluxos de Caixa."""
+
+    def __init__(self, session: Session, ecd_id: int):
+        self.session = session
+        self.ecd_id = ecd_id
+        self.engine = FilterEngine(session, ecd_id)
+
+    def _get_mapeamentos(self, empresa_id: int) -> dict[str, list[str]]:
+        """Carrega mapeamentos DFC da empresa ou usa defaults."""
+        maps = list(self.session.execute(
+            select(Mapeamento)
+            .where(
+                Mapeamento.empresa_id == empresa_id,
+                Mapeamento.tipo == "dfc",
+            )
+            .order_by(Mapeamento.ordem)
+        ).scalars())
+
+        if maps:
+            result: dict[str, list[str]] = {}
+            for m in maps:
+                result.setdefault(m.categoria, []).append(m.cod_cta)
+            return result
+
+        # Default: classifica por nome da conta
+        plano = {
+            c.cod_cta: c
+            for c in self.session.execute(
+                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
+            ).scalars()
+        }
+
+        result: dict[str, list[str]] = {
+            "lucro_liquido": [],
+            "depreciacao": [],
+            "var_contas_receber": [],
+            "var_estoques": [],
+            "var_fornecedores": [],
+            "var_obrig_fiscais": [],
+            "outros_operacionais": [],
+            "aquisicao_imobilizado": [],
+            "venda_imobilizado": [],
+            "aquisicao_intangivel": [],
+            "outros_investimentos": [],
+            "aumento_capital": [],
+            "emprestimos": [],
+            "distribuicao_lucros": [],
+        }
+
+        for cod_cta, pc in plano.items():
+            nome = pc.nome_cta.upper()
+
+            if any(t in nome for t in ["DEPRECIA", "AMORTIZA", "EXAUSTÃO"]):
+                result["depreciacao"].append(cod_cta)
+            elif any(t in nome for t in ["CLIENTES", "CONTAS A RECEBER", "DUPLICATAS A RECEBER"]):
+                result["var_contas_receber"].append(cod_cta)
+            elif any(t in nome for t in ["ESTOQUE", "MERCADORIA"]):
+                result["var_estoques"].append(cod_cta)
+            elif any(t in nome for t in ["FORNECEDOR"]):
+                result["var_fornecedores"].append(cod_cta)
+            elif any(t in nome for t in ["IMPOSTO", "TRIBUTO", "OBRIGAÇÕES FISC", "PIS", "COFINS", "ICMS", "IRPJ", "CSLL"]):
+                result["var_obrig_fiscais"].append(cod_cta)
+            elif any(t in nome for t in ["IMOBILIZADO", "MÁQUINAS", "EQUIPAMENTO", "VEÍCULO", "MÓVEIS"]):
+                result["aquisicao_imobilizado"].append(cod_cta)
+            elif any(t in nome for t in ["INTANGÍVEL", "SOFTWARE", "MARCA", "PATENTE"]):
+                result["aquisicao_intangivel"].append(cod_cta)
+            elif any(t in nome for t in ["CAPITAL SOCIAL", "CAPITAL SUBSCRITO"]):
+                result["aumento_capital"].append(cod_cta)
+            elif any(t in nome for t in ["EMPRÉSTIMO", "FINANCIAMENTO", "DEBÊNTURE"]):
+                result["emprestimos"].append(cod_cta)
+            elif any(t in nome for t in ["LUCRO", "DIVIDENDO", "DISTRIBUIÇÃO"]):
+                result["distribuicao_lucros"].append(cod_cta)
+
+        return result
+
+    def gerar(
+        self,
+        criterios: FilterCriteria | None = None,
+        empresa_id: int | None = None,
+    ) -> tuple[ReportContext, list[LinhaDFC], dict[str, float]]:
+        """Gera a DFC."""
+        if criterios is None:
+            criterios = FilterCriteria()
+
+        if empresa_id is None:
+            from src.db.models import ECD
+            ecd = self.session.get(ECD, self.ecd_id)
+            empresa_id = ecd.empresa_id if ecd else 0
+
+        mapeamentos = self._get_mapeamentos(empresa_id)
+
+        # Busca saldos
+        saldos = self.engine.aplicar_saldos(criterios)
+        saldo_por_conta: dict[str, float] = {}
+        for s in saldos:
+            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
+            saldo_por_conta[s.cod_cta] = vl
+
+        # Calcula valores por categoria
+        cat_valores: dict[str, float] = {}
+        for cat, contas in mapeamentos.items():
+            total = sum(saldo_por_conta.get(c, 0.0) for c in contas)
+            cat_valores[cat] = total
+
+        # Monta linhas
+        linhas: list[LinhaDFC] = []
+        running = 0.0
+
+        for i, degrau in enumerate(DFC_DEFAULT):
+            if degrau["categoria"] is None:
+                if degrau["tipo"] in ("subtotal", "total"):
+                    linhas.append(LinhaDFC(
+                        tipo=degrau["tipo"],
+                        descricao=degrau["descricao"],
+                        valor=running,
+                        ordem=i,
+                    ))
+                else:
+                    linhas.append(LinhaDFC(
+                        tipo=degrau["tipo"],
+                        descricao=degrau["descricao"],
+                        valor=0.0,
+                        ordem=i,
+                    ))
+            else:
+                vl = cat_valores.get(degrau["categoria"], 0.0)
+                vl_dre = vl * degrau["sinal"]
+                running += vl_dre
+                linhas.append(LinhaDFC(
+                    tipo=degrau["tipo"],
+                    descricao=degrau["descricao"],
+                    valor=vl_dre,
+                    ordem=i,
+                ))
+
+        totais = {
+            "variacao_caixa": running,
+            "operacional": next(
+                (l.valor for l in linhas if "Operações" in l.descricao and l.tipo == "subtotal"), 0.0
+            ),
+            "investimento": next(
+                (l.valor for l in linhas if "Investimento" in l.descricao and l.tipo == "subtotal"), 0.0
+            ),
+            "financiamento": next(
+                (l.valor for l in linhas if "Financiamento" in l.descricao and l.tipo == "subtotal"), 0.0
+            ),
+        }
+
+        ctx = ReportContext(
+            titulo="Demonstração dos Fluxos de Caixa",
+            filtros_descricao=self.engine.descricao_filtros(criterios),
+        )
+
+        return ctx, linhas, totais

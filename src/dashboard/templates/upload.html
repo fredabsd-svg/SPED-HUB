@@ -1,47 +1,108 @@
 {% extends "base.html" %}
-{% block title %}Upload ECD — SPED-HUB{% endblock %}
+{% block title %}Upload — SPED-HUB{% endblock %}
 
 {% block content %}
-<div style="max-width:640px;margin:0 auto;">
-    <h2 style="font-size:1.25rem;margin-bottom:8px;">📤 Importar Arquivo ECD</h2>
+<div style="max-width:720px;margin:0 auto;">
+    <h2 style="font-size:1.25rem;margin-bottom:8px;">📤 Importar Arquivos SPED</h2>
     <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
-        Faça upload de um arquivo ECD (.txt) para processar e visualizar os dados contábeis.
+        Faça upload de arquivos ECD, EFD-Contribuições ou ECF para processar e visualizar os dados.
     </p>
 
-    <!-- ── Upload Zone ── -->
-    <div id="upload-container">
-        <form id="upload-form"
-              hx-encoding="multipart/form-data"
-              hx-post="/api/upload"
-              hx-target="#upload-result"
-              hx-swap="innerHTML">
-            <label class="upload-zone" id="drop-zone"
-                   x-data="{ dragging: false }"
-                   @dragover.prevent="dragging = true"
-                   @dragleave.prevent="dragging = false"
-                   @drop.prevent="dragging = false; const file = $event.dataTransfer.files[0]; if(file) { const input = document.getElementById('file-input'); const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }"
-                   :class="{ 'dragover': dragging }">
-                <div class="upload-icon">📁</div>
-                <div class="upload-text">
-                    <strong>Clique para selecionar</strong> ou arraste o arquivo ECD aqui
+    <!-- ── Tabs de formato ── -->
+    <div class="tabs" x-data="{ formato: 'ecd' }" style="margin-bottom:20px;">
+        <button class="tab-btn" :class="{ active: formato === 'ecd' }" @click="formato = 'ecd'">📗 ECD</button>
+        <button class="tab-btn" :class="{ active: formato === 'efd' }" @click="formato = 'efd'">📘 EFD-Contribuições</button>
+        <button class="tab-btn" :class="{ active: formato === 'ecf' }" @click="formato = 'ecf'">📙 ECF</button>
+
+        <!-- ECD -->
+        <div class="tab-content" :class="{ active: formato === 'ecd' }" style="width:100%;">
+            <form id="upload-ecd"
+                  hx-encoding="multipart/form-data"
+                  hx-post="/api/upload"
+                  hx-target="#upload-result"
+                  hx-swap="innerHTML">
+                <label class="upload-zone" id="drop-ecd"
+                       x-data="{ dragging: false }"
+                       @dragover.prevent="dragging = true"
+                       @dragleave.prevent="dragging = false"
+                       @drop.prevent="dragging = false; const file = $event.dataTransfer.files[0]; if(file) { const input = document.getElementById('file-ecd'); const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }"
+                       :class="{ 'dragover': dragging }">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo ECD aqui</div>
+                    <div class="upload-hint">Formatos: .txt, .ecd — Leiaute 9</div>
+                    <input type="file" id="file-ecd" name="file" accept=".txt,.ecd"
+                           @change="const name = $el.files[0]?.name; if(name) { document.getElementById('file-name-ecd').textContent = name; document.getElementById('btn-ecd').disabled = false; }">
+                </label>
+                <div id="file-name-ecd" style="text-align:center;margin:12px 0;font-size:.875rem;color:var(--gray-600);"></div>
+                <div style="text-align:center;">
+                    <button type="submit" id="btn-ecd" class="btn btn-primary" disabled
+                            hx-indicator="#upload-spinner">
+                        <span class="htmx-indicator" id="upload-spinner"><span class="spinner"></span></span>
+                        🚀 Processar ECD
+                    </button>
                 </div>
-                <div class="upload-hint">Formatos aceitos: .txt, .ecd</div>
-                <input type="file" id="file-input" name="file" accept=".txt,.ecd"
-                       @change="const name = $el.files[0]?.name; if(name) { document.getElementById('file-name').textContent = name; document.getElementById('btn-upload').disabled = false; }">
-            </label>
+            </form>
+        </div>
 
-            <div id="file-name" style="text-align:center;margin:12px 0;font-size:.875rem;color:var(--gray-600);"></div>
+        <!-- EFD -->
+        <div class="tab-content" :class="{ active: formato === 'efd' }" style="width:100%;">
+            <form id="upload-efd"
+                  hx-encoding="multipart/form-data"
+                  hx-post="/api/upload-efd"
+                  hx-target="#upload-result"
+                  hx-swap="innerHTML">
+                <label class="upload-zone" id="drop-efd"
+                       x-data="{ dragging: false }"
+                       @dragover.prevent="dragging = true"
+                       @dragleave.prevent="dragging = false"
+                       @drop.prevent="dragging = false; const file = $event.dataTransfer.files[0]; if(file) { const input = document.getElementById('file-efd'); const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }"
+                       :class="{ 'dragover': dragging }">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo EFD aqui</div>
+                    <div class="upload-hint">Formatos: .txt, .efd — EFD-Contribuições (PIS/COFINS)</div>
+                    <input type="file" id="file-efd" name="file" accept=".txt,.efd"
+                           @change="const name = $el.files[0]?.name; if(name) { document.getElementById('file-name-efd').textContent = name; document.getElementById('btn-efd').disabled = false; }">
+                </label>
+                <div id="file-name-efd" style="text-align:center;margin:12px 0;font-size:.875rem;color:var(--gray-600);"></div>
+                <div style="text-align:center;">
+                    <button type="submit" id="btn-efd" class="btn btn-primary" disabled
+                            hx-indicator="#upload-spinner-efd">
+                        <span class="htmx-indicator" id="upload-spinner-efd"><span class="spinner"></span></span>
+                        🚀 Processar EFD
+                    </button>
+                </div>
+            </form>
+        </div>
 
-            <div style="text-align:center;margin-top:16px;">
-                <button type="submit" id="btn-upload" class="btn btn-primary" disabled
-                        hx-indicator="#upload-spinner">
-                    <span class="htmx-indicator" id="upload-spinner">
-                        <span class="spinner"></span>
-                    </span>
-                    🚀 Processar ECD
-                </button>
-            </div>
-        </form>
+        <!-- ECF -->
+        <div class="tab-content" :class="{ active: formato === 'ecf' }" style="width:100%;">
+            <form id="upload-ecf"
+                  hx-encoding="multipart/form-data"
+                  hx-post="/api/upload-ecf"
+                  hx-target="#upload-result"
+                  hx-swap="innerHTML">
+                <label class="upload-zone" id="drop-ecf"
+                       x-data="{ dragging: false }"
+                       @dragover.prevent="dragging = true"
+                       @dragleave.prevent="dragging = false"
+                       @drop.prevent="dragging = false; const file = $event.dataTransfer.files[0]; if(file) { const input = document.getElementById('file-ecf'); const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }"
+                       :class="{ 'dragover': dragging }">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo ECF aqui</div>
+                    <div class="upload-hint">Formatos: .txt, .ecf — ECF (IRPJ/CSLL)</div>
+                    <input type="file" id="file-ecf" name="file" accept=".txt,.ecf"
+                           @change="const name = $el.files[0]?.name; if(name) { document.getElementById('file-name-ecf').textContent = name; document.getElementById('btn-ecf').disabled = false; }">
+                </label>
+                <div id="file-name-ecf" style="text-align:center;margin:12px 0;font-size:.875rem;color:var(--gray-600);"></div>
+                <div style="text-align:center;">
+                    <button type="submit" id="btn-ecf" class="btn btn-primary" disabled
+                            hx-indicator="#upload-spinner-ecf">
+                        <span class="htmx-indicator" id="upload-spinner-ecf"><span class="spinner"></span></span>
+                        🚀 Processar ECF
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <!-- ── Resultado ── -->
@@ -49,22 +110,11 @@
 
     <!-- ── Instruções ── -->
     <div class="card" style="margin-top:32px;">
-        <div class="card-header">ℹ️ Sobre a ECD</div>
+        <div class="card-header">ℹ️ Formatos Suportados</div>
         <div class="card-body" style="font-size:.875rem;color:var(--gray-600);line-height:1.6;">
-            <p>A <strong>Escrituração Contábil Digital (ECD)</strong> é parte do SPED e substitui a escrituração em papel pela versão digital dos livros:</p>
-            <ul style="margin:12px 0;padding-left:20px;">
-                <li>Livro Diário e seus auxiliares</li>
-                <li>Livro Razão e seus auxiliares</li>
-                <li>Livro Balancetes Diários, Balanços e fichas de lançamento</li>
-            </ul>
-            <p>O SPED-HUB processa o arquivo texto da ECD (leiaute 9), extrai o plano de contas, lançamentos, saldos e gera automaticamente:</p>
-            <ul style="margin:12px 0;padding-left:20px;">
-                <li>✅ Balanço Patrimonial</li>
-                <li>✅ DRE (Demonstração do Resultado)</li>
-                <li>✅ Livro Diário</li>
-                <li>✅ Balancete e Razão</li>
-                <li>✅ KPIs e gráficos interativos</li>
-            </ul>
+            <p><strong>📗 ECD</strong> — Escrituração Contábil Digital: Livro Diário, Razão, Balancetes, Balanço Patrimonial, DRE.</p>
+            <p><strong>📘 EFD-Contribuições</strong> — PIS/COFINS: apuração de créditos e débitos, receita bruta, regime cumulativo e não-cumulativo.</p>
+            <p><strong>📙 ECF</strong> — Escrituração Contábil Fiscal: IRPJ e CSLL, lucro real, presumido ou arbitrado, e-Lalur e e-Lacs.</p>
         </div>
     </div>
 </div>

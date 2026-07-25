@@ -1,47 +1,61 @@
 """Dashboard Web — FastAPI + Jinja2 + HTMX + Alpine.js.
 
 Rotas:
-  GET  /                    — Dashboard principal
-  GET  /upload              — Página de upload de ECD
+  GET  /                    — Dashboard principal (requer auth)
+  GET  /login               — Página de login
+  POST /api/login           — Autenticação
+  GET  /logout              — Logout
+  GET  /register            — Página de registro
+  POST /api/register        — Registro
+  GET  /upload              — Upload de ECD/EFD/ECF
   POST /api/upload          — Upload de arquivo ECD
+  POST /api/upload-efd      — Upload de arquivo EFD-Contribuições
+  POST /api/upload-ecf      — Upload de arquivo ECF
   GET  /api/kpis            — KPIs (HTMX partial)
   GET  /api/graficos        — Dados para gráficos (JSON)
   GET  /api/balanco         — Balanço Patrimonial (HTMX partial)
   GET  /api/dre             — DRE (HTMX partial)
   GET  /api/diario          — Livro Diário (HTMX partial)
+  GET  /api/dfc             — DFC (HTMX partial)
+  GET  /api/export/pdf      — Exporta relatório para PDF
+  GET  /api/export/xlsx     — Exporta relatório para XLSX
   GET  /api/ecds            — Lista ECDs disponíveis
-  GET  /api/selecionar-ecd  — Seleciona ECD ativa
+  GET  /api/filtros/aplicar — Aplica filtros e retorna dados filtrados
 """
 
 import datetime
 import hashlib
+import io
 import logging
 import sys
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-# Adiciona raiz do projeto ao path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.db.models import criar_engine, get_session, init_db
 from src.db.repository import Repository
 from src.parsers.ecd import ECDParser
+from src.parsers.efd import EFDParser
+from src.parsers.ecf import ECFParser
 from src.dashboard.services import DashboardService
 from src.reports.balanco import BalancoPatrimonial
 from src.reports.dre import DRE
 from src.reports.diario import LivroDiario
+from src.reports.dfc import DFC
 from src.reports.base import fmt_moeda, fmt_data
+from src.auth import AuthService, init_auth, get_auth, get_usuario_atual, requer_autenticacao
+from src.filters.engine import FilterCriteria
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.2.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.3.0")
 
 # Templates
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -55,7 +69,8 @@ DB_PATH = Path("sped_hub.db")
 if not DB_PATH.is_absolute():
     DB_PATH = Path.cwd() / DB_PATH
 
-# Garante que o banco existe
+# Inicializa auth e banco
+init_auth(str(DB_PATH))
 engine = criar_engine(str(DB_PATH))
 init_db(engine)
 
@@ -71,15 +86,96 @@ jinja_env.globals["fmt_data"] = fmt_data
 jinja_env.globals["now"] = datetime.datetime.now
 
 
+# ── Rotas: Autenticação ────────────────────────────────────────────────────
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Página de login."""
+    usuario = await get_usuario_atual(request)
+    if usuario:
+        return RedirectResponse(url="/", status_code=302)
+    return HTMLResponse(jinja_env.get_template("login.html").render({"request": request}))
+
+
+@app.post("/api/login")
+async def api_login(request: Request):
+    """Autentica usuário."""
+    form = await request.form()
+    email = form.get("email", "")
+    senha = form.get("senha", "")
+
+    try:
+        auth = get_auth()
+        usuario, token = auth.login(
+            email=email,
+            senha=senha,
+            ip=request.client.host if request.client else "",
+            user_agent=request.headers.get("User-Agent", ""),
+        )
+        response = JSONResponse({"status": "ok", "redirect": "/"})
+        response.set_cookie(
+            key="sped_hub_session",
+            value=token,
+            httponly=True,
+            max_age=86400,
+            samesite="lax",
+        )
+        return response
+    except ValueError as e:
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=401)
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    """Logout."""
+    token = request.cookies.get("sped_hub_session")
+    if token:
+        get_auth().logout(token)
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie("sped_hub_session")
+    return response
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request):
+    """Página de registro."""
+    return HTMLResponse(jinja_env.get_template("register.html").render({"request": request}))
+
+
+@app.post("/api/register")
+async def api_register(request: Request):
+    """Registra novo usuário."""
+    form = await request.form()
+    email = form.get("email", "")
+    nome = form.get("nome", "")
+    senha = form.get("senha", "")
+
+    if not email or not nome or not senha:
+        return JSONResponse({"status": "erro", "mensagem": "Todos os campos são obrigatórios"}, status_code=400)
+    if len(senha) < 6:
+        return JSONResponse({"status": "erro", "mensagem": "Senha deve ter no mínimo 6 caracteres"}, status_code=400)
+
+    try:
+        auth = get_auth()
+        auth.registrar(email=email, nome=nome, senha=senha)
+        return JSONResponse({"status": "ok", "redirect": "/login"})
+    except ValueError as e:
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=400)
+
+
 # ── Rotas: Páginas ─────────────────────────────────────────────────────────
 
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    """Dashboard principal."""
+    """Dashboard principal (requer autenticação)."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
     session = get_session(_get_engine())
     try:
-        # Busca última ECD
         from sqlalchemy import select, desc
         from src.db.models import ECD
 
@@ -94,21 +190,27 @@ async def dashboard(request: Request):
             composicao = svc.get_composicao_ativo()
             dre_waterfall = svc.get_dre_waterfall()
             ecds = svc.get_ecds_disponiveis()
+            # Dados para comparativo
+            comparativo = svc.get_comparativo_empresas() if len(ecds) > 1 else None
         else:
             data = None
             evolucao = None
             composicao = None
             dre_waterfall = None
             ecds = []
+            comparativo = None
 
         return HTMLResponse(jinja_env.get_template("dashboard.html").render({
             "request": request,
+            "usuario": usuario,
             "data": data,
             "evolucao": evolucao,
             "composicao": composicao,
             "dre_waterfall": dre_waterfall,
+            "comparativo": comparativo,
             "ecds": ecds,
             "ecd_ativo": ecd.id if ecd else None,
+            "current_page": "dashboard",
         }))
     finally:
         session.close()
@@ -116,13 +218,19 @@ async def dashboard(request: Request):
 
 @app.get("/upload", response_class=HTMLResponse)
 async def upload_page(request: Request):
-    """Página de upload de ECD."""
+    """Página de upload."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
     return HTMLResponse(jinja_env.get_template("upload.html").render({
         "request": request,
+        "usuario": usuario,
+        "current_page": "upload",
     }))
 
 
-# ── Rotas: API ─────────────────────────────────────────────────────────────
+# ── Rotas: API Upload ──────────────────────────────────────────────────────
 
 
 @app.post("/api/upload")
@@ -131,18 +239,14 @@ async def api_upload(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith((".txt", ".ecd")):
         return JSONResponse({"status": "erro", "mensagem": "Formato inválido. Envie um arquivo .txt ou .ecd"}, status_code=400)
 
-    # Salva temporário
     upload_dir = Path("/workspace/uploads")
     upload_dir.mkdir(exist_ok=True)
     temp_path = upload_dir / file.filename
 
     content = await file.read()
     temp_path.write_bytes(content)
-
-    # Hash
     hash_arquivo = hashlib.sha256(content).hexdigest()
 
-    # Processa
     engine = _get_engine()
     session = get_session(engine)
     repo = Repository(session)
@@ -159,7 +263,6 @@ async def api_upload(file: UploadFile = File(...)):
         if not grupos.get("0000"):
             return JSONResponse({"status": "erro", "mensagem": "Arquivo não contém registro 0000 — não é uma ECD válida"}, status_code=400)
 
-        # ── 0000: Empresa ──
         r0000 = grupos["0000"][0]
         empresa = repo.upsert_empresa({
             "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
@@ -198,7 +301,7 @@ async def api_upload(file: UploadFile = File(...)):
             "nome_arquivo": file.filename,
         })
 
-        # ── I050: Plano de Contas ──
+        # Plano de Contas
         contas = []
         for r in grupos["I050"]:
             contas.append({
@@ -212,65 +315,47 @@ async def api_upload(file: UploadFile = File(...)):
             })
         repo.inserir_plano_contas(ecd.id, contas)
 
-        # ── I051: Contas Referenciais ──
+        # Contas Referenciais
         refs = []
         for r in grupos["I051"]:
-            refs.append({
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_ccus": r.get("COD_CCUS", ""),
-                "cod_cta_ref": r.get("COD_CTA_REF", ""),
-            })
+            refs.append({"cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""), "cod_cta_ref": r.get("COD_CTA_REF", "")})
         repo.inserir_contas_referenciais(ecd.id, refs)
 
-        # ── I052: Aglutinações ──
+        # Aglutinações
         agls = []
         for r in grupos["I052"]:
-            agls.append({
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_ccus": r.get("COD_CCUS", ""),
-                "cod_agl": r.get("COD_AGL", ""),
-            })
+            agls.append({"cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""), "cod_agl": r.get("COD_AGL", "")})
         repo.inserir_aglutinacoes(ecd.id, agls)
 
-        # ── I075: Históricos ──
+        # Históricos
         hists = []
         for r in grupos["I075"]:
-            hists.append({
-                "cod_hist": r.get("COD_HIST", ""),
-                "descr_hist": r.get("DESCR_HIST", ""),
-            })
+            hists.append({"cod_hist": r.get("COD_HIST", ""), "descr_hist": r.get("DESCR_HIST", "")})
         repo.inserir_historicos_padrao(ecd.id, hists)
 
-        # ── I155: Saldos Periódicos ──
+        # Saldos Periódicos
         saldos = []
         for r in grupos["I155"]:
             saldos.append({
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_ccus": r.get("COD_CCUS", ""),
-                "dt_ini": dt_ini,
-                "dt_fin": dt_fin,
-                "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0,
-                "ind_dc_ini": r.get("IND_DC_INI", "D"),
-                "vl_deb": r.get("VL_DEB", 0.0) or 0.0,
-                "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
-                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0,
-                "ind_dc_fin": r.get("IND_DC_FIN", "D"),
+                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
+                "dt_ini": dt_ini, "dt_fin": dt_fin,
+                "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0, "ind_dc_ini": r.get("IND_DC_INI", "D"),
+                "vl_deb": r.get("VL_DEB", 0.0) or 0.0, "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
+                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
             })
         repo.inserir_saldos_periodicos(ecd.id, saldos)
 
-        # ── I355: Saldos Resultado ──
+        # Saldos Resultado
         saldos_res = []
         for r in grupos["I355"]:
             saldos_res.append({
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_ccus": r.get("COD_CCUS", ""),
+                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
                 "dt_res": dt_fin,
-                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0,
-                "ind_dc_fin": r.get("IND_DC_FIN", "D"),
+                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
             })
         repo.inserir_saldos_resultado(ecd.id, saldos_res)
 
-        # ── I200/I250: Lançamentos e Partidas ──
+        # Lançamentos
         lancs = []
         for r in grupos["I200"]:
             lancs.append({
@@ -287,13 +372,10 @@ async def api_upload(file: UploadFile = File(...)):
             partidas.append({
                 "num_lcto": r.get("NUM_LCTO", ""),
                 "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat() if r.get("DT_LCTO") else dt_ini.isoformat(),
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_ccus": r.get("COD_CCUS", ""),
-                "vl_dc": r.get("VL_DC", 0.0) or 0.0,
-                "ind_dc": r.get("IND_DC", "D"),
+                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
+                "vl_dc": r.get("VL_DC", 0.0) or 0.0, "ind_dc": r.get("IND_DC", "D"),
                 "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-                "cod_hist_pad": r.get("COD_HIST_PAD", ""),
-                "hist": r.get("HIST", ""),
+                "cod_hist_pad": r.get("COD_HIST_PAD", ""), "hist": r.get("HIST", ""),
                 "cod_part": r.get("COD_PART", ""),
             })
         repo.inserir_partidas(ecd.id, partidas)
@@ -314,21 +396,77 @@ async def api_upload(file: UploadFile = File(...)):
         return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
     finally:
         session.close()
-        # Limpa temporário
         if temp_path.exists():
             temp_path.unlink()
 
 
+@app.post("/api/upload-efd")
+async def api_upload_efd(file: UploadFile = File(...)):
+    """Upload de arquivo EFD-Contribuições."""
+    if not file.filename or not file.filename.lower().endswith((".txt", ".efd")):
+        return JSONResponse({"status": "erro", "mensagem": "Formato inválido"}, status_code=400)
+
+    upload_dir = Path("/workspace/uploads")
+    upload_dir.mkdir(exist_ok=True)
+    temp_path = upload_dir / file.filename
+    content = await file.read()
+    temp_path.write_bytes(content)
+
+    try:
+        parser = EFDParser()
+        resumo = parser.extrair_resumo(temp_path)
+        return JSONResponse({
+            "status": "ok",
+            "mensagem": f"EFD-Contribuições processada! {resumo['total_registros']} registros.",
+            "resumo": resumo,
+        })
+    except Exception as e:
+        logger.exception("Erro ao processar EFD")
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+@app.post("/api/upload-ecf")
+async def api_upload_ecf(file: UploadFile = File(...)):
+    """Upload de arquivo ECF."""
+    if not file.filename or not file.filename.lower().endswith((".txt", ".ecf")):
+        return JSONResponse({"status": "erro", "mensagem": "Formato inválido"}, status_code=400)
+
+    upload_dir = Path("/workspace/uploads")
+    upload_dir.mkdir(exist_ok=True)
+    temp_path = upload_dir / file.filename
+    content = await file.read()
+    temp_path.write_bytes(content)
+
+    try:
+        parser = ECFParser()
+        resumo = parser.extrair_resumo(temp_path)
+        return JSONResponse({
+            "status": "ok",
+            "mensagem": f"ECF processada! {resumo['total_registros']} registros.",
+            "resumo": resumo,
+        })
+    except Exception as e:
+        logger.exception("Erro ao processar ECF")
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+# ── Rotas: API Dados ───────────────────────────────────────────────────────
+
+
 @app.get("/api/kpis", response_class=HTMLResponse)
 async def api_kpis(request: Request, ecd_id: int = Query(...)):
-    """Retorna HTML parcial com KPIs (HTMX)."""
     session = get_session(_get_engine())
     try:
         svc = DashboardService(session, ecd_id)
         data = svc.get_dashboard_data()
         return HTMLResponse(jinja_env.get_template("partials/kpis.html").render({
-            "request": request,
-            "data": data,
+            "request": request, "data": data,
         }))
     finally:
         session.close()
@@ -336,7 +474,6 @@ async def api_kpis(request: Request, ecd_id: int = Query(...)):
 
 @app.get("/api/graficos")
 async def api_graficos(ecd_id: int = Query(...)):
-    """Retorna dados para gráficos em JSON."""
     session = get_session(_get_engine())
     try:
         svc = DashboardService(session, ecd_id)
@@ -344,6 +481,8 @@ async def api_graficos(ecd_id: int = Query(...)):
             "evolucao": svc.get_evolucao_patrimonial(),
             "composicao": svc.get_composicao_ativo(),
             "dre_waterfall": svc.get_dre_waterfall(),
+            "dfc": svc.get_dfc_data(),
+            "comparativo": svc.get_comparativo_empresas(),
         }
     finally:
         session.close()
@@ -351,7 +490,6 @@ async def api_graficos(ecd_id: int = Query(...)):
 
 @app.get("/api/balanco", response_class=HTMLResponse)
 async def api_balanco(request: Request, ecd_id: int = Query(...), visao: str = Query("hierarquica")):
-    """Retorna HTML parcial com Balanço Patrimonial (HTMX)."""
     session = get_session(_get_engine())
     try:
         balanco = BalancoPatrimonial(session, ecd_id)
@@ -359,13 +497,9 @@ async def api_balanco(request: Request, ecd_id: int = Query(...), visao: str = Q
             ctx, grupos, totais = balanco.gerar_publicacao()
         else:
             ctx, grupos, totais = balanco.gerar(visao=visao)
-
         return HTMLResponse(jinja_env.get_template("partials/balanco.html").render({
-            "request": request,
-            "ctx": ctx,
-            "grupos": grupos,
-            "totais": totais,
-            "visao": visao,
+            "request": request, "ctx": ctx, "grupos": grupos, "totais": totais,
+            "visao": visao, "ecd_id": ecd_id,
         }))
     finally:
         session.close()
@@ -373,16 +507,13 @@ async def api_balanco(request: Request, ecd_id: int = Query(...), visao: str = Q
 
 @app.get("/api/dre", response_class=HTMLResponse)
 async def api_dre(request: Request, ecd_id: int = Query(...)):
-    """Retorna HTML parcial com DRE (HTMX)."""
     session = get_session(_get_engine())
     try:
         dre = DRE(session, ecd_id)
         ctx, linhas, totais = dre.gerar()
         return HTMLResponse(jinja_env.get_template("partials/dre.html").render({
-            "request": request,
-            "ctx": ctx,
-            "linhas": linhas,
-            "totais": totais,
+            "request": request, "ctx": ctx, "linhas": linhas, "totais": totais,
+            "ecd_id": ecd_id,
         }))
     finally:
         session.close()
@@ -390,27 +521,33 @@ async def api_dre(request: Request, ecd_id: int = Query(...)):
 
 @app.get("/api/diario", response_class=HTMLResponse)
 async def api_diario(request: Request, ecd_id: int = Query(...), pagina: int = Query(1)):
-    """Retorna HTML parcial com Livro Diário paginado (HTMX)."""
     session = get_session(_get_engine())
     try:
         diario = LivroDiario(session, ecd_id)
         ctx, lancamentos, totais = diario.gerar()
-
-        # Paginação: 20 lançamentos por página
         per_page = 20
         total_paginas = max(1, (len(lancamentos) + per_page - 1) // per_page)
         pagina = max(1, min(pagina, total_paginas))
         inicio = (pagina - 1) * per_page
         fim = inicio + per_page
         pagina_lancs = lancamentos[inicio:fim]
-
         return HTMLResponse(jinja_env.get_template("partials/diario.html").render({
-            "request": request,
-            "ctx": ctx,
-            "lancamentos": pagina_lancs,
-            "totais": totais,
-            "pagina": pagina,
-            "total_paginas": total_paginas,
+            "request": request, "ctx": ctx, "lancamentos": pagina_lancs,
+            "totais": totais, "pagina": pagina, "total_paginas": total_paginas,
+            "ecd_id": ecd_id,
+        }))
+    finally:
+        session.close()
+
+
+@app.get("/api/dfc", response_class=HTMLResponse)
+async def api_dfc(request: Request, ecd_id: int = Query(...)):
+    session = get_session(_get_engine())
+    try:
+        dfc = DFC(session, ecd_id)
+        ctx, linhas, totais = dfc.gerar()
+        return HTMLResponse(jinja_env.get_template("partials/dfc.html").render({
+            "request": request, "ctx": ctx, "linhas": linhas, "totais": totais,
             "ecd_id": ecd_id,
         }))
     finally:
@@ -419,11 +556,193 @@ async def api_diario(request: Request, ecd_id: int = Query(...), pagina: int = Q
 
 @app.get("/api/ecds")
 async def api_ecds():
-    """Lista ECDs disponíveis."""
     session = get_session(_get_engine())
     try:
         svc = DashboardService(session, 0)
         return svc.get_ecds_disponiveis()
+    finally:
+        session.close()
+
+
+# ── Rotas: Exportação ──────────────────────────────────────────────────────
+
+
+@app.get("/api/export/pdf")
+async def api_export_pdf(
+    ecd_id: int = Query(...),
+    tipo: str = Query("balanco"),
+    visao: str = Query("hierarquica"),
+):
+    """Exporta relatório para PDF."""
+    session = get_session(_get_engine())
+    try:
+        from src.reports.export_engine import ExportEngine, WhiteLabel
+        from src.reports.base import ReportContext
+        from src.db.models import ECD, Empresa
+
+        ecd = session.get(ECD, ecd_id)
+        empresa = session.get(Empresa, ecd.empresa_id) if ecd else None
+
+        wl = WhiteLabel()
+        export = ExportEngine()
+        ctx = ReportContext(
+            titulo="",
+            empresa_nome=empresa.nome if empresa else "",
+            empresa_cnpj=empresa.cnpj if empresa else "",
+            periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}" if ecd else "",
+        )
+
+        if tipo == "balanco":
+            balanco = BalancoPatrimonial(session, ecd_id)
+            if visao == "publicacao":
+                ctx_rel, grupos, totais = balanco.gerar_publicacao()
+            else:
+                ctx_rel, grupos, totais = balanco.gerar(visao=visao)
+            ctx.titulo = ctx_rel.titulo
+            html = export.render_html("balanco.html", ctx, wl, grupos=grupos, totais=totais)
+
+        elif tipo == "dre":
+            dre = DRE(session, ecd_id)
+            ctx_rel, linhas, totais = dre.gerar()
+            ctx.titulo = ctx_rel.titulo
+            html = export.render_html("dre.html", ctx, wl, linhas=linhas, totais=totais)
+
+        elif tipo == "dfc":
+            dfc = DFC(session, ecd_id)
+            ctx_rel, linhas, totais = dfc.gerar()
+            ctx.titulo = ctx_rel.titulo
+            html = export.render_html("dfc.html", ctx, wl, linhas=linhas, totais=totais)
+
+        else:
+            return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
+
+        # Gera PDF
+        from weasyprint import HTML as WHTML
+        pdf_bytes = WHTML(string=html).write_pdf()
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={tipo}_{ecd_id}.pdf"},
+        )
+
+    except Exception as e:
+        logger.exception("Erro ao exportar PDF")
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
+    finally:
+        session.close()
+
+
+@app.get("/api/export/xlsx")
+async def api_export_xlsx(
+    ecd_id: int = Query(...),
+    tipo: str = Query("balanco"),
+    visao: str = Query("hierarquica"),
+):
+    """Exporta relatório para XLSX."""
+    session = get_session(_get_engine())
+    try:
+        from src.reports.export_engine import ExportEngine, WhiteLabel
+        from src.reports.base import ReportContext
+        from src.db.models import ECD, Empresa
+
+        ecd = session.get(ECD, ecd_id)
+        empresa = session.get(Empresa, ecd.empresa_id) if ecd else None
+
+        wl = WhiteLabel()
+        export = ExportEngine()
+        ctx = ReportContext(
+            titulo="",
+            empresa_nome=empresa.nome if empresa else "",
+            empresa_cnpj=empresa.cnpj if empresa else "",
+            periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}" if ecd else "",
+        )
+
+        output_path = f"/workspace/outputs/{tipo}_{ecd_id}.xlsx"
+
+        if tipo == "balanco":
+            balanco = BalancoPatrimonial(session, ecd_id)
+            if visao == "publicacao":
+                ctx_rel, grupos, totais = balanco.gerar_publicacao()
+            else:
+                ctx_rel, grupos, totais = balanco.gerar(visao=visao)
+            ctx.titulo = ctx_rel.titulo
+            linhas_dict = []
+            for secao, nome in [("ativo", "Ativo"), ("passivo", "Passivo"), ("pl", "PL")]:
+                for l in grupos[secao]:
+                    linhas_dict.append({"secao": nome, "cod_cta": l.cod_cta, "nome_cta": l.nome_cta, "saldo_atual": l.saldo_atual})
+            colunas = ["secao", "cod_cta", "nome_cta", "saldo_atual"]
+            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+
+        elif tipo == "dre":
+            dre = DRE(session, ecd_id)
+            ctx_rel, linhas, totais = dre.gerar()
+            ctx.titulo = ctx_rel.titulo
+            linhas_dict = [{"tipo": l.tipo, "descricao": l.descricao, "valor_atual": l.valor_atual} for l in linhas]
+            colunas = ["tipo", "descricao", "valor_atual"]
+            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+
+        elif tipo == "dfc":
+            dfc = DFC(session, ecd_id)
+            ctx_rel, linhas, totais = dfc.gerar()
+            ctx.titulo = ctx_rel.titulo
+            linhas_dict = [{"tipo": l.tipo, "descricao": l.descricao, "valor": l.valor} for l in linhas]
+            colunas = ["tipo", "descricao", "valor"]
+            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+
+        else:
+            return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
+
+        return JSONResponse({"status": "ok", "arquivo": f"{tipo}_{ecd_id}.xlsx"})
+
+    except Exception as e:
+        logger.exception("Erro ao exportar XLSX")
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
+    finally:
+        session.close()
+
+
+# ── Rotas: Filtros ─────────────────────────────────────────────────────────
+
+
+@app.get("/api/filtros/aplicar", response_class=HTMLResponse)
+async def api_filtros_aplicar(
+    request: Request,
+    ecd_id: int = Query(...),
+    natureza: str = Query(""),
+    nivel_ate: str = Query(""),
+    dt_ini: str = Query(""),
+    dt_fin: str = Query(""),
+    conta: str = Query(""),
+    nome_cta: str = Query(""),
+    ocultar_zero: bool = Query(False),
+):
+    """Aplica filtros e retorna balanço filtrado."""
+    session = get_session(_get_engine())
+    try:
+        criterios = FilterCriteria()
+        if natureza:
+            criterios.cod_nat = [n.strip() for n in natureza.split(",")]
+        if nivel_ate:
+            criterios.nivel_ate = int(nivel_ate)
+        if dt_ini:
+            criterios.dt_ini = datetime.date.fromisoformat(dt_ini)
+        if dt_fin:
+            criterios.dt_fin = datetime.date.fromisoformat(dt_fin)
+        if conta:
+            criterios.cod_cta_exato = [conta]
+        if nome_cta:
+            criterios.nome_cta = nome_cta
+        if ocultar_zero:
+            criterios.ocultar_saldo_zero = True
+
+        balanco = BalancoPatrimonial(session, ecd_id)
+        ctx, grupos, totais = balanco.gerar(criterios=criterios)
+
+        return HTMLResponse(jinja_env.get_template("partials/balanco.html").render({
+            "request": request, "ctx": ctx, "grupos": grupos, "totais": totais,
+            "visao": "hierarquica", "ecd_id": ecd_id,
+        }))
     finally:
         session.close()
 

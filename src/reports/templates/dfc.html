@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Demonstração dos Fluxos de Caixa</h2>
+
+<div class="info-box">
+  <div>
+    <dt>Período</dt>
+    <dd>{{ ctx.periodo_ref }}</dd>
+  </div>
+  <div>
+    <dt>Variação de Caixa</dt>
+    <dd class="{{ 'text-success' if totais.variacao_caixa >= 0 else 'text-error' }}">
+      {{ fmt_moeda(totais.variacao_caixa) }}
+    </dd>
+  </div>
+  {% if ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  <div>
+    <dt>Filtros</dt>
+    <dd>{{ ctx.filtros_descricao }}</dd>
+  </div>
+  {% endif %}
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:60%">Descrição</th>
+      <th class="right" style="width:40%">Valor (R$)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for linha in linhas %}
+      {% if linha.tipo == 'section' %}
+      <tr class="dre-subtotal">
+        <td><strong>{{ linha.descricao }}</strong></td>
+        <td></td>
+      </tr>
+      {% elif linha.tipo == 'subtotal' %}
+      <tr class="dre-subtotal">
+        <td>{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor) }}</td>
+      </tr>
+      {% elif linha.tipo == 'total' %}
+      <tr class="dre-total">
+        <td>{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor) }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td style="padding-left: 24px;">{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor) }}</td>
+      </tr>
+      {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

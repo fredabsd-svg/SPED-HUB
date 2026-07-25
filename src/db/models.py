@@ -6,6 +6,7 @@ Todas as tabelas de dados têm chave lógica (CNPJ, periodo_ini, periodo_fin).
 import datetime
 import hashlib
 import json
+import secrets
 
 from sqlalchemy import (
     Column,
@@ -31,6 +32,91 @@ def _hash_sensivel(valor: str) -> str:
     return hashlib.sha256(valor.encode()).hexdigest()[:12]
 
 
+# ── Autenticação ────────────────────────────────────────────────────────────
+
+
+class Usuario(Base):
+    """Usuário do sistema com autenticação por senha."""
+
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    nome: Mapped[str] = mapped_column(String(150), nullable=False)
+    senha_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    salt: Mapped[str] = mapped_column(String(64), nullable=False)
+    ativo: Mapped[bool] = mapped_column(default=True)
+    admin: Mapped[bool] = mapped_column(default=False)
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow
+    )
+    ultimo_login: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    # Relacionamentos
+    sessoes: Mapped[list["Sessao"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
+    empresas: Mapped[list["UsuarioEmpresa"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
+
+    @staticmethod
+    def hash_senha(senha: str, salt: str | None = None) -> tuple[str, str]:
+        """Gera hash PBKDF2 da senha com salt."""
+        if salt is None:
+            salt = secrets.token_hex(32)
+        hash_bytes = hashlib.pbkdf2_hmac("sha256", senha.encode(), salt.encode(), 200_000)
+        return hash_bytes.hex(), salt
+
+    def verificar_senha(self, senha: str) -> bool:
+        """Verifica se a senha confere."""
+        hash_bytes, _ = self.hash_senha(senha, self.salt)
+        return hash_bytes == self.senha_hash
+
+    def __repr__(self):
+        return f"<Usuario {self.email}>"
+
+
+class Sessao(Base):
+    """Sessão de usuário autenticado (token-based)."""
+
+    __tablename__ = "sessoes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False, index=True)
+    token: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=datetime.datetime.utcnow
+    )
+    expira_em: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+    ip: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(512))
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="sessoes")
+
+    @staticmethod
+    def gerar_token() -> str:
+        return secrets.token_hex(64)
+
+    @property
+    def expirado(self) -> bool:
+        return datetime.datetime.utcnow() > self.expira_em
+
+
+class UsuarioEmpresa(Base):
+    """Associação usuário-empresa (multiempresa)."""
+
+    __tablename__ = "usuarios_empresas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False, index=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), nullable=False, index=True)
+    permissao: Mapped[str] = mapped_column(String(20), default="leitura")  # leitura, escrita, admin
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="empresas")
+    empresa: Mapped["Empresa"] = relationship(back_populates="usuarios")
+
+    __table_args__ = (
+        UniqueConstraint("usuario_id", "empresa_id", name="uq_usuario_empresa"),
+    )
+
+
 # ── Cadastros ──────────────────────────────────────────────────────────────
 
 
@@ -54,6 +140,7 @@ class Empresa(Base):
 
     # Relacionamentos
     ecds: Mapped[list["ECD"]] = relationship(back_populates="empresa", cascade="all, delete-orphan")
+    usuarios: Mapped[list["UsuarioEmpresa"]] = relationship(back_populates="empresa", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Empresa {_hash_sensivel(self.cnpj)}>"

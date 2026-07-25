@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Registrar — SPED-HUB{% endblock %}
+
+{% block content %}
+<div style="max-width:400px;margin:60px auto;">
+    <div class="card">
+        <div class="card-header" style="text-align:center;font-size:1.1rem;">📝 Criar Conta</div>
+        <div class="card-body">
+            <form id="register-form"
+                  hx-post="/api/register"
+                  hx-target="#register-result"
+                  hx-swap="innerHTML">
+                <div style="margin-bottom:16px;">
+                    <label style="display:block;font-size:.8rem;font-weight:600;color:var(--gray-600);margin-bottom:4px;">Nome</label>
+                    <input type="text" name="nome" required
+                           style="width:100%;padding:10px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:.9rem;"
+                           placeholder="Seu nome completo">
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block;font-size:.8rem;font-weight:600;color:var(--gray-600);margin-bottom:4px;">Email</label>
+                    <input type="email" name="email" required
+                           style="width:100%;padding:10px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:.9rem;"
+                           placeholder="seu@email.com">
+                </div>
+                <div style="margin-bottom:20px;">
+                    <label style="display:block;font-size:.8rem;font-weight:600;color:var(--gray-600);margin-bottom:4px;">Senha (mínimo 6 caracteres)</label>
+                    <input type="password" name="senha" required minlength="6"
+                           style="width:100%;padding:10px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:.9rem;"
+                           placeholder="••••••">
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+                    <span class="htmx-indicator"><span class="spinner"></span></span>
+                    Criar Conta
+                </button>
+            </form>
+            <div id="register-result" style="margin-top:12px;"></div>
+            <div style="text-align:center;margin-top:16px;font-size:.8rem;color:var(--gray-500);">
+                Já tem conta? <a href="/login" style="color:var(--primary);">Faça login</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

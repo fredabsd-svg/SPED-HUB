@@ -1,0 +1,42 @@
+# ── SPED-HUB Docker Compose ──
+# Produção: servidor web + volume persistente
+
+version: "3.9"
+
+services:
+  web:
+    build: .
+    container_name: sped-hub-web
+    ports:
+      - "8000:8000"
+    volumes:
+      - sped_hub_data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - SPED_HUB_DB=/app/data/sped_hub.db
+      - PYTHONPATH=/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ecds')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Desenvolvimento (descomente para usar) ──
+  # dev:
+  #   build: .
+  #   container_name: sped-hub-dev
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - .:/app
+  #     - sped_hub_data:/app/data
+  #   environment:
+  #     - SPED_HUB_DB=/app/data/sped_hub.db
+  #     - PYTHONPATH=/app
+  #   command: python -m uvicorn src.dashboard.app:app --host 0.0.0.0 --port 8000 --reload
+  #   restart: unless-stopped
+
+volumes:
+  sped_hub_data:
+    driver: local

@@ -4,82 +4,98 @@
 
 ## Objetivo da Alteração Atual
 
-**Fase 3 — Dashboard Web:** FastAPI + Jinja2 + HTMX + Alpine.js + Chart.js com upload web, dashboard com KPIs, gráficos de evolução e visualização interativa de relatórios.
+**Fase 4 — 6 funcionalidades completas:**
+1. Autenticação multiempresa (login/registro/sessões)
+2. Filtros interativos no dashboard
+3. Exportação PDF/XLSX direto do dashboard
+4. Mais gráficos: DFC, comparativo entre empresas
+5. Upload multi-formato: EFD-Contribuições + ECF
+6. Deploy com Docker (Dockerfile + docker-compose)
 
 ## Status Técnico
 
 | Componente | Status |
 |---|---|
-| `pyproject.toml` | ✅ Atualizado (v0.2.0, +uvicorn, +python-multipart) |
+| `pyproject.toml` | ✅ Atualizado (v0.3.0) |
 | `src/layouts/ecd_v9.yml` | ✅ 30 registros (Fase 1) |
 | `src/parsers/ecd.py` | ✅ Streaming + herança (Fase 1) |
-| `src/db/models.py` | ✅ 14 modelos (Fase 1) |
+| `src/parsers/efd.py` | ✅ **Parser EFD-Contribuições (Fase 4)** |
+| `src/parsers/ecf.py` | ✅ **Parser ECF (Fase 4)** |
+| `src/db/models.py` | ✅ **17 modelos (+Usuario, +Sessao, +UsuarioEmpresa)** |
 | `src/db/repository.py` | ✅ CRUD + consultas (Fase 1) |
+| `src/auth/__init__.py` | ✅ **AuthService + middleware (Fase 4)** |
 | `src/filters/engine.py` | ✅ 16 tipos de filtro (Fase 1) |
 | `src/reports/base.py` | ✅ Convenção de sinais (Fase 1) |
 | `src/reports/balancete.py` | ✅ Balancete F8 (Fase 1) |
 | `src/reports/razao.py` | ✅ Razão F11 (Fase 1) |
 | `src/reports/balanco.py` | ✅ Balanço Patrimonial F9 (Fase 2) |
 | `src/reports/dre.py` | ✅ DRE F10 (Fase 2) |
+| `src/reports/dfc.py` | ✅ **DFC — Fluxos de Caixa (Fase 4)** |
 | `src/reports/diario.py` | ✅ Livro Diário F12 (Fase 2) |
 | `src/reports/export_engine.py` | ✅ Exportador PDF/XLSX (Fase 2) |
-| `src/reports/templates/*` | ✅ Templates HTML (Fase 2) |
+| `src/reports/templates/*` | ✅ **+dfc.html (Fase 4)** |
 | `src/validators/integridade.py` | ✅ 7 validações (Fase 1) |
 | `src/cli.py` | ✅ CLI completa (Fase 1-2) |
-| `src/dashboard/app.py` | ✅ **FastAPI app — 8 rotas REST + páginas** |
-| `src/dashboard/services.py` | ✅ **Serviços de dados — KPIs, gráficos, agregações** |
-| `src/dashboard/templates/base.html` | ✅ **Template base com design system** |
-| `src/dashboard/templates/dashboard.html` | ✅ **Dashboard com KPIs + 3 gráficos + tabs** |
-| `src/dashboard/templates/upload.html` | ✅ **Upload com drag & drop** |
-| `src/dashboard/templates/partials/kpis.html` | ✅ **Partial HTMX — cards de KPIs** |
-| `src/dashboard/templates/partials/balanco.html` | ✅ **Partial HTMX — Balanço Patrimonial** |
-| `src/dashboard/templates/partials/dre.html` | ✅ **Partial HTMX — DRE** |
-| `src/dashboard/templates/partials/diario.html` | ✅ **Partial HTMX — Livro Diário paginado** |
+| `src/dashboard/app.py` | ✅ **FastAPI app — 24 rotas (Fase 4)** |
+| `src/dashboard/services.py` | ✅ **+DFC, +comparativo (Fase 4)** |
+| `src/dashboard/templates/base.html` | ✅ **+logout, +usuário (Fase 4)** |
+| `src/dashboard/templates/dashboard.html` | ✅ **+DFC, +comparativo, +filtros (Fase 4)** |
+| `src/dashboard/templates/upload.html` | ✅ **+EFD, +ECF tabs (Fase 4)** |
+| `src/dashboard/templates/login.html` | ✅ **Página de login (Fase 4)** |
+| `src/dashboard/templates/register.html` | ✅ **Página de registro (Fase 4)** |
+| `src/dashboard/templates/partials/dfc.html` | ✅ **Partial HTMX — DFC (Fase 4)** |
+| `Dockerfile` | ✅ **Multi-stage build (Fase 4)** |
+| `docker-compose.yml` | ✅ **Produção + dev (Fase 4)** |
 | **Total** | **72 testes — 100% passando** |
 
-## O que foi entregue na Fase 3
+## O que foi entregue na Fase 4
 
-### Dashboard Web (FastAPI + Jinja2 + HTMX + Alpine.js + Chart.js)
+### 1. Autenticação Multiempresa
+- Modelos: `Usuario`, `Sessao`, `UsuarioEmpresa`
+- PBKDF2-SHA256 com salt de 256 bits e 200k iterações
+- Tokens de sessão de 512 bits com expiração de 24h
+- Middleware `requer_autenticacao` com redirect ou 401
+- Páginas `/login` e `/register` com HTMX
+- Associação usuário-empresa com permissões (leitura/escrita/admin)
 
-**Rotas:**
-- `GET /` — Dashboard principal com KPIs, gráficos e relatórios
-- `GET /upload` — Página de upload de ECD com drag & drop
-- `POST /api/upload` — Processamento de arquivo ECD
-- `GET /api/kpis?ecd_id=N` — Cards de KPIs (HTMX partial)
-- `GET /api/graficos?ecd_id=N` — Dados JSON para gráficos
-- `GET /api/balanco?ecd_id=N&visao=hierarquica|publicacao` — Balanço (HTMX)
-- `GET /api/dre?ecd_id=N` — DRE (HTMX)
-- `GET /api/diario?ecd_id=N&pagina=P` — Livro Diário paginado (HTMX)
-- `GET /api/ecds` — Lista de ECDs disponíveis (JSON)
+### 2. Filtros Interativos
+- Painel de filtros colapsável (Alpine.js) no dashboard
+- Filtros: natureza, nível, período, conta, nome da conta, ocultar zerados
+- Aplicação via HTMX sem refresh da página
+- Resultado renderizado diretamente na tab de Balanço
 
-**KPIs:**
-- Ativo Total, Patrimônio Líquido, Endividamento, Resultado Líquido, Margem Líquida, Lançamentos
+### 3. Exportação PDF/XLSX
+- Botões 📄 PDF e 📊 XLSX em cada aba de relatório
+- Rotas `/api/export/pdf` e `/api/export/xlsx`
+- Suporte a Balanço, DRE e DFC
+- PDF via WeasyPrint com templates profissionais
+- XLSX via openpyxl com formatação (cores, zebra, cabeçalho)
 
-**Gráficos (Chart.js):**
-- Evolução Patrimonial (linha: Ativo vs Passivo+PL)
-- Composição do Ativo (pizza/doughnut)
-- DRE Waterfall (barras coloridas: receitas verdes, despesas vermelhas, subtotais azuis)
+### 4. Mais Gráficos
+- **DFC** — gráfico de barras com fluxos operacional, investimento e financiamento
+- **Comparativo entre Empresas** — barras agrupadas (Ativo, PL, Resultado) para até 5 ECDs
+- Dados via `/api/graficos` com chaves `dfc` e `comparativo`
 
-**Interatividade:**
-- HTMX para carregamento parcial sem refresh completo
-- Alpine.js para tabs e drag & drop
-- Seletor de ECD para navegar entre múltiplas importações
-- Paginação no Livro Diário
+### 5. Upload Multi-formato
+- **EFD-Contribuições** — parser streaming com extração de resumo (PIS/COFINS, receita bruta)
+- **ECF** — parser streaming com extração de resumo (IRPJ/CSLL, lucro contábil/tributável)
+- Interface com 3 tabs (ECD, EFD, ECF) usando Alpine.js
+- Drag & drop em cada formato
 
-**Design:**
-- Tema profissional com paleta azul (#0B4F6C)
-- Responsivo (grid adaptativo)
-- Cards, tabelas zebradas, loading spinners
-- Empty state amigável quando não há dados
+### 6. Docker
+- **Dockerfile** multi-stage: builder (poetry/pip) + runtime (slim)
+- Dependências de sistema para WeasyPrint (pango, cairo, glib)
+- Healthcheck via `/api/ecds`
+- **docker-compose.yml** com volume persistente e configuração dev comentada
 
-## Próximos Passos (Fase 4)
+## Próximos Passos (Fase 5)
 
-1. Autenticação multiempresa (login/registro)
-2. Filtros interativos no dashboard (por período, conta, natureza)
-3. Exportação direto do dashboard (PDF/XLSX)
-4. Mais gráficos: DFC, evolução mensal, comparativo interempresas
-5. Upload de múltiplos formatos (EFD-Contribuições, ECF)
-6. Deploy com Docker
+1. Testes de integração com ECDs reais grandes
+2. Período anterior no Balanço/DRE (comparativo)
+3. Suporte a J100/J150 completo na visão de publicação
+4. Fontes customizadas (Inter) no WeasyPrint
+5. Deploy em produção (VPS/cloud)
+6. CI/CD com GitHub Actions
 
 ## Pendências
 
