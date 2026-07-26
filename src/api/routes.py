@@ -1,4 +1,4 @@
-"""Rotas da API REST externa v1 — Fase 7 + Fase 10.
+"""Rotas da API REST externa v1 — Fase 7 + Fase 10 + Fase 12.
 
 Endpoints:
   GET  /api/v1/empresas          — Lista empresas
@@ -15,6 +15,11 @@ Endpoints:
   GET  /api/v1/health            — Health check público
 
 Webhooks (Fase 10):
+
+API Keys (Fase 12):
+  GET    /api/v1/api-keys        — Lista API Keys
+  POST   /api/v1/api-keys        — Cria nova API Key
+  DELETE /api/v1/api-keys/{id}   — Revoga API Key
   GET    /api/v1/webhooks        — Lista webhooks
   POST   /api/v1/webhooks        — Registra webhook
   PUT    /api/v1/webhooks/{id}   — Atualiza webhook
@@ -85,7 +90,7 @@ async def health_check():
 
     return {
         "status": "ok",
-        "version": "0.9.0",
+        "version": "0.10.0",
         "database": db_status,
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
@@ -676,3 +681,49 @@ async def retry_webhooks(
     svc = WebhookService(_get_db_path())
     result = svc.retry_failed(webhook_id=webhook_id)
     return {"status": "ok", **result}
+
+
+# ── API Keys (Fase 12) ──────────────────────────────────────────────────────
+
+from src.api import ApiKeyService
+
+
+@router.get("/api-keys")
+async def listar_api_keys(api_key=Depends(requer_api_key)):
+    """Lista todas as API Keys (sem expor a chave completa)."""
+    svc = ApiKeyService(_get_db_path())
+    keys = svc.listar()
+    return {"total": len(keys), "dados": keys}
+
+
+@router.post("/api-keys")
+async def criar_api_key(
+    payload: dict = Body(...),
+    api_key=Depends(requer_api_key),
+):
+    """Cria uma nova API Key.
+
+    Body:
+        nome: str — nome descritivo da chave
+        dias_expiracao: int | None — dias até expirar (None = sem expiração)
+    """
+    nome = payload.get("nome", "").strip()
+    if not nome:
+        raise HTTPException(status_code=400, detail="Nome é obrigatório")
+
+    dias = payload.get("dias_expiracao")
+    if dias is not None and (not isinstance(dias, int) or dias < 1):
+        raise HTTPException(status_code=400, detail="dias_expiracao deve ser inteiro positivo")
+
+    svc = ApiKeyService(_get_db_path())
+    result = svc.criar(nome=nome, dias_expiracao=dias)
+    return {"status": "ok", **result}
+
+
+@router.delete("/api-keys/{key_id}")
+async def revogar_api_key(key_id: int, api_key=Depends(requer_api_key)):
+    """Revoga (desativa) uma API Key."""
+    svc = ApiKeyService(_get_db_path())
+    if svc.revogar(key_id):
+        return {"status": "ok", "mensagem": f"API Key #{key_id} revogada"}
+    raise HTTPException(status_code=404, detail="API Key não encontrada")

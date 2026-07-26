@@ -4,25 +4,24 @@
 
 ## Objetivo da Alteração Atual
 
-**Fase 11 — Dashboard de Webhooks, Drag & Drop Layout e Multi-Tenancy:**
-1. Dashboard de Webhooks — nova rota `/webhooks` com template Alpine.js + Chart.js, estatísticas agregadas (taxa de sucesso, entregas 24h), tabela de entregas com status e filtros
-2. Retry com exponential backoff — `WebhookService` com retry automático (2s, 4s, 8s...), tracking via `WebhookDelivery`, retry manual via API
-3. Drag & drop de colunas — SortableJS integrado ao template `layout.html`, reordenação persistente em localStorage
-4. Multi-tenancy — modelo `Escritorio` com slug único, `escritorio_id` em `Empresa`, `ECD` e `Usuario`, isolamento por escritório com retrocompatibilidade (null = sem escritório)
-5. Bump v0.9.0 — 183 testes (100% passando)
+**Fase 12 — Middleware Multi-Tenant, API Keys UI e Testes de Carga:**
+1. Middleware de isolamento multi-tenant — `MultiTenantMiddleware` com `contextvars`, `TenantFilter` para queries SQLAlchemy, injeção automática de `escritorio_id` via token de sessão
+2. API Keys UI — nova rota `/api-keys` com template Alpine.js, CRUD completo (`POST/GET/DELETE /api/v1/api-keys`), geração de chave com prefixo `spd_`, exibição única da chave, revogação
+3. Testes de carga — gerador de ECDs sintéticas configuráveis (até 3000 contas, 10000 lançamentos), benchmark de parsing e importação, assertions de performance
+4. Bump v0.10.0 — 214 testes (100% passando)
 
 ## Status Técnico
 
 | Componente | Status |
 |---|---|
-| `pyproject.toml` | ✅ Atualizado (v0.9.0) |
+| `pyproject.toml` | ✅ Atualizado (v0.10.0) |
 | `src/layouts/ecd_v9.yml` | ✅ 30 registros (Fase 1) |
 | `src/parsers/ecd.py` | ✅ Streaming + herança + parse_em_lotes + contar_registros (Fase 9) |
 | `src/parsers/efd.py` | ✅ Parser EFD-Contribuições (Fase 4) |
 | `src/parsers/ecf.py` | ✅ Parser ECF (Fase 4) |
 | `src/db/models.py` | ✅ 21 modelos + Escritorio + WebhookDelivery (Fase 11) |
 | `src/db/repository.py` | ✅ CRUD + consultas (Fase 1) |
-| `src/auth/__init__.py` | ✅ AuthService + middleware (Fase 5) |
+| `src/auth/__init__.py` | ✅ AuthService + MultiTenantMiddleware + TenantFilter + contextvars (Fase 12) |
 | `src/filters/engine.py` | ✅ 16 tipos de filtro (Fase 1) |
 | `src/reports/base.py` | ✅ Convenção de sinais (Fase 1) |
 | `src/reports/balancete.py` | ✅ Balancete F8 (Fase 8) |
@@ -35,11 +34,11 @@
 | `src/reports/templates/*` | ✅ +fontes Inter, +colunas período anterior (Fase 6) |
 | `src/validators/integridade.py` | ✅ 7 validações (Fase 1) |
 | `src/cli.py` | ✅ CLI completa (Fase 1-2) |
-| `src/dashboard/app.py` | ✅ FastAPI app — 40 rotas incluindo /webhooks (Fase 11) |
+| `src/dashboard/app.py` | ✅ FastAPI app — 41 rotas incluindo /api-keys (Fase 12) |
 | `src/dashboard/services.py` | ✅ +multi-ECD, +layout customizável (Fase 7) |
-| `src/dashboard/templates/*` | ✅ Auth, upload, partials, notas, +comparar, +layout com SortableJS, +webhooks (Fase 11) |
-| `src/api/__init__.py` | ✅ API Key auth (Fase 7) |
-| `src/api/routes.py` | ✅ 17 endpoints REST v1 + webhooks dashboard/deliveries/retry (Fase 11) |
+| `src/dashboard/templates/*` | ✅ Auth, upload, partials, notas, +comparar, +layout com SortableJS, +webhooks, +api_keys (Fase 12) |
+| `src/api/__init__.py` | ✅ API Key auth + ApiKeyService (Fase 12) |
+| `src/api/routes.py` | ✅ 20 endpoints REST v1 + api-keys CRUD (Fase 12) |
 | `src/api/graphql.py` | ✅ GraphQL API v2 — 14 queries (Fase 9) |
 | `src/webhooks/__init__.py` | ✅ WebhookService + retry backoff + WebhookDelivery tracking (Fase 11) |
 | `src/watchdog.py` | ✅ Importação automática por polling (Fase 7) |
@@ -48,48 +47,43 @@
 | `docker-compose.yml` | ✅ Produção com nginx + certbot (Fase 7) |
 | `nginx.conf` | ✅ Proxy reverso + SSL hardening (Fase 7) |
 | `.github/workflows/ci.yml` | ✅ CI/CD pipeline (Fase 5) |
-| `tests/test_fase11.py` | ✅ 21 testes (Fase 11) |
-| **Total** | **183 testes — 100% passando** |
+| `tests/test_fase12.py` | ✅ 31 testes (Fase 12) |
+| **Total** | **214 testes — 100% passando** |
 
-## O que foi entregue na Fase 11
+## O que foi entregue na Fase 12
 
-### 1. Dashboard de Webhooks (`/webhooks`)
-- Template `webhooks.html` com Alpine.js + Chart.js (gráfico doughnut sucesso/falha)
-- Estatísticas agregadas: total de webhooks, ativos, taxa de sucesso, entregas 24h
-- Tabela de entregas recentes com status (pending/success/failed/retrying), HTTP code, tentativa
-- Tabela de webhooks registrados com total de envios e falhas
-- API endpoints: `GET /api/v1/webhooks/dashboard`, `GET /api/v1/webhooks/deliveries`, `POST /api/v1/webhooks/retry`
+### 1. Middleware de Isolamento Multi-Tenant
+- `MultiTenantMiddleware` — middleware ASGI que extrai `escritorio_id` do token de sessão e injeta no `contextvars`
+- `TenantFilter` — aplica `WHERE escritorio_id = ?` automaticamente em queries SQLAlchemy (Empresa, ECD, PlanoConta, Lancamento, Partida)
+- `set_tenant_id()` / `get_tenant_id()` — API de contexto thread-safe e async-safe
+- `requer_autenticacao` atualizado para definir tenant automaticamente no request
+- Retrocompatibilidade: sem tenant (None) = sem filtro, dados existentes continuam funcionando
 
-### 2. Retry com Exponential Backoff
-- `WebhookService._enviar_com_retry()` — até N tentativas com backoff 2s, 4s, 8s, 16s, 32s (máx 60s)
-- Modelo `WebhookDelivery` — histórico completo de cada tentativa (request/response body, status code, erro)
-- `WebhookRegistration.max_retries` e `total_falhas` configuráveis
-- `retry_failed()` — reenvio manual de entregas com falha
+### 2. API Keys UI (`/api-keys`)
+- Template `api_keys.html` com Alpine.js — formulário de criação, lista de chaves, revogação
+- `ApiKeyService` — criar (com expiração opcional), listar (sem expor chave), revogar, excluir
+- Endpoints REST: `GET /api/v1/api-keys`, `POST /api/v1/api-keys`, `DELETE /api/v1/api-keys/{id}`
+- Chave exibida apenas uma vez na criação (formato `spd_<64 hex chars>`)
+- Navbar atualizada em todos os templates com link para API Keys
 
-### 3. Drag & Drop de Colunas no Layout
-- SortableJS integrado ao `layout.html` com Alpine.js
-- Reordenação via drag handle (⋮⋮) com animação e feedback visual
-- Persistência da ordem e visibilidade em localStorage
-- Botão "Restaurar Padrão" funcional
+### 3. Testes de Carga e Stress
+- Gerador de ECDs sintéticas com tamanho configurável (contas, lançamentos)
+- Benchmark de parsing: 100 contas/500 lançamentos < 5s, 500/2000 < 15s, 3000/10000 < 60s
+- Benchmark de importação completa no banco: 200 contas/1000 lançamentos < 10s
+- Teste de contagem de registros em ECD grande
+- Testes de integridade do modelo Escritorio (slug único, relações)
 
-### 4. Multi-Tenancy
-- Modelo `Escritorio` (id, nome, slug único, cnpj, ativo)
-- `escritorio_id` (nullable) em `Empresa`, `ECD` e `Usuario`
-- Retrocompatibilidade: dados sem escritório continuam funcionando
-- Base para isolamento completo entre escritórios contábeis
-
-## Próximos Passos (Fase 12+)
+## Próximos Passos (Fase 13+)
 
 1. Deploy real em VPS/cloud com domínio e SSL
 2. Suporte a ECDs reais de clientes (testes com arquivos >100MB)
-3. Middleware de isolamento multi-tenant (filtro automático por escritório)
-4. Integração nativa com sistemas de terceiros (Domínio, Questor, Alterdata)
-5. API de geração de API Keys com UI
-6. Testes de carga e stress com ECDs grandes
+3. Integração nativa com sistemas de terceiros (Domínio, Questor, Alterdata)
+4. Testes end-to-end com Playwright (dashboard, upload, exportação)
+5. Rate limiting nas API Keys
+6. Logs de auditoria (quem acessou o quê, quando)
 
 ## Pendências
 
 - Deploy real em VPS/cloud (configuração de domínio + SSL)
 - Suporte a ECDs reais de clientes (arquivos grandes)
-- Middleware de isolamento multi-tenant ativo
 - Integração com sistemas de terceiros

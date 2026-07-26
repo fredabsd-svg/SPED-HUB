@@ -1,8 +1,10 @@
-"""API REST externa versionada — Fase 7.
+"""API REST externa versionada — Fase 7 + Fase 12.
 
 Autenticação por API Key (X-API-Key header).
 Rotas versionadas: /api/v1/...
 OpenAPI documentada com tags e schemas.
+
+Fase 12: +CRUD de API Keys com geração, listagem, revogação e UI.
 """
 
 import datetime
@@ -82,3 +84,107 @@ async def requer_api_key(request: Request, db_path: str = "sped_hub.db"):
         return api_key
     finally:
         session.close()
+
+
+# ── API Key Service (Fase 12) ───────────────────────────────────────────────
+
+
+class ApiKeyService:
+    """Serviço de gerenciamento de API Keys."""
+
+    def __init__(self, db_path: str = "sped_hub.db"):
+        self.db_path = db_path
+
+    def _get_session(self) -> Session:
+        engine = criar_engine(self.db_path)
+        init_db(engine)
+        return get_session(engine)
+
+    def criar(self, nome: str, dias_expiracao: int | None = None) -> dict:
+        """Cria uma nova API Key.
+
+        Returns:
+            dict com id, nome, prefixo, chave_completa (exibida uma única vez),
+            criado_em, expira_em.
+        """
+        chave_completa, key_hash = gerar_api_key()
+        prefixo = chave_completa[:11]  # "spd_" + 7 chars
+
+        expira_em = None
+        if dias_expiracao:
+            expira_em = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=dias_expiracao)
+
+        session = self._get_session()
+        try:
+            api_key = ApiKey(
+                nome=nome,
+                key_hash=key_hash,
+                prefixo=prefixo,
+                ativo=True,
+                expira_em=expira_em,
+            )
+            session.add(api_key)
+            session.commit()
+            session.refresh(api_key)
+
+            return {
+                "id": api_key.id,
+                "nome": api_key.nome,
+                "prefixo": api_key.prefixo,
+                "chave": chave_completa,
+                "criado_em": api_key.criado_em.isoformat() if api_key.criado_em else None,
+                "expira_em": api_key.expira_em.isoformat() if api_key.expira_em else None,
+                "ativo": api_key.ativo,
+            }
+        finally:
+            session.close()
+
+    def listar(self) -> list[dict]:
+        """Lista todas as API Keys (sem expor a chave completa)."""
+        session = self._get_session()
+        try:
+            keys = session.execute(
+                select(ApiKey).order_by(ApiKey.criado_em.desc())
+            ).scalars().all()
+
+            return [
+                {
+                    "id": k.id,
+                    "nome": k.nome,
+                    "prefixo": k.prefixo,
+                    "ativo": k.ativo,
+                    "criado_em": k.criado_em.isoformat() if k.criado_em else None,
+                    "expira_em": k.expira_em.isoformat() if k.expira_em else None,
+                    "ultimo_uso": k.ultimo_uso.isoformat() if k.ultimo_uso else None,
+                    "total_requisicoes": k.total_requisicoes or 0,
+                }
+                for k in keys
+            ]
+        finally:
+            session.close()
+
+    def revogar(self, key_id: int) -> bool:
+        """Revoga (desativa) uma API Key."""
+        session = self._get_session()
+        try:
+            k = session.get(ApiKey, key_id)
+            if not k:
+                return False
+            k.ativo = False
+            session.commit()
+            return True
+        finally:
+            session.close()
+
+    def excluir(self, key_id: int) -> bool:
+        """Exclui permanentemente uma API Key."""
+        session = self._get_session()
+        try:
+            k = session.get(ApiKey, key_id)
+            if not k:
+                return False
+            session.delete(k)
+            session.commit()
+            return True
+        finally:
+            session.close()

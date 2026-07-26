@@ -1,5 +1,9 @@
-"""Módulo de autenticação — login, registro, sessões e middleware."""
+"""Módulo de autenticação — login, registro, sessões, middleware e multi-tenancy.
 
+Fase 12: +MultiTenantMiddleware com isolamento por escritório via contextvars.
+"""
+
+import contextvars
 import datetime
 import logging
 from functools import wraps
@@ -17,6 +21,134 @@ logger = logging.getLogger("sped-hub.auth")
 # Duração da sessão: 24 horas
 SESSAO_DURACAO_HORAS = 24
 
+# ── Multi-Tenancy Context (Fase 12) ────────────────────────────────────────
+
+# ContextVar para o escritório do request atual (thread-safe e async-safe)
+_tenant_context: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "sped_hub_tenant_id", default=None
+)
+
+
+def get_tenant_id() -> int | None:
+    """Retorna o escritorio_id do contexto atual, ou None se não houver isolamento."""
+    return _tenant_context.get()
+
+
+def set_tenant_id(escritorio_id: int | None) -> None:
+    """Define o escritorio_id no contexto atual."""
+    _tenant_context.set(escritorio_id)
+
+
+class TenantFilter:
+    """Filtro de queries por tenant — aplica WHERE escritorio_id = ? quando ativo.
+
+    Uso:
+        tf = TenantFilter()
+        query = tf.aplicar(query, ECD)  # adiciona join/filtro conforme o modelo
+    """
+
+    @staticmethod
+    def aplicar(stmt, model_class, tenant_id: int | None = None):
+        """Aplica filtro de tenant a uma query SQLAlchemy.
+
+        Args:
+            stmt: query SQLAlchemy (select)
+            model_class: classe do modelo principal da query
+            tenant_id: ID do escritório (se None, usa get_tenant_id())
+
+        Returns:
+            query com filtro de tenant aplicado (ou a original se tenant_id for None)
+        """
+        tid = tenant_id if tenant_id is not None else get_tenant_id()
+        if tid is None:
+            return stmt
+
+        from src.db.models import ECD, Empresa, Escritorio, Usuario
+
+        # Modelos com escritorio_id direto
+        if model_class in (Empresa, Usuario):
+            return stmt.where(model_class.escritorio_id == tid)
+
+        # ECD: join com Empresa para filtrar por escritorio_id
+        if model_class is ECD:
+            return stmt.join(Empresa, ECD.empresa_id == Empresa.id).where(
+                Empresa.escritorio_id == tid
+            )
+
+        # Para outros modelos que pertencem a uma ECD (PlanoConta, Lancamento, etc.)
+        # o filtro é aplicado via ECD → Empresa
+        if hasattr(model_class, "ecd_id"):
+            return stmt.join(ECD, model_class.ecd_id == ECD.id).join(
+                Empresa, ECD.empresa_id == Empresa.id
+            ).where(Empresa.escritorio_id == tid)
+
+        # Para modelos que pertencem a Lancamento (Partida)
+        if hasattr(model_class, "lancamento_id"):
+            from src.db.models import Lancamento
+            return (
+                stmt.join(Lancamento, model_class.lancamento_id == Lancamento.id)
+                .join(ECD, Lancamento.ecd_id == ECD.id)
+                .join(Empresa, ECD.empresa_id == Empresa.id)
+                .where(Empresa.escritorio_id == tid)
+            )
+
+        return stmt
+
+
+class MultiTenantMiddleware:
+    """Middleware ASGI que injeta o tenant_id do usuário autenticado no contexto.
+
+    Deve ser registrado antes das rotas que precisam de isolamento.
+    """
+
+    def __init__(self, app, db_path: str = "sped_hub.db"):
+        self.app = app
+        self.db_path = db_path
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        # Extrai token do cookie ou header
+        request = Request(scope, receive)
+        token = request.cookies.get("sped_hub_session")
+        if not token:
+            auth_header = dict(scope.get("headers", [])).get(b"authorization", b"").decode()
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+
+        # Resolve tenant do usuário
+        tenant_id = None
+        if token:
+            tenant_id = self._resolve_tenant(token)
+
+        # Define no contexto
+        token_ctx = _tenant_context.set(tenant_id)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _tenant_context.reset(token_ctx)
+
+    def _resolve_tenant(self, token: str) -> int | None:
+        """Resolve o escritorio_id a partir do token de sessão."""
+        try:
+            engine = criar_engine(self.db_path)
+            init_db(engine)
+            session = get_session(engine)
+            try:
+                sessao = session.execute(
+                    select(Sessao).where(Sessao.token == token)
+                ).scalar_one_or_none()
+                if sessao and not sessao.expirado:
+                    usuario = sessao.usuario
+                    return usuario.escritorio_id
+            finally:
+                session.close()
+        except Exception:
+            logger.exception("Erro ao resolver tenant do token")
+        return None
+
 
 class AuthService:
     """Serviço de autenticação."""
@@ -29,7 +161,7 @@ class AuthService:
         init_db(engine)
         return get_session(engine)
 
-    def registrar(self, email: str, nome: str, senha: str) -> Usuario:
+    def registrar(self, email: str, nome: str, senha: str, escritorio_id: int | None = None) -> Usuario:
         """Registra um novo usuário."""
         session = self._get_session()
         try:
@@ -45,6 +177,7 @@ class AuthService:
                 nome=nome,
                 senha_hash=senha_hash,
                 salt=salt,
+                escritorio_id=escritorio_id,
             )
             session.add(usuario)
             session.commit()
@@ -183,6 +316,8 @@ def requer_autenticacao(redirect: bool = True):
                 raise HTTPException(status_code=401, detail="Não autenticado")
             # Injeta usuário no request
             request.state.usuario = usuario
+            # Define tenant no contexto (Fase 12)
+            set_tenant_id(usuario.escritorio_id)
             return await func(request, *args, **kwargs)
         return wrapper
     return decorator

@@ -1113,3 +1113,27 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# ── Rotas: Fase 12 — API Keys UI ────────────────────────────────────────────
+
+@app.get("/api-keys", response_class=HTMLResponse)
+async def api_keys_page(request: Request):
+    """Página de gerenciamento de API Keys."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return HTMLResponse(jinja_env.get_template("api_keys.html").render({
+        "request": request,
+        "usuario": usuario,
+        "current_page": "api_keys",
+    }))
+
+
+def main():
+    import uvicorn
+    uvicorn.run("src.dashboard.app:app", host="0.0.0.0", port=8000, reload=True)
+
+
+if __name__ == "__main__":
+    main()
