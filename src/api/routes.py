@@ -90,7 +90,7 @@ async def health_check():
 
     return {
         "status": "ok",
-        "version": "0.10.0",
+        "version": "0.11.0",
         "database": db_status,
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
@@ -727,3 +727,130 @@ async def revogar_api_key(key_id: int, api_key=Depends(requer_api_key)):
     if svc.revogar(key_id):
         return {"status": "ok", "mensagem": f"API Key #{key_id} revogada"}
     raise HTTPException(status_code=404, detail="API Key não encontrada")
+
+
+# ── Rate Limiting (Fase 13) ────────────────────────────────────────────────
+
+from src.ratelimit import RateLimitService, get_limiter
+
+
+@router.get("/api-keys/{key_id}/rate-limit")
+async def obter_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
+    """Obtém a configuração de rate limit de uma API Key."""
+    svc = RateLimitService(_get_db_path())
+    config = svc.obter(key_id)
+    if config is None:
+        return {
+            "api_key_id": key_id,
+            "limite": 100,
+            "janela": 60,
+            "default": True,
+            "mensagem": "Usando configuração padrão (100 req/60s)",
+        }
+    return {**config, "default": False}
+
+
+@router.put("/api-keys/{key_id}/rate-limit")
+async def configurar_rate_limit(
+    key_id: int,
+    payload: dict = Body(...),
+    api_key=Depends(requer_api_key),
+):
+    """Configura o rate limit de uma API Key.
+
+    Body:
+        limite: int — máximo de requisições por janela
+        janela: int — duração da janela em segundos
+    """
+    limite = payload.get("limite")
+    janela = payload.get("janela")
+
+    if limite is None or janela is None:
+        raise HTTPException(status_code=400, detail="limite e janela são obrigatórios")
+
+    if not isinstance(limite, int) or limite < 1:
+        raise HTTPException(status_code=400, detail="limite deve ser inteiro >= 1")
+    if not isinstance(janela, int) or janela < 1:
+        raise HTTPException(status_code=400, detail="janela deve ser inteiro >= 1")
+
+    svc = RateLimitService(_get_db_path())
+    try:
+        result = svc.configurar(key_id, limite, janela)
+        return {"status": "ok", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/api-keys/{key_id}/rate-limit")
+async def remover_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
+    """Remove a configuração de rate limit (volta ao padrão)."""
+    svc = RateLimitService(_get_db_path())
+    if svc.remover(key_id):
+        return {"status": "ok", "mensagem": f"Rate limit da API Key #{key_id} removido (padrão)"}
+    raise HTTPException(status_code=404, detail="Configuração de rate limit não encontrada")
+
+
+@router.get("/api-keys/{key_id}/rate-limit/status")
+async def status_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
+    """Retorna o status atual do rate limit (contador em tempo real)."""
+    limiter = get_limiter(_get_db_path())
+    info = limiter.get_info(key_id)
+    return {
+        "api_key_id": key_id,
+        "limite": info.limite,
+        "janela": info.janela,
+        "requisicoes_restantes": info.requisicoes_restantes,
+        "reset_em_segundos": info.reset_em,
+        "limite_excedido": info.limite_excedido,
+    }
+
+
+# ── Auditoria (Fase 13) ────────────────────────────────────────────────────
+
+from src.audit import AuditService
+
+
+@router.get("/audit/logs")
+async def listar_audit_logs(
+    api_key=Depends(requer_api_key),
+    usuario_id: int | None = Query(None),
+    acao: str | None = Query(None),
+    limite: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Lista logs de auditoria com filtros opcionais."""
+    svc = AuditService(_get_db_path())
+    logs = svc.listar(
+        usuario_id=usuario_id,
+        acao=acao,
+        limite=limite,
+        offset=offset,
+    )
+    total = svc.contar(usuario_id=usuario_id, acao=acao)
+    return {
+        "total": total,
+        "limite": limite,
+        "offset": offset,
+        "dados": logs,
+    }
+
+
+@router.get("/audit/stats")
+async def audit_stats(
+    api_key=Depends(requer_api_key),
+    horas: int = Query(24, ge=1, le=720),
+):
+    """Estatísticas de auditoria das últimas N horas."""
+    svc = AuditService(_get_db_path())
+    return svc.estatisticas(horas=horas)
+
+
+@router.post("/audit/limpar")
+async def limpar_audit_logs(
+    api_key=Depends(requer_api_key),
+    dias: int = Query(90, ge=1, le=3650),
+):
+    """Remove logs de auditoria mais antigos que o número de dias especificado."""
+    svc = AuditService(_get_db_path())
+    removidos = svc.limpar_antigos(dias=dias)
+    return {"status": "ok", "removidos": removidos, "mensagem": f"{removidos} logs removidos (> {dias} dias)"}

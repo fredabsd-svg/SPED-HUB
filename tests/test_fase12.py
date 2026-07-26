@@ -251,7 +251,7 @@ class TestAuthServiceTenant:
             senha="senha123",
             escritorio_id=escritorio.id,
         )
-        usuario, token = auth.login("contador@teste.com", "senha123")
+        usuario, token, _, _ = auth.login("contador@teste.com", "senha123")
         assert token is not None
         assert len(token) == 128  # 64 bytes hex
         # auth.login() fecha a sessão interna — consultamos direto no banco

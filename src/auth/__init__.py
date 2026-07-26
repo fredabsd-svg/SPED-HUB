@@ -217,7 +217,11 @@ class AuthService:
             usuario.ultimo_login = agora
             session.commit()
 
-            return usuario, token
+            # Captura dados antes de fechar a sessão
+            usuario_id = usuario.id
+            usuario_email = usuario.email
+
+            return usuario, token, usuario_id, usuario_email
         finally:
             session.close()
 

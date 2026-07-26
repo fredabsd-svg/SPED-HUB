@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Auditoria — SPED-HUB{% endblock %}
+
+{% block content %}
+<div x-data="auditApp()" x-init="init()">
+    <!-- Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <div>
+            <h1 style="font-size: 1.5rem; font-weight: 700; color: var(--gray-900);">📋 Logs de Auditoria</h1>
+            <p style="color: var(--gray-500); font-size: .85rem; margin-top: 4px;">Rastreabilidade de acessos e ações</p>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-outline btn-sm" @click="carregarStats()">🔄 Atualizar</button>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="kpi-grid" x-show="stats" style="margin-bottom: 24px;">
+        <div class="kpi-card">
+            <div class="kpi-icon">📊</div>
+            <div class="kpi-titulo">Total de Eventos (24h)</div>
+            <div class="kpi-valor" x-text="stats?.total_eventos ?? 0"></div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon">👤</div>
+            <div class="kpi-titulo">Usuários Únicos</div>
+            <div class="kpi-valor" x-text="stats?.usuarios_unicos ?? 0"></div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon">🌐</div>
+            <div class="kpi-titulo">IPs Únicos</div>
+            <div class="kpi-valor" x-text="stats?.ips_unicos ?? 0"></div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-icon">⚠️</div>
+            <div class="kpi-titulo">Erros (4xx/5xx)</div>
+            <div class="kpi-valor" style="color: var(--danger);" x-text="stats?.erros ?? 0"></div>
+        </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="card" style="margin-bottom: 16px;">
+        <div class="card-body" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <select class="form-select" x-model="filtroAcao" @change="carregarLogs()" style="min-width: 200px;">
+                <option value="">Todas as ações</option>
+                <option value="api.acesso">API Acesso</option>
+                <option value="api.rate_limited">Rate Limited</option>
+                <option value="auth.login">Login</option>
+                <option value="auth.logout">Logout</option>
+                <option value="auth.register">Registro</option>
+                <option value="ecd.upload">Upload ECD</option>
+                <option value="relatorio.export">Exportação</option>
+                <option value="apikey.create">API Key Criada</option>
+                <option value="apikey.revoke">API Key Revogada</option>
+                <option value="webhook.create">Webhook Criado</option>
+                <option value="webhook.delete">Webhook Removido</option>
+            </select>
+            <button class="btn btn-primary btn-sm" @click="carregarLogs()">🔍 Filtrar</button>
+            <span style="margin-left: auto; color: var(--gray-400); font-size: .8rem;" x-text="totalLogs + ' registros'"></span>
+        </div>
+    </div>
+
+    <!-- Tabela de Logs -->
+    <div class="card">
+        <div class="card-header">
+            Eventos de Auditoria
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data/Hora</th>
+                        <th>Ação</th>
+                        <th>Recurso</th>
+                        <th>Método</th>
+                        <th>Usuário</th>
+                        <th>IP</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="log in logs" :key="log.id">
+                        <tr>
+                            <td class="font-mono" x-text="formatarData(log.criado_em)"></td>
+                            <td>
+                                <span class="badge" x-text="log.acao"
+                                      style="padding: 2px 8px; border-radius: 4px; font-size: .75rem; font-weight: 600;"
+                                      :style="corAcao(log.acao)"></span>
+                            </td>
+                            <td class="font-mono" x-text="log.recurso?.substring(0, 50)"></td>
+                            <td x-text="log.metodo || '—'"></td>
+                            <td x-text="log.usuario_email || (log.api_key_id ? 'API Key #' + log.api_key_id : '—')"></td>
+                            <td class="font-mono" x-text="log.ip || '—'"></td>
+                            <td>
+                                <span x-text="log.status_code || '—'"
+                                      :style="log.status_code >= 400 ? 'color: var(--danger); font-weight: 600;' : 'color: var(--success);'"
+                                      x-show="log.status_code"></span>
+                                <span x-show="!log.status_code" style="color: var(--gray-400);">—</span>
+                            </td>
+                        </tr>
+                    </template>
+                    <tr x-show="logs.length === 0">
+                        <td colspan="7" style="text-align: center; padding: 32px; color: var(--gray-400);">
+                            Nenhum log de auditoria encontrado.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Paginação -->
+        <div class="pagination" x-show="totalLogs > limite">
+            <button @click="paginaAnterior()" :disabled="offset === 0">← Anterior</button>
+            <span style="padding: 6px 12px; font-size: .8rem; color: var(--gray-500);">
+                Página <span x-text="Math.floor(offset / limite) + 1"></span>
+            </span>
+            <button @click="proximaPagina()" :disabled="offset + limite >= totalLogs">Próxima →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+function auditApp() {
+    return {
+        stats: null,
+        logs: [],
+        totalLogs: 0,
+        filtroAcao: '',
+        offset: 0,
+        limite: 50,
+
+        async init() {
+            await Promise.all([this.carregarStats(), this.carregarLogs()]);
+        },
+
+        async carregarStats() {
+            try {
+                const resp = await fetch('/api/audit/stats?horas=24');
+                if (resp.ok) this.stats = await resp.json();
+            } catch (e) { console.error('Erro ao carregar stats:', e); }
+        },
+
+        async carregarLogs() {
+            try {
+                let url = `/api/audit/logs?limite=${this.limite}&offset=${this.offset}`;
+                if (this.filtroAcao) url += `&acao=${this.filtroAcao}`;
+                const resp = await fetch(url);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.logs = data.dados;
+                    this.totalLogs = data.total;
+                }
+            } catch (e) { console.error('Erro ao carregar logs:', e); }
+        },
+
+        paginaAnterior() {
+            this.offset = Math.max(0, this.offset - this.limite);
+            this.carregarLogs();
+        },
+
+        proximaPagina() {
+            if (this.offset + this.limite < this.totalLogs) {
+                this.offset += this.limite;
+                this.carregarLogs();
+            }
+        },
+
+        formatarData(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleString('pt-BR', { timeZone: 'UTC' });
+        },
+
+        corAcao(acao) {
+            const cores = {
+                'auth.login': 'background: #DBEAFE; color: #1E40AF;',
+                'auth.logout': 'background: #E0E7FF; color: #3730A3;',
+                'auth.register': 'background: #D1FAE5; color: #065F46;',
+                'ecd.upload': 'background: #FEF3C7; color: #92400E;',
+                'relatorio.export': 'background: #FCE7F3; color: #9D174D;',
+                'apikey.create': 'background: #EDE9FE; color: #5B21B6;',
+                'apikey.revoke': 'background: #FEE2E2; color: #991B1B;',
+                'api.rate_limited': 'background: #FED7AA; color: #9A3412;',
+            };
+            return cores[acao] || 'background: var(--gray-100); color: var(--gray-600);';
+        },
+    };
+}
+</script>
+{% endblock %}

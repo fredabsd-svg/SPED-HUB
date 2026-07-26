@@ -1,10 +1,11 @@
-"""API REST externa versionada — Fase 7 + Fase 12.
+"""API REST externa versionada — Fase 7 + Fase 12 + Fase 13.
 
 Autenticação por API Key (X-API-Key header).
 Rotas versionadas: /api/v1/...
 OpenAPI documentada com tags e schemas.
 
 Fase 12: +CRUD de API Keys com geração, listagem, revogação e UI.
+Fase 13: +Rate limiting, +Logs de auditoria, +Configuração de rate limit por API Key.
 """
 
 import datetime
@@ -15,10 +16,13 @@ from functools import wraps
 from typing import Callable
 
 from fastapi import Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.models import ApiKey, criar_engine, get_session, init_db
+from src.ratelimit import RateLimiter, RateLimitService, get_limiter
+from src.audit import AuditService, get_audit_service
 
 logger = logging.getLogger("sped-hub.api")
 
@@ -53,8 +57,14 @@ async def get_api_key(request: Request) -> str | None:
     return request.headers.get("X-API-Key")
 
 
-async def requer_api_key(request: Request, db_path: str = "sped_hub.db"):
-    """Dependency que valida API Key e retorna o registro."""
+async def requer_api_key(request: Request, db_path: str = None):
+    if db_path is None:
+        import os as _os
+        db_path = _os.environ.get("SPED_HUB_DB", "sped_hub.db")
+    """Dependency que valida API Key, aplica rate limit e registra auditoria.
+
+    Retorna o registro da API Key se válida.
+    """
     chave = await get_api_key(request)
     if not chave:
         raise HTTPException(status_code=401, detail="X-API-Key header obrigatório")
@@ -75,6 +85,36 @@ async def requer_api_key(request: Request, db_path: str = "sped_hub.db"):
 
         if api_key.expira_em and api_key.expira_em < datetime.datetime.now(datetime.UTC):
             raise HTTPException(status_code=403, detail="API Key expirada")
+
+        # ── Rate Limiting (Fase 13) ──
+        limiter = get_limiter(db_path)
+        permitido, info = limiter.verificar(api_key.id)
+        if not permitido:
+            # Registra tentativa bloqueada
+            audit = get_audit_service(db_path)
+            audit.registrar(
+                acao="api.rate_limited",
+                recurso=str(request.url.path),
+                api_key_id=api_key.id,
+                metodo=request.method,
+                ip=request.client.host if request.client else None,
+                status_code=429,
+                detalhes={"limite": info.limite, "janela": info.janela},
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded: {info.limite} requests per {info.janela}s. "
+                       f"Retry in {info.reset_em}s.",
+                headers={
+                    "X-RateLimit-Limit": str(info.limite),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(info.reset_em),
+                    "Retry-After": str(info.reset_em),
+                },
+            )
+
+        # Adiciona headers de rate limit no request state para o middleware
+        request.state.rate_limit_info = info
 
         # Registra uso
         api_key.ultimo_uso = datetime.datetime.now(datetime.UTC)
@@ -127,6 +167,14 @@ class ApiKeyService:
             session.commit()
             session.refresh(api_key)
 
+            # Registra auditoria
+            audit = get_audit_service(self.db_path)
+            audit.registrar(
+                acao="apikey.create",
+                recurso=f"API Key #{api_key.id} ({nome})",
+                detalhes={"nome": nome, "prefixo": prefixo},
+            )
+
             return {
                 "id": api_key.id,
                 "nome": api_key.nome,
@@ -172,6 +220,14 @@ class ApiKeyService:
                 return False
             k.ativo = False
             session.commit()
+
+            # Registra auditoria
+            audit = get_audit_service(self.db_path)
+            audit.registrar(
+                acao="apikey.revoke",
+                recurso=f"API Key #{key_id} ({k.nome})",
+            )
+
             return True
         finally:
             session.close()

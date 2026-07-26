@@ -2,6 +2,7 @@
 
 Todas as tabelas de dados têm chave lógica (CNPJ, periodo_ini, periodo_fin).
 Fase 11: +Escritorio (multi-tenancy), +WebhookDelivery (dashboard de webhooks).
+Fase 13: +RateLimitConfig, +AuditLog (rate limiting e auditoria).
 """
 
 import datetime
@@ -10,6 +11,7 @@ import json
 import secrets
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -125,7 +127,11 @@ class Sessao(Base):
 
     @property
     def expirado(self) -> bool:
-        return datetime.datetime.now(datetime.UTC) > self.expira_em
+        agora = datetime.datetime.now(datetime.UTC)
+        expira = self.expira_em
+        if expira.tzinfo is None:
+            expira = expira.replace(tzinfo=datetime.UTC)
+        return agora > expira
 
 
 class UsuarioEmpresa(Base):
@@ -494,6 +500,74 @@ class ApiKey(Base):
 
     def __repr__(self):
         return f"<ApiKey {self.nome} ({self.prefixo}...)>"
+
+
+# ── Rate Limiting (Fase 13) ────────────────────────────────────────────────
+
+
+class RateLimitConfig(Base):
+    """Configuração de rate limit por API Key.
+
+    Permite definir limites personalizados por chave: número máximo de
+    requisições por janela de tempo (em segundos).
+    """
+
+    __tablename__ = "rate_limit_configs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    api_key_id: Mapped[int] = mapped_column(
+        ForeignKey("api_keys.id"), nullable=False, unique=True, index=True
+    )
+    limite: Mapped[int] = mapped_column(nullable=False, default=100)  # máx req por janela
+    janela: Mapped[int] = mapped_column(nullable=False, default=60)  # janela em segundos
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    atualizado_em: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    def __repr__(self):
+        return f"<RateLimitConfig key={self.api_key_id} {self.limite}/{self.janela}s>"
+
+
+# ── Logs de Auditoria (Fase 13) ────────────────────────────────────────────
+
+
+class AuditLog(Base):
+    """Registro de auditoria — rastreia quem acessou o quê e quando.
+
+    Captura automaticamente acessos a endpoints da API e ações sensíveis
+    do dashboard (login, upload, exportação, etc.).
+    """
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int | None] = mapped_column(index=True)
+    usuario_email: Mapped[str | None] = mapped_column(String(255))
+    api_key_id: Mapped[int | None] = mapped_column(index=True)
+    acao: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    recurso: Mapped[str] = mapped_column(String(255), nullable=False)
+    metodo: Mapped[str | None] = mapped_column(String(10))
+    ip: Mapped[str | None] = mapped_column(String(45))
+    status_code: Mapped[int | None] = mapped_column()
+    detalhes: Mapped[str | None] = mapped_column(Text)  # JSON
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), index=True
+    )
+
+    def __repr__(self):
+        return f"<AuditLog {self.acao} {self.recurso} {self.criado_em}>"
+
+    def get_detalhes(self) -> dict:
+        if self.detalhes:
+            try:
+                return json.loads(self.detalhes)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return {}
+
+    def set_detalhes(self, detalhes: dict):
+        self.detalhes = json.dumps(detalhes, ensure_ascii=False, default=str)
 
 
 # ── Webhooks (Fase 10) ─────────────────────────────────────────────────────

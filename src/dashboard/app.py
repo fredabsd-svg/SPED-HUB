@@ -65,6 +65,8 @@ from src.reports.base import fmt_moeda, fmt_data
 from src.auth import AuthService, init_auth, get_auth, get_usuario_atual, requer_autenticacao
 from src.filters.engine import FilterCriteria
 from src.api.routes import router as api_v1_router
+from src.audit import AuditService, init_audit_service, get_audit_service
+from src.ratelimit import init_limiter
 from src.api.graphql import graphql_router
 
 logging.basicConfig(level=logging.INFO)
@@ -72,7 +74,7 @@ logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.9.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.11.0")
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
@@ -94,6 +96,8 @@ if not DB_PATH.is_absolute():
 
 # Inicializa auth e banco
 init_auth(str(DB_PATH))
+init_audit_service(str(DB_PATH))
+init_limiter(str(DB_PATH))
 engine = criar_engine(str(DB_PATH))
 init_db(engine)
 
@@ -130,12 +134,23 @@ async def api_login(request: Request):
 
     try:
         auth = get_auth()
-        usuario, token = auth.login(
+        usuario, token, usuario_id, usuario_email = auth.login(
             email=email,
             senha=senha,
             ip=request.client.host if request.client else "",
             user_agent=request.headers.get("User-Agent", ""),
         )
+        # Registra auditoria
+        svc = get_audit_service()
+        svc.registrar(
+            acao="auth.login",
+            recurso=f"Login: {email}",
+            usuario_id=usuario_id,
+            usuario_email=usuario_email,
+            ip=request.client.host if request.client else None,
+            status_code=200,
+        )
+
         response = JSONResponse({"status": "ok", "redirect": "/"})
         response.set_cookie(
             key="sped_hub_session",
@@ -146,6 +161,16 @@ async def api_login(request: Request):
         )
         return response
     except ValueError as e:
+        # Registra tentativa falha
+        svc = get_audit_service()
+        svc.registrar(
+            acao="auth.login",
+            recurso=f"Login falho: {email}",
+            usuario_email=email,
+            ip=request.client.host if request.client else None,
+            status_code=401,
+            detalhes={"erro": str(e)},
+        )
         return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=401)
 
 
@@ -153,8 +178,22 @@ async def api_login(request: Request):
 async def logout(request: Request):
     """Logout."""
     token = request.cookies.get("sped_hub_session")
+    usuario = None
     if token:
+        usuario = get_auth().validar_token(token)
         get_auth().logout(token)
+    # Captura dados antes do objeto ser detached
+    uid = usuario.id if usuario else None
+    uemail = usuario.email if usuario else None
+    # Registra auditoria
+    svc = get_audit_service()
+    svc.registrar(
+        acao="auth.logout",
+        recurso="Logout",
+        usuario_id=uid,
+        usuario_email=uemail,
+        ip=request.client.host if request.client else None,
+    )
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie("sped_hub_session")
     return response
@@ -181,7 +220,17 @@ async def api_register(request: Request):
 
     try:
         auth = get_auth()
-        auth.registrar(email=email, nome=nome, senha=senha)
+        usuario = auth.registrar(email=email, nome=nome, senha=senha)
+        usuario_id = usuario.id
+        # Registra auditoria
+        svc = get_audit_service()
+        svc.registrar(
+            acao="auth.register",
+            recurso=f"Novo usuário: {email}",
+            usuario_id=usuario_id,
+            usuario_email=email,
+            ip=request.client.host if request.client else None,
+        )
         return JSONResponse({"status": "ok", "redirect": "/login"})
     except ValueError as e:
         return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=400)
@@ -405,6 +454,19 @@ async def api_upload(file: UploadFile = File(...)):
 
         repo.commit()
 
+        # Registra auditoria
+        svc_audit = AuditService(str(DB_PATH))
+        svc_audit.registrar(
+            acao="ecd.upload",
+            recurso=f"ECD #{ecd.id} ({empresa.nome})",
+            detalhes={
+                "contas": len(contas),
+                "lancamentos": len(lancs),
+                "partidas": len(partidas),
+                "arquivo": file.filename,
+            },
+        )
+
         return JSONResponse({
             "status": "ok",
             "mensagem": f"ECD importada com sucesso! {len(contas)} contas, {len(lancs)} lançamentos, {len(partidas)} partidas.",
@@ -588,6 +650,88 @@ async def api_ecds():
         session.close()
 
 
+
+
+# ── Rotas: Auditoria (Fase 13) ─────────────────────────────────────────────
+
+
+@app.get("/auditoria", response_class=HTMLResponse)
+async def auditoria_page(request: Request):
+    """Página de logs de auditoria."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return HTMLResponse(jinja_env.get_template("auditoria.html").render({
+        "request": request,
+        "usuario": usuario,
+        "current_page": "auditoria",
+    }))
+
+
+@app.get("/api/audit/logs")
+async def api_audit_logs(
+    request: Request,
+    usuario_id: int | None = Query(None),
+    acao: str | None = Query(None),
+    limite: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Lista logs de auditoria (requer autenticação)."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
+
+    svc = get_audit_service()
+    logs = svc.listar(
+        usuario_id=usuario_id,
+        acao=acao,
+        limite=limite,
+        offset=offset,
+    )
+    total = svc.contar(usuario_id=usuario_id, acao=acao)
+    return {"total": total, "limite": limite, "offset": offset, "dados": logs}
+
+
+@app.get("/api/audit/stats")
+async def api_audit_stats(
+    request: Request,
+    horas: int = Query(24, ge=1, le=720),
+):
+    """Estatísticas de auditoria (requer autenticação)."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
+
+    svc = get_audit_service()
+    return svc.estatisticas(horas=horas)
+
+
+@app.post("/api/audit/limpar")
+async def api_audit_limpar(
+    request: Request,
+    dias: int = Query(90, ge=1, le=3650),
+):
+    """Remove logs antigos (requer autenticação)."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
+
+    svc = get_audit_service()
+    removidos = svc.limpar_antigos(dias=dias)
+
+    # Registra a ação de limpeza
+    svc.registrar(
+        acao="audit.limpar",
+        recurso=f"Logs > {dias} dias",
+        usuario_id=usuario.id,
+        usuario_email=usuario.email,
+        ip=request.client.host if request.client else None,
+        detalhes={"removidos": removidos, "dias": dias},
+    )
+
+    return {"status": "ok", "removidos": removidos}
+
 # ── Rotas: Exportação ──────────────────────────────────────────────────────
 
 
@@ -643,6 +787,14 @@ async def api_export_pdf(
         # Gera PDF
         from weasyprint import HTML as WHTML
         pdf_bytes = WHTML(string=html).write_pdf()
+
+        # Registra auditoria
+        svc_audit = AuditService(str(DB_PATH))
+        svc_audit.registrar(
+            acao="relatorio.export",
+            recurso=f"PDF: {tipo} ECD #{ecd_id}",
+            detalhes={"tipo": tipo, "visao": visao, "formato": "pdf"},
+        )
 
         return Response(
             content=pdf_bytes,
@@ -716,6 +868,14 @@ async def api_export_xlsx(
 
         else:
             return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
+
+        # Registra auditoria
+        svc_audit = AuditService(str(DB_PATH))
+        svc_audit.registrar(
+            acao="relatorio.export",
+            recurso=f"XLSX: {tipo} ECD #{ecd_id}",
+            detalhes={"tipo": tipo, "visao": visao, "formato": "xlsx"},
+        )
 
         return JSONResponse({"status": "ok", "arquivo": f"{tipo}_{ecd_id}.xlsx"})
 
