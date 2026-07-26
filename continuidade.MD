@@ -1,27 +1,27 @@
 # SPED-HUB — Continuidade do Projeto
 
-**Data:** 2025-07-26
+**Data:** 2026-07-26
 
 ## Objetivo da Alteração Atual
 
-**Fase 13 — Rate Limiting, Logs de Auditoria e Testes E2E:**
-1. Rate Limiting por API Key — `RateLimiter` com janela deslizante em memória, `RateLimitService` para configuração persistente, `RateLimitConfig` no banco, headers `X-RateLimit-*`, HTTP 429 quando excedido, endpoints REST de configuração (`GET/PUT/DELETE /api/v1/api-keys/{id}/rate-limit`, `GET .../rate-limit/status`)
-2. Logs de Auditoria — modelo `AuditLog` no banco, `AuditService` com `registrar()`, `listar()`, `contar()`, `estatisticas()`, `limpar_antigos()`, auditoria automática em login (sucesso/falha), logout, registro, upload de ECD, exportação PDF/XLSX, criação/revogação de API Keys, dashboard de auditoria em `/auditoria` com filtros e estatísticas
-3. Testes E2E — suite completa via `FastAPI TestClient`: fluxo de autenticação (registro→login→acesso→logout), API REST com API Key (incluindo rate limiting 429), dashboard de auditoria, configuração de rate limit via API
-4. Bump v0.11.0 — 257 testes (100% passando)
+**Fase 14 — Importação Assíncrona, Cache Layer e Benchmark:**
+1. Importação Assíncrona — `AsyncJob` model + `AsyncJobService` com tracking de progresso (0-100%), endpoint `POST /api/upload-async` com processamento em background thread, polling via `GET /api/jobs/{id}`, listagem `GET /api/jobs`, limpeza automática de jobs antigos (>24h)
+2. Cache Layer — `CacheService` em memória com TTL, thread-safe via `threading.Lock`, invalidação por prefixo, estatísticas (hits/misses/hit_rate), decorator `@cached`, endpoint `GET /api/cache/stats`, pronto para migração Redis
+3. Benchmark — geração de ECDs sintéticas (pequena ~1000 regs, média ~5000 regs), testes de performance do parser streaming, validação de tempo (<5s para 1000 regs, <10s para 5000 regs)
+4. Bump v0.12.0 — 287 testes (100% passando)
 
 ## Status Técnico
 
 | Componente | Status |
 |---|---|
-| `pyproject.toml` | ✅ Atualizado (v0.11.0) |
+| `pyproject.toml` | ✅ Atualizado (v0.12.0) |
 | `src/layouts/ecd_v9.yml` | ✅ 30 registros (Fase 1) |
 | `src/parsers/ecd.py` | ✅ Streaming + herança + parse_em_lotes + contar_registros (Fase 9) |
 | `src/parsers/efd.py` | ✅ Parser EFD-Contribuições (Fase 4) |
 | `src/parsers/ecf.py` | ✅ Parser ECF (Fase 4) |
-| `src/db/models.py` | ✅ 23 modelos + RateLimitConfig + AuditLog (Fase 13) |
+| `src/db/models.py` | ✅ 24 modelos + AsyncJob (Fase 14) |
 | `src/db/repository.py` | ✅ CRUD + consultas (Fase 1) |
-| `src/auth/__init__.py` | ✅ AuthService + MultiTenantMiddleware + TenantFilter + contextvars + login retorna id/email (Fase 13) |
+| `src/auth/__init__.py` | ✅ AuthService + MultiTenantMiddleware + TenantFilter + contextvars (Fase 13) |
 | `src/filters/engine.py` | ✅ 16 tipos de filtro (Fase 1) |
 | `src/reports/base.py` | ✅ Convenção de sinais (Fase 1) |
 | `src/reports/balancete.py` | ✅ Balancete F8 (Fase 8) |
@@ -36,7 +36,9 @@
 | `src/cli.py` | ✅ CLI completa (Fase 1-2) |
 | `src/ratelimit/__init__.py` | ✅ RateLimiter + RateLimitService + RateLimitInfo (Fase 13) |
 | `src/audit/__init__.py` | ✅ AuditService + logs + estatísticas + limpeza (Fase 13) |
-| `src/dashboard/app.py` | ✅ FastAPI app — 48 rotas incluindo /auditoria, /api/audit/* (Fase 13) |
+| `src/async_jobs/__init__.py` | ✅ AsyncJobService + JobInfo + polling + limpeza (Fase 14) |
+| `src/cache/__init__.py` | ✅ CacheService + TTL + @cached + stats (Fase 14) |
+| `src/dashboard/app.py` | ✅ FastAPI app — 52 rotas incluindo /api/upload-async, /api/jobs/*, /api/cache/stats (Fase 14) |
 | `src/dashboard/services.py` | ✅ +multi-ECD, +layout customizável (Fase 7) |
 | `src/dashboard/templates/*` | ✅ Auth, upload, partials, notas, +comparar, +layout, +webhooks, +api_keys, +auditoria (Fase 13) |
 | `src/api/__init__.py` | ✅ API Key auth + ApiKeyService + rate limiting integrado + auditoria (Fase 13) |
@@ -49,72 +51,64 @@
 | `docker-compose.yml` | ✅ Produção com nginx + certbot (Fase 7) |
 | `nginx.conf` | ✅ Proxy reverso + SSL hardening (Fase 7) |
 | `.github/workflows/ci.yml` | ✅ CI/CD pipeline (Fase 5) |
-| `tests/test_fase13.py` | ✅ 43 testes (Fase 13) |
-| **Total** | **257 testes — 100% passando** |
+| `tests/test_fase14.py` | ✅ 30 testes (Fase 14) |
+| **Total** | **287 testes — 100% passando** |
 
-## O que foi entregue na Fase 13
+## O que foi entregue na Fase 14
 
-### 1. Rate Limiting por API Key
-- `RateLimitConfig` — modelo no banco com `limite` e `janela` por API Key
-- `RateLimiter` — contador em memória com janela deslizante, thread-safe via `threading.Lock`
-  - `verificar(api_key_id)` → `(permitido, RateLimitInfo)` — incrementa e verifica
-  - `get_info(api_key_id)` → status sem incrementar
-  - `reset(api_key_id)` — limpa contador (para testes/admin)
-  - `get_limiter()` / `init_limiter()` — instância global
-- `RateLimitService` — CRUD de configurações: `configurar()`, `obter()`, `remover()`, `listar()`
-- Integração no `requer_api_key` — verifica rate limit antes de processar a requisição
-- HTTP 429 com headers `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`
-- Default: 100 requisições por 60 segundos (quando sem configuração)
-- Endpoints REST: `GET/PUT/DELETE /api/v1/api-keys/{id}/rate-limit`, `GET .../rate-limit/status`
+### 1. Importação Assíncrona
+- `AsyncJob` — modelo no banco com `tipo`, `status` (pending/processing/completed/failed), `progresso` (0-100%), `parametros` (JSON), `resultado` (JSON), `erro`, `mensagem`, `criado_em`, `concluido_em`
+- `AsyncJobService`:
+  - `criar()` — cria job com status pending
+  - `atualizar_progresso()` — atualiza progresso e transita para processing
+  - `concluir()` — marca como completed com resultado
+  - `falhar()` — marca como failed com mensagem de erro
+  - `obter()` — retorna JobInfo para polling
+  - `listar()` — lista com filtro por status
+  - `limpar_antigos(horas)` — remove jobs concluídos/falhos antigos
+- Endpoint `POST /api/upload-async` — recebe arquivo, cria job, inicia processamento em thread separada
+- Endpoint `GET /api/jobs/{id}` — polling de status/progresso/resultado
+- Endpoint `GET /api/jobs` — listagem de jobs com filtro opcional por status
+- Processamento em lotes via `parse_em_lotes()` com atualização de progresso incremental
+- Thread daemon para não bloquear shutdown
 
-### 2. Logs de Auditoria
-- `AuditLog` — modelo no banco com `usuario_id`, `usuario_email`, `api_key_id`, `acao`, `recurso`, `metodo`, `ip`, `status_code`, `detalhes` (JSON), `criado_em`
-- `AuditService`:
-  - `registrar()` — cria log de auditoria
-  - `listar()` — lista com filtros (usuario_id, acao, dt_ini, dt_fin) e paginação
-  - `contar()` — total com filtros
-  - `estatisticas()` — agregações: total, por_acao, por_status, usuarios_unicos, ips_unicos, erros
-  - `limpar_antigos(dias)` — remove logs antigos
-- Auditoria automática em:
-  - Login (sucesso e falha) — `auth.login`
-  - Logout — `auth.logout`
-  - Registro — `auth.register`
-  - Upload de ECD — `ecd.upload`
-  - Exportação PDF/XLSX — `relatorio.export`
-  - Criação de API Key — `apikey.create`
-  - Revogação de API Key — `apikey.revoke`
-  - Rate limit excedido — `api.rate_limited`
-- Dashboard de auditoria em `/auditoria` com:
-  - Cards de estatísticas (total, usuários, IPs, erros)
-  - Filtros por ação
-  - Tabela paginada com data, ação, recurso, método, usuário, IP, status
-  - API: `GET /api/audit/logs`, `GET /api/audit/stats`, `POST /api/audit/limpar`
+### 2. Cache Layer
+- `CacheService` — cache em memória thread-safe com:
+  - `get(key)` / `set(key, value, ttl)` — operações básicas com TTL
+  - `delete(key)` — remoção individual
+  - `invalidate_prefix(prefix)` — invalidação em massa (ex: "kpi:*")
+  - `clear()` — limpeza total
+  - `stats()` — hits, misses, sets, evictions, hit_rate
+  - Limpeza periódica de entradas expiradas
+  - Limite máximo de entradas com eviction LRU-like
+- Decorator `@cached(ttl, prefix)` — cacheia resultado de funções automaticamente
+- Endpoint `GET /api/cache/stats` — estatísticas em tempo real
+- Pronto para migração para Redis (mesma interface)
 
-### 3. Testes E2E
-- `TestE2EAuth` — fluxo completo de autenticação (registro→login→acesso→logout, login falho)
-- `TestE2EAPI` — API REST com API Key (acesso permitido, 401 sem key, 403 key inválida, 429 rate limit)
-- `TestE2EAuditDashboard` — dashboard de auditoria (requer auth, logs, stats)
-- `TestE2ERateLimitConfig` — configuração de rate limit via API (criar, obter, status, remover)
-- Usa `FastAPI TestClient` para simular fluxo HTTP completo sem browser
+### 3. Benchmark
+- `test_gerar_ecd_sintetica_pequena` — ~1000 registros, valida tempo <5s
+- `test_gerar_ecd_sintetica_media` — ~5000 registros, valida tempo <10s
+- `test_parser_streaming_memoria` — valida que streaming não acumula tudo em memória
+- Métricas: contagem de registros, parse completo, parse em lotes
 
 ### 4. Correções de Bugs
-- `Sessao.expirado` — corrigido `TypeError` ao comparar datetimes com e sem timezone (SQLite não preserva tzinfo)
-- `AuthService.login()` — agora retorna `(usuario, token, usuario_id, usuario_email)` para evitar `DetachedInstanceError` quando a sessão é fechada
-- `requer_api_key()` — agora usa `SPED_HUB_DB` env var em vez de hardcoded `sped_hub.db`
+- `_get_engine()` — agora usa `SPED_HUB_DB` env var em vez de hardcoded `DB_PATH`
+- `AsyncJobService.limpar_antigos()` — corrigido uso de `.delete()` em resultado de select (SQLAlchemy 2.0 usa `delete()` statement)
+- `AsyncJobService.falhar()` — assinatura correta com parâmetro `erro` obrigatório
 
-## Próximos Passos (Fase 14+)
+## Próximos Passos (Fase 15+)
 
 1. Deploy real em VPS/cloud com domínio e SSL
-2. Suporte a ECDs reais de clientes (testes com arquivos >100MB)
+2. Testes E2E com Playwright (browser real, screenshots)
 3. Integração nativa com sistemas de terceiros (Domínio, Questor, Alterdata)
-4. Testes E2E com Playwright (browser real, screenshots)
-5. Notificações por email (alertas de erro, relatórios agendados)
-6. API de importação assíncrona (background tasks para ECDs grandes)
-7. Cache Redis para queries frequentes
+4. Notificações por email (alertas de erro, relatórios agendados)
+5. Migração do cache para Redis
+6. Fila de processamento com workers dedicados (substituir threads)
+7. Suporte a ECDs reais de clientes (testes com arquivos >100MB)
 
 ## Pendências
 
 - Deploy real em VPS/cloud (configuração de domínio + SSL)
-- Suporte a ECDs reais de clientes (arquivos grandes)
 - Integração com sistemas de terceiros
+- Cache em memória não persiste entre restarts (Redis na Fase 15)
 - Rate limiting em memória não persiste entre restarts (aceitável para v1)

@@ -38,6 +38,7 @@ API REST v1 (autenticação por X-API-Key):
 """
 
 import datetime
+import os
 import hashlib
 import io
 import logging
@@ -74,7 +75,7 @@ logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.11.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.12.0")
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
@@ -103,7 +104,8 @@ init_db(engine)
 
 
 def _get_engine():
-    return criar_engine(str(DB_PATH))
+    db = os.environ.get("SPED_HUB_DB", str(DB_PATH))
+    return criar_engine(db)
 
 
 # ── Filtros Jinja2 ─────────────────────────────────────────────────────────
@@ -731,6 +733,256 @@ async def api_audit_limpar(
     )
 
     return {"status": "ok", "removidos": removidos}
+
+
+# ── Rotas: Jobs Assíncronos (Fase 14) ──────────────────────────────────────
+
+
+@app.post("/api/upload-async")
+async def api_upload_async(file: UploadFile = File(...)):
+    """Upload assíncrono de ECD — retorna job_id para polling.
+
+    Ideal para arquivos grandes (>50MB). O cliente faz polling em
+    GET /api/jobs/{job_id} para acompanhar o progresso.
+    """
+    import asyncio
+    from src.async_jobs import AsyncJobService, get_async_job_service, init_async_job_service
+
+    if not file.filename or not file.filename.lower().endswith((".txt", ".ecd")):
+        return JSONResponse({"status": "erro", "mensagem": "Formato inválido. Envie um arquivo .txt ou .ecd"}, status_code=400)
+
+    upload_dir = Path("/workspace/uploads")
+    upload_dir.mkdir(exist_ok=True)
+    temp_path = upload_dir / file.filename
+
+    content = await file.read()
+    temp_path.write_bytes(content)
+
+    # Cria job
+    init_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
+    job_svc = get_async_job_service()
+    job = job_svc.criar(
+        tipo="ecd_import",
+        parametros={"arquivo": file.filename, "tamanho_bytes": len(content)},
+    )
+
+    # Inicia processamento em background
+    import threading
+    def _processar():
+        try:
+            job_svc.atualizar_progresso(job.id, 5.0, "Iniciando parser...")
+
+            parser = ECDParser()
+            job_svc.atualizar_progresso(job.id, 10.0, "Parser carregado, lendo arquivo...")
+
+            # Conta registros primeiro para estimar progresso
+            contagem = parser.contar_registros(temp_path)
+            total_regs = sum(contagem.values())
+            job_svc.atualizar_progresso(job.id, 15.0, f"Detectados {total_regs} registros")
+
+            # Processa em lotes
+            registros = []
+            lotes_processados = 0
+            for lote in parser.parse_em_lotes(temp_path, tamanho_lote=500):
+                registros.extend(lote)
+                lotes_processados += 1
+                progresso = min(90.0, 15.0 + (lotes_processados / max(1, total_regs / 500)) * 75.0)
+                job_svc.atualizar_progresso(job.id, progresso, f"Processando lote {lotes_processados}...")
+
+            job_svc.atualizar_progresso(job.id, 90.0, "Salvando no banco...")
+
+            # Agrupa e salva
+            from collections import defaultdict
+            grupos = defaultdict(list)
+            for r in registros:
+                grupos[r["_reg"]].append(r)
+
+            if not grupos.get("0000"):
+                raise ValueError("Arquivo não contém registro 0000")
+
+            engine_local = _get_engine()
+            session_local = get_session(engine_local)
+            repo = Repository(session_local)
+
+            try:
+                r0000 = grupos["0000"][0]
+                empresa = repo.upsert_empresa({
+                    "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
+                    "nome": r0000.get("NOME", ""),
+                    "uf": r0000.get("UF", ""),
+                    "ie": r0000.get("IE", ""),
+                    "cod_mun": str(int(r0000.get("COD_MUN", 0))).zfill(7) if r0000.get("COD_MUN") else None,
+                    "im": r0000.get("IM", ""),
+                    "ind_sit_esp": int(r0000.get("IND_SIT_ESP", 0)) if r0000.get("IND_SIT_ESP") else None,
+                    "ind_nire": int(r0000.get("IND_NIRE", 0)) if r0000.get("IND_NIRE") else None,
+                    "ind_fin_esc": int(r0000.get("IND_FIN_ESC", 0)) if r0000.get("IND_FIN_ESC") else None,
+                    "ind_grande_por": int(r0000.get("IND_GRANDE_POR", 0)) if r0000.get("IND_GRANDE_POR") else None,
+                    "tip_ecd": r0000.get("TIP_ECD", ""),
+                    "ident_mf": r0000.get("IDENT_MF", ""),
+                    "ind_esc_cons": r0000.get("IND_ESC_CONS", ""),
+                })
+
+                rI010 = grupos["I010"][0] if grupos["I010"] else {}
+                leiaute = rI010.get("COD_VER_LC", "009")
+
+                def _parse_data(valor):
+                    if len(valor) == 8 and valor.isdigit():
+                        return datetime.date(int(valor[4:8]), int(valor[2:4]), int(valor[0:2]))
+                    return datetime.date.today()
+
+                dt_ini = _parse_data(str(int(r0000.get("DT_INI", 0))).zfill(8))
+                dt_fin = _parse_data(str(int(r0000.get("DT_FIN", 0))).zfill(8))
+
+                hash_arquivo_local = hashlib.sha256(content).hexdigest()
+                ecd = repo.criar_ecd(empresa.id, {
+                    "leiaute": leiaute,
+                    "dt_ini": dt_ini,
+                    "dt_fin": dt_fin,
+                    "ind_esc": rI010.get("IND_ESC", ""),
+                    "cod_ver_lc": leiaute,
+                    "hash_arquivo": hash_arquivo_local,
+                    "nome_arquivo": file.filename,
+                })
+
+                # Plano de Contas
+                contas = []
+                for r in grupos["I050"]:
+                    contas.append({
+                        "cod_cta": r.get("COD_CTA", ""),
+                        "cod_cta_sup": r.get("COD_CTA_SUP", ""),
+                        "nome_cta": r.get("NOME_CTA", ""),
+                        "cod_nat": r.get("COD_NAT", "01"),
+                        "ind_cta": r.get("IND_CTA", "A"),
+                        "nivel": int(r.get("NIVEL", 0)),
+                        "dt_alt": _parse_data(str(int(r.get("DT_ALT", 0))).zfill(8)) if r.get("DT_ALT") else None,
+                    })
+                repo.inserir_plano_contas(ecd.id, contas)
+
+                # Saldos
+                saldos = []
+                for r in grupos["I155"]:
+                    saldos.append({
+                        "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
+                        "dt_ini": dt_ini, "dt_fin": dt_fin,
+                        "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0, "ind_dc_ini": r.get("IND_DC_INI", "D"),
+                        "vl_deb": r.get("VL_DEB", 0.0) or 0.0, "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
+                        "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
+                    })
+                repo.inserir_saldos_periodicos(ecd.id, saldos)
+
+                # Lançamentos e partidas
+                lancs = []
+                for r in grupos["I200"]:
+                    lancs.append({
+                        "num_lcto": r.get("NUM_LCTO", ""),
+                        "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)) if r.get("DT_LCTO") else dt_ini,
+                        "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
+                        "ind_lcto": r.get("IND_LCTO", "N"),
+                        "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
+                    })
+                repo.inserir_lancamentos(ecd.id, lancs)
+
+                partidas = []
+                for r in grupos["I250"]:
+                    partidas.append({
+                        "num_lcto": r.get("NUM_LCTO", ""),
+                        "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat() if r.get("DT_LCTO") else dt_ini.isoformat(),
+                        "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
+                        "vl_dc": r.get("VL_DC", 0.0) or 0.0, "ind_dc": r.get("IND_DC", "D"),
+                        "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
+                        "cod_hist_pad": r.get("COD_HIST_PAD", ""), "hist": r.get("HIST", ""),
+                        "cod_part": r.get("COD_PART", ""),
+                    })
+                repo.inserir_partidas(ecd.id, partidas)
+
+                repo.commit()
+
+                job_svc.concluir(job.id, {
+                    "ecd_id": ecd.id,
+                    "empresa": empresa.nome,
+                    "periodo": f"{dt_ini} a {dt_fin}",
+                    "contas": len(contas),
+                    "lancamentos": len(lancs),
+                    "partidas": len(partidas),
+                    "total_registros": total_regs,
+                })
+            finally:
+                session_local.close()
+
+        except Exception as e:
+            logger.exception("Erro no job assíncrono #%d", job.id)
+            job_svc.falhar(job.id, str(e))
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    thread = threading.Thread(target=_processar, daemon=True)
+    thread.start()
+
+    return JSONResponse({
+        "status": "ok",
+        "mensagem": "Processamento iniciado em background",
+        "job_id": job.id,
+        "poll_url": f"/api/jobs/{job.id}",
+    })
+
+
+@app.get("/api/jobs/{job_id}")
+async def api_job_status(job_id: int):
+    """Consulta status de um job assíncrono."""
+    from src.async_jobs import get_async_job_service, init_async_job_service
+
+    init_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
+    svc = get_async_job_service()
+    info = svc.obter(job_id)
+    if info is None:
+        return JSONResponse({"status": "erro", "mensagem": "Job não encontrado"}, status_code=404)
+
+    return {
+        "id": info.id,
+        "status": info.status,
+        "progresso": info.progresso,
+        "tipo": info.tipo,
+        "mensagem": info.mensagem,
+        "resultado": info.resultado,
+        "erro": info.erro,
+        "criado_em": info.criado_em,
+        "concluido_em": info.concluido_em,
+    }
+
+
+@app.get("/api/jobs")
+async def api_jobs_list(status: str | None = Query(None)):
+    """Lista jobs assíncronos."""
+    from src.async_jobs import get_async_job_service, init_async_job_service
+
+    init_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
+    svc = get_async_job_service()
+    jobs = svc.listar(status=status)
+    return {
+        "total": len(jobs),
+        "dados": [
+            {
+                "id": j.id,
+                "status": j.status,
+                "progresso": j.progresso,
+                "tipo": j.tipo,
+                "mensagem": j.mensagem,
+                "criado_em": j.criado_em,
+                "concluido_em": j.concluido_em,
+            }
+            for j in jobs
+        ],
+    }
+
+
+@app.get("/api/cache/stats")
+async def api_cache_stats():
+    """Estatísticas do cache."""
+    from src.cache import get_cache, init_cache
+    init_cache()
+    return get_cache().stats()
+
 
 # ── Rotas: Exportação ──────────────────────────────────────────────────────
 

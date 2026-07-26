@@ -657,7 +657,7 @@ class TestE2EAPI:
         resp = client.get("/api/v1/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
-        assert resp.json()["version"] == "0.11.0"
+        assert resp.json()["version"] == "0.12.0"
 
         # Lista empresas (precisa de API Key)
         resp = client.get("/api/v1/empresas", headers={"X-API-Key": chave})

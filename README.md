@@ -31,6 +31,8 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **GraphQL API v2** — Schema completo com strawberry-graphql em  (14 queries: empresas, ECDs, balanço, DRE, DFC, diário, KPIs, notas, validações)
 - **Multi-ECD lado a lado** — Comparação de até 5 ECDs simultaneamente
 - **Watchdog** — Importação automática de ECDs por polling
+- **Importação assíncrona** — Upload em background com tracking de progresso e polling
+- **Cache inteligente** — Cache em memória com TTL, invalidação e estatísticas
 - **Layout customizável** — Configuração de colunas visíveis por tipo de relatório
 - **Deploy produção** — nginx + SSL (Let's Encrypt) + docker-compose pronto
 - **Navegação entre múltiplas ECDs** importadas
@@ -94,7 +96,7 @@ sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 
 ```bash
 pytest tests/ -v
-# 183 testes — 100% passando
+# 287 testes — 100% passando
 ```
 
 ## Estrutura do Projeto
@@ -142,6 +144,10 @@ src/
 │           ├── dfc.html
 │           ├── diario.html
 │           └── notas.html       # (Fase 6)
+├── async_jobs/         # Jobs assíncronos (Fase 14)
+│   └── __init__.py      # AsyncJobService + polling
+├── cache/               # Cache layer (Fase 14)
+│   └── __init__.py      # CacheService + @cached
 ├── watchdog.py         # Importação automática (Fase 7)
 ├── api/                 # APIs (Fase 7-9)
 │   ├── __init__.py      # API Key auth

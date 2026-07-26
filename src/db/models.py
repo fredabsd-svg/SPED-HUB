@@ -630,6 +630,36 @@ class WebhookDelivery(Base):
         return f"<WebhookDelivery {self.id} {self.evento} {self.status}>"
 
 
+# ── Jobs Assíncronos (Fase 14) ─────────────────────────────────────────────
+
+
+class AsyncJob(Base):
+    """Job assíncrono para processamento em background.
+
+    Usado para importação de ECDs grandes, exportação em lote e outras
+    operações demoradas. O cliente faz polling via GET /api/jobs/{id}.
+    """
+
+    __tablename__ = "async_jobs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # ecd_import, export_lote, etc.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)  # pending, processing, completed, failed
+    progresso: Mapped[float] = mapped_column(default=0.0)  # 0-100
+    parametros: Mapped[str | None] = mapped_column(Text)  # JSON
+    resultado: Mapped[str | None] = mapped_column(Text)  # JSON
+    erro: Mapped[str | None] = mapped_column(Text)
+    mensagem: Mapped[str | None] = mapped_column(String(500))
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC), index=True
+    )
+    concluido_em: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    def __repr__(self):
+        return f"<AsyncJob {self.id} {self.tipo} {self.status}>"
+
+
+
 # ── Engine Factory ─────────────────────────────────────────────────────────
 
 
