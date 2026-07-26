@@ -463,6 +463,33 @@ class ApiKey(Base):
         return f"<ApiKey {self.nome} ({self.prefixo}...)>"
 
 
+# ── Webhooks (Fase 10) ─────────────────────────────────────────────────────
+
+
+class WebhookRegistration(Base):
+    """Registro de webhook para integração com sistemas de terceiros."""
+
+    __tablename__ = "webhooks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    eventos: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array: ["ecd.importada", ...]
+    secret: Mapped[str | None] = mapped_column(String(128))  # HMAC secret
+    descricao: Mapped[str] = mapped_column(String(255), default="")
+    ativo: Mapped[bool] = mapped_column(default=True)
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    ultimo_envio: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    total_envios: Mapped[int] = mapped_column(default=0)
+
+    def get_eventos(self) -> list[str]:
+        return json.loads(self.eventos)
+
+    def __repr__(self):
+        return f"<Webhook {self.id} → {self.url[:50]}>"
+
+
 # ── Engine Factory ─────────────────────────────────────────────────────────
 
 

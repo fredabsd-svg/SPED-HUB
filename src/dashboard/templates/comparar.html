@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comparar ECDs — SPED-HUB</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@1"></script>
+    <style>
+        :root {
+            --primary: #0B4F6C;
+            --primary-light: #E8F3F7;
+            --bg: #F8F9FB;
+            --card: #FFFFFF;
+            --text: #1A1A2E;
+            --text-secondary: #6B6B85;
+            --border: #E2E2EC;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --danger: #EF4444;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .navbar {
+            background: var(--primary);
+            color: white;
+            padding: 0 2rem;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .navbar h1 { font-size: 1.25rem; font-weight: 700; }
+        .navbar nav { display: flex; gap: 1.5rem; }
+        .navbar nav a {
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            padding: 0.25rem 0;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .navbar nav a:hover, .navbar nav a.active {
+            color: white;
+            border-bottom-color: white;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .page-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 2rem;
+        }
+        .selector-bar {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin-bottom: 2rem;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .selector-bar label {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+        .ecd-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.8125rem;
+        }
+        .ecd-checkbox:hover { border-color: var(--primary); background: var(--primary-light); }
+        .ecd-checkbox.selected {
+            border-color: var(--primary);
+            background: var(--primary-light);
+            font-weight: 600;
+        }
+        .ecd-checkbox input { display: none; }
+        .btn {
+            padding: 0.5rem 1.25rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card h3 {
+            font-size: 1.125rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: var(--primary);
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+        }
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8125rem;
+        }
+        .comparison-table th {
+            background: var(--primary);
+            color: white;
+            padding: 0.75rem 1rem;
+            text-align: left;
+            font-weight: 600;
+        }
+        .comparison-table th:first-child { border-radius: 8px 0 0 0; }
+        .comparison-table th:last-child { border-radius: 0 8px 0 0; }
+        .comparison-table td {
+            padding: 0.625rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .comparison-table tr:nth-child(even) td { background: var(--bg); }
+        .comparison-table .number {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .comparison-table .total-row td {
+            font-weight: 700;
+            background: var(--primary-light);
+            border-top: 2px solid var(--primary);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-secondary);
+        }
+        .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>🔍 SPED-HUB — Comparativo</h1>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/upload">Upload</a>
+            <a href="/comparar" class="active">Comparar</a>
+            <a href="/layout">Layout</a>
+            <a href="/logout">Sair</a>
+        </nav>
+    </div>
+
+    <div class="container" x-data="comparativoApp()" x-init="init()">
+        <h2 class="page-title">Comparativo Multi-ECD</h2>
+        <p class="page-subtitle">Selecione até 5 ECDs para comparar lado a lado — Balanço, DRE e DFC</p>
+
+        <!-- Seletor de ECDs -->
+        <div class="selector-bar">
+            <label>ECDs:</label>
+            <template x-for="ecd in ecdsDisponiveis" :key="ecd.id">
+                <label class="ecd-checkbox" :class="{ selected: selecionados.includes(ecd.id) }">
+                    <input type="checkbox" :value="ecd.id" x-model="selecionados" @change="maxCheck()">
+                    <span x-text="ecd.empresa + ' — ' + ecd.periodo"></span>
+                </label>
+            </template>
+            <button class="btn btn-primary" @click="comparar()" :disabled="selecionados.length < 2">
+                Comparar Selecionados
+            </button>
+        </div>
+
+        <!-- Resultados -->
+        <template x-if="loading">
+            <div class="empty-state"><div class="icon">⏳</div><p>Carregando comparação...</p></div>
+        </template>
+
+        <template x-if="!loading && dados">
+            <!-- Balanço -->
+            <div class="card">
+                <h3>📊 Balanço Patrimonial</h3>
+                <div class="chart-container">
+                    <canvas id="chartBalanco"></canvas>
+                </div>
+                <table class="comparison-table" style="margin-top:1.5rem">
+                    <thead>
+                        <tr>
+                            <th>Indicador</th>
+                            <template x-for="ecd in dados.ecds" :key="ecd.id">
+                                <th x-text="ecd.empresa + ' ' + ecd.periodo.split(' a ')[0]"></th>
+                            </template>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Ativo Total</td>
+                            <template x-for="(v, i) in dados.balanco.ativo" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                        <tr>
+                            <td>Passivo Total</td>
+                            <template x-for="(v, i) in dados.balanco.passivo" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                        <tr class="total-row">
+                            <td>Patrimônio Líquido</td>
+                            <template x-for="(v, i) in dados.balanco.pl" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- DRE -->
+            <div class="card">
+                <h3>📈 DRE</h3>
+                <div class="chart-container">
+                    <canvas id="chartDRE"></canvas>
+                </div>
+                <table class="comparison-table" style="margin-top:1.5rem">
+                    <thead>
+                        <tr>
+                            <th>Indicador</th>
+                            <template x-for="ecd in dados.ecds" :key="ecd.id">
+                                <th x-text="ecd.empresa + ' ' + ecd.periodo.split(' a ')[0]"></th>
+                            </template>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Receita Bruta</td>
+                            <template x-for="(v, i) in dados.dre.receita_bruta" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                        <tr class="total-row">
+                            <td>Resultado Líquido</td>
+                            <template x-for="(v, i) in dados.dre.resultado_liquido" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                        <tr>
+                            <td>Margem Líquida</td>
+                            <template x-for="(v, i) in dados.dre.margem" :key="i">
+                                <td class="number" x-text="v.toFixed(1) + '%'"></td>
+                            </template>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- DFC -->
+            <div class="card">
+                <h3>💵 DFC</h3>
+                <div class="chart-container">
+                    <canvas id="chartDFC"></canvas>
+                </div>
+                <table class="comparison-table" style="margin-top:1.5rem">
+                    <thead>
+                        <tr>
+                            <th>Indicador</th>
+                            <template x-for="ecd in dados.ecds" :key="ecd.id">
+                                <th x-text="ecd.empresa + ' ' + ecd.periodo.split(' a ')[0]"></th>
+                            </template>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Operacional</td>
+                            <template x-for="(v, i) in dados.dfc.operacional" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                        <tr>
+                            <td>Investimento</td>
+                            <template x-for="(v, i) in dados.dfc.investimento" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                        <tr>
+                            <td>Financiamento</td>
+                            <template x-for="(v, i) in dados.dfc.financiamento" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                        <tr class="total-row">
+                            <td>Variação de Caixa</td>
+                            <template x-for="(v, i) in dados.dfc.variacao" :key="i">
+                                <td class="number" x-text="fmtMoeda(v)"></td>
+                            </template>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </template>
+
+        <template x-if="!loading && !dados && selecionados.length >= 2">
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <p>Clique em "Comparar Selecionados" para ver os resultados</p>
+            </div>
+        </template>
+    </div>
+
+    <script>
+        function comparativoApp() {
+            return {
+                ecdsDisponiveis: [],
+                selecionados: [],
+                dados: null,
+                loading: false,
+                charts: {},
+
+                async init() {
+                    try {
+                        const resp = await fetch('/api/ecds');
+                        this.ecdsDisponiveis = await resp.json();
+                    } catch (e) {
+                        console.error('Erro ao carregar ECDs:', e);
+                    }
+                },
+
+                maxCheck() {
+                    if (this.selecionados.length > 5) {
+                        this.selecionados = this.selecionados.slice(0, 5);
+                    }
+                },
+
+                async comparar() {
+                    if (this.selecionados.length < 2) return;
+                    this.loading = true;
+                    this.dados = null;
+
+                    try {
+                        const ids = this.selecionados.join(',');
+                        const resp = await fetch(`/api/comparar?ecd_ids=${ids}`);
+                        this.dados = await resp.json();
+                        this.$nextTick(() => this.renderCharts());
+                    } catch (e) {
+                        console.error('Erro ao comparar:', e);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                renderCharts() {
+                    this.destroyCharts();
+                    if (!this.dados) return;
+
+                    const labels = this.dados.ecds.map(e => e.empresa.substring(0, 15));
+                    const colors = ['#0B4F6C', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+
+                    // Balanço
+                    const ctxB = document.getElementById('chartBalanco');
+                    if (ctxB) {
+                        this.charts.balanco = new Chart(ctxB, {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: [
+                                    { label: 'Ativo', data: this.dados.balanco.ativo, backgroundColor: colors[0] },
+                                    { label: 'Passivo', data: this.dados.balanco.passivo, backgroundColor: colors[1] },
+                                    { label: 'PL', data: this.dados.balanco.pl, backgroundColor: colors[2] },
+                                ]
+                            },
+                            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+                        });
+                    }
+
+                    // DRE
+                    const ctxD = document.getElementById('chartDRE');
+                    if (ctxD) {
+                        this.charts.dre = new Chart(ctxD, {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: [
+                                    { label: 'Receita Bruta', data: this.dados.dre.receita_bruta, backgroundColor: colors[0] },
+                                    { label: 'Resultado Líquido', data: this.dados.dre.resultado_liquido, backgroundColor: colors[3] },
+                                ]
+                            },
+                            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+                        });
+                    }
+
+                    // DFC
+                    const ctxF = document.getElementById('chartDFC');
+                    if (ctxF) {
+                        this.charts.dfc = new Chart(ctxF, {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: [
+                                    { label: 'Operacional', data: this.dados.dfc.operacional, backgroundColor: colors[0] },
+                                    { label: 'Investimento', data: this.dados.dfc.investimento, backgroundColor: colors[1] },
+                                    { label: 'Financiamento', data: this.dados.dfc.financiamento, backgroundColor: colors[2] },
+                                ]
+                            },
+                            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+                        });
+                    }
+                },
+
+                destroyCharts() {
+                    Object.values(this.charts).forEach(c => c.destroy());
+                    this.charts = {};
+                },
+
+                fmtMoeda(v) {
+                    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+                }
+            };
+        }
+    </script>
+</body>
+</html>

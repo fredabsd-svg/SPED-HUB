@@ -1,4 +1,4 @@
-"""Rotas da API REST externa v1 — Fase 7.
+"""Rotas da API REST externa v1 — Fase 7 + Fase 10.
 
 Endpoints:
   GET  /api/v1/empresas          — Lista empresas
@@ -13,13 +13,21 @@ Endpoints:
   GET  /api/v1/ecds/{id}/notas   — Notas Explicativas
   GET  /api/v1/ecds/{id}/validar — Validações de integridade
   GET  /api/v1/health            — Health check público
+
+Webhooks (Fase 10):
+  GET    /api/v1/webhooks        — Lista webhooks
+  POST   /api/v1/webhooks        — Registra webhook
+  PUT    /api/v1/webhooks/{id}   — Atualiza webhook
+  DELETE /api/v1/webhooks/{id}   — Remove webhook
+  GET    /api/v1/webhooks/eventos — Lista eventos disponíveis
 """
 
 import datetime
+import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -32,6 +40,7 @@ from src.db.models import (
     PlanoConta,
     SaldoPeriodico,
     SaldoResultado,
+    WebhookRegistration,
     criar_engine,
     get_session,
     init_db,
@@ -42,6 +51,7 @@ from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
 from src.validators.integridade import ValidadorIntegridade
+from src.webhooks import EVENTOS_DISPONIVEIS, WebhookService
 
 logger = logging.getLogger("sped-hub.api.v1")
 
@@ -74,7 +84,7 @@ async def health_check():
 
     return {
         "status": "ok",
-        "version": "0.6.1",
+        "version": "0.8.0",
         "database": db_status,
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
@@ -479,3 +489,141 @@ async def api_evolucao_multi(ecd_id: int, api_key=Depends(requer_api_key)):
         return data or {"labels": [], "ativos": [], "passivos": [], "pls": [], "resultados": [], "num_periodos": 0}
     finally:
         session.close()
+
+
+# ── Webhooks (Fase 10) ──────────────────────────────────────────────────────
+
+
+@router.get("/webhooks/eventos")
+async def listar_eventos(api_key=Depends(requer_api_key)):
+    """Lista eventos disponíveis para webhooks."""
+    return {
+        "eventos": [
+            {"tipo": e, "descricao": _descricao_evento(e)}
+            for e in EVENTOS_DISPONIVEIS
+        ]
+    }
+
+
+@router.get("/webhooks")
+async def listar_webhooks(api_key=Depends(requer_api_key)):
+    """Lista todos os webhooks registrados."""
+    svc = WebhookService(_get_db_path())
+    webhooks = svc.listar()
+    return {
+        "total": len(webhooks),
+        "dados": [
+            {
+                "id": wh.id,
+                "url": wh.url,
+                "eventos": wh.get_eventos(),
+                "descricao": wh.descricao,
+                "ativo": wh.ativo,
+                "criado_em": wh.criado_em.isoformat() if wh.criado_em else None,
+                "ultimo_envio": wh.ultimo_envio.isoformat() if wh.ultimo_envio else None,
+                "total_envios": wh.total_envios,
+            }
+            for wh in webhooks
+        ],
+    }
+
+
+@router.post("/webhooks")
+async def registrar_webhook(
+    payload: dict = Body(...),
+    api_key=Depends(requer_api_key),
+):
+    """Registra um novo webhook.
+
+    Body:
+        url: str — endpoint que receberá os POSTs
+        eventos: list[str] — ex: ["ecd.importada", "ecd.validada"]
+        secret: str | None — segredo para HMAC (opcional)
+        descricao: str — descrição amigável
+    """
+    url = payload.get("url", "")
+    eventos = payload.get("eventos", [])
+    secret = payload.get("secret")
+    descricao = payload.get("descricao", "")
+
+    if not url:
+        raise HTTPException(status_code=400, detail="URL é obrigatória")
+    if not eventos:
+        raise HTTPException(status_code=400, detail="Pelo menos um evento é obrigatório")
+
+    # Valida eventos
+    for evt in eventos:
+        if evt not in EVENTOS_DISPONIVEIS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Evento inválido: {evt}. Disponíveis: {EVENTOS_DISPONIVEIS}",
+            )
+
+    svc = WebhookService(_get_db_path())
+    wh = svc.registrar(url=url, eventos=eventos, secret=secret, descricao=descricao)
+
+    return {
+        "status": "ok",
+        "id": wh.id,
+        "url": wh.url,
+        "eventos": wh.get_eventos(),
+        "descricao": wh.descricao,
+    }
+
+
+@router.put("/webhooks/{webhook_id}")
+async def atualizar_webhook(
+    webhook_id: int,
+    payload: dict = Body(...),
+    api_key=Depends(requer_api_key),
+):
+    """Atualiza um webhook existente."""
+    svc = WebhookService(_get_db_path())
+
+    eventos = payload.get("eventos")
+    if eventos:
+        for evt in eventos:
+            if evt not in EVENTOS_DISPONIVEIS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Evento inválido: {evt}",
+                )
+
+    wh = svc.atualizar(
+        webhook_id=webhook_id,
+        url=payload.get("url"),
+        eventos=eventos,
+        secret=payload.get("secret"),
+        descricao=payload.get("descricao"),
+        ativo=payload.get("ativo"),
+    )
+
+    if not wh:
+        raise HTTPException(status_code=404, detail="Webhook não encontrado")
+
+    return {
+        "status": "ok",
+        "id": wh.id,
+        "url": wh.url,
+        "eventos": wh.get_eventos(),
+        "descricao": wh.descricao,
+        "ativo": wh.ativo,
+    }
+
+
+@router.delete("/webhooks/{webhook_id}")
+async def remover_webhook(webhook_id: int, api_key=Depends(requer_api_key)):
+    """Remove um webhook."""
+    svc = WebhookService(_get_db_path())
+    removido = svc.remover(webhook_id)
+    if not removido:
+        raise HTTPException(status_code=404, detail="Webhook não encontrado")
+    return {"status": "ok", "mensagem": f"Webhook #{webhook_id} removido"}
+
+
+def _descricao_evento(tipo: str) -> str:
+    return {
+        "ecd.importada": "Disparado quando uma nova ECD é importada com sucesso",
+        "ecd.validada": "Disparado quando a validação de integridade é concluída",
+        "relatorio.gerado": "Disparado quando um relatório contábil é gerado",
+    }.get(tipo, tipo)

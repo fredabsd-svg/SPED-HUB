@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Layout Customizável — SPED-HUB</title>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3" defer></script>
+    <style>
+        :root {
+            --primary: #0B4F6C;
+            --primary-light: #E8F3F7;
+            --bg: #F8F9FB;
+            --card: #FFFFFF;
+            --text: #1A1A2E;
+            --text-secondary: #6B6B85;
+            --border: #E2E2EC;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .navbar {
+            background: var(--primary);
+            color: white;
+            padding: 0 2rem;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .navbar h1 { font-size: 1.25rem; font-weight: 700; }
+        .navbar nav { display: flex; gap: 1.5rem; }
+        .navbar nav a {
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            padding: 0.25rem 0;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .navbar nav a:hover, .navbar nav a.active {
+            color: white;
+            border-bottom-color: white;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+        .page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .page-subtitle { color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 2rem; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card h3 { font-size: 1.125rem; font-weight: 700; margin-bottom: 1rem; color: var(--primary); }
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1.5rem;
+            border-bottom: 2px solid var(--border);
+        }
+        .tab {
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: var(--primary); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .column-list { display: flex; flex-direction: column; gap: 0.5rem; }
+        .column-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .column-item:hover { border-color: var(--primary); }
+        .column-item.disabled { opacity: 0.5; }
+        .drag-handle {
+            cursor: grab;
+            color: var(--text-secondary);
+            font-size: 1.25rem;
+        }
+        .toggle {
+            position: relative;
+            width: 48px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+        .toggle input { display: none; }
+        .toggle .slider {
+            position: absolute;
+            inset: 0;
+            background: #CBD5E1;
+            border-radius: 26px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .toggle .slider::before {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            left: 3px;
+            top: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        .toggle input:checked + .slider { background: var(--primary); }
+        .toggle input:checked + .slider::before { transform: translateX(22px); }
+        .column-info { flex: 1; }
+        .column-info .label { font-weight: 600; font-size: 0.875rem; }
+        .column-info .key { font-size: 0.75rem; color: var(--text-secondary); }
+        .btn {
+            padding: 0.5rem 1.25rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+        .btn-secondary:hover { background: var(--border); }
+        .actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: var(--primary);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            transition: all 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>⚙️ SPED-HUB — Layout</h1>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/upload">Upload</a>
+            <a href="/comparar">Comparar</a>
+            <a href="/layout" class="active">Layout</a>
+            <a href="/logout">Sair</a>
+        </nav>
+    </div>
+
+    <div class="container" x-data="layoutApp()" x-init="init()">
+        <h2 class="page-title">Layout Customizável</h2>
+        <p class="page-subtitle">Configure quais colunas aparecem em cada tipo de relatório. As preferências são salvas no navegador.</p>
+
+        <!-- Tabs de relatórios -->
+        <div class="tabs">
+            <template x-for="(cols, tipo) in layouts" :key="tipo">
+                <div class="tab" :class="{ active: tabAtiva === tipo }" @click="tabAtiva = tipo"
+                     x-text="nomesTabs[tipo]"></div>
+            </template>
+        </div>
+
+        <!-- Colunas do relatório ativo -->
+        <div class="card">
+            <h3 x-text="nomesTabs[tabAtiva] + ' — Colunas'"></h3>
+            <div class="column-list">
+                <template x-for="(col, idx) in layouts[tabAtiva]" :key="col.key">
+                    <div class="column-item" :class="{ disabled: !col.visible }">
+                        <span class="drag-handle">⋮⋮</span>
+                        <div class="column-info">
+                            <div class="label" x-text="col.label"></div>
+                            <div class="key" x-text="col.key"></div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" x-model="col.visible">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </template>
+            </div>
+            <div class="actions">
+                <button class="btn btn-primary" @click="salvar()">💾 Salvar Preferências</button>
+                <button class="btn btn-secondary" @click="restaurar()">↩ Restaurar Padrão</button>
+            </div>
+        </div>
+
+        <!-- Preview -->
+        <div class="card">
+            <h3>📋 Preview — Colunas Visíveis</h3>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">
+                As colunas marcadas abaixo aparecerão nos relatórios exportados e na visualização.
+            </p>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                <template x-for="col in layouts[tabAtiva].filter(c => c.visible)" :key="col.key">
+                    <span style="background: var(--primary-light); color: var(--primary); padding: 0.375rem 0.75rem;
+                                 border-radius: 6px; font-size: 0.8125rem; font-weight: 600;"
+                          x-text="col.label"></span>
+                </template>
+                <template x-if="layouts[tabAtiva].filter(c => c.visible).length === 0">
+                    <span style="color: var(--text-secondary); font-style: italic;">Nenhuma coluna selecionada</span>
+                </template>
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div class="toast" x-show="toastVisivel" x-transition x-text="toastMsg" @click="toastVisivel = false"></div>
+    </div>
+
+    <script>
+        function layoutApp() {
+            return {
+                tabAtiva: 'balanco',
+                toastVisivel: false,
+                toastMsg: '',
+                nomesTabs: {
+                    balanco: 'Balanço Patrimonial',
+                    dre: 'DRE',
+                    dfc: 'DFC',
+                    diario: 'Livro Diário',
+                },
+                layouts: {
+                    balanco: [
+                        { key: 'cod_cta', label: 'Conta', visible: true, width: 120 },
+                        { key: 'nome_cta', label: 'Descrição', visible: true, width: 300 },
+                        { key: 'nivel', label: 'Nível', visible: false, width: 60 },
+                        { key: 'saldo_atual', label: 'Saldo Atual', visible: true, width: 150 },
+                        { key: 'saldo_anterior', label: 'Saldo Anterior', visible: true, width: 150 },
+                    ],
+                    dre: [
+                        { key: 'descricao', label: 'Descrição', visible: true, width: 350 },
+                        { key: 'valor_atual', label: 'Valor Atual', visible: true, width: 150 },
+                        { key: 'valor_anterior', label: 'Valor Anterior', visible: true, width: 150 },
+                    ],
+                    dfc: [
+                        { key: 'descricao', label: 'Descrição', visible: true, width: 350 },
+                        { key: 'valor', label: 'Valor', visible: true, width: 150 },
+                        { key: 'valor_anterior', label: 'Valor Anterior', visible: true, width: 150 },
+                    ],
+                    diario: [
+                        { key: 'num_lcto', label: 'Nº Lcto', visible: true, width: 100 },
+                        { key: 'data', label: 'Data', visible: true, width: 100 },
+                        { key: 'cod_cta', label: 'Conta', visible: true, width: 120 },
+                        { key: 'historico', label: 'Histórico', visible: true, width: 300 },
+                        { key: 'debito', label: 'Débito', visible: true, width: 130 },
+                        { key: 'credito', label: 'Crédito', visible: true, width: 130 },
+                    ],
+                },
+
+                init() {
+                    this.carregar();
+                },
+
+                carregar() {
+                    const saved = localStorage.getItem('sped-hub-layout');
+                    if (saved) {
+                        try {
+                            const data = JSON.parse(saved);
+                            for (const [tipo, cols] of Object.entries(data)) {
+                                if (this.layouts[tipo]) {
+                                    // Merge: mantém estrutura, atualiza visible
+                                    for (const savedCol of cols) {
+                                        const local = this.layouts[tipo].find(c => c.key === savedCol.key);
+                                        if (local) {
+                                            local.visible = savedCol.visible;
+                                            if (savedCol.width) local.width = savedCol.width;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Erro ao carregar layout:', e);
+                        }
+                    }
+                },
+
+                salvar() {
+                    const data = {};
+                    for (const [tipo, cols] of Object.entries(this.layouts)) {
+                        data[tipo] = cols.map(c => ({ key: c.key, label: c.label, visible: c.visible, width: c.width }));
+                    }
+                    localStorage.setItem('sped-hub-layout', JSON.stringify(data));
+                    this.mostrarToast('Preferências salvas com sucesso! ✅');
+                },
+
+                restaurar() {
+                    localStorage.removeItem('sped-hub-layout');
+                    for (const cols of Object.values(this.layouts)) {
+                        for (const col of cols) {
+                            col.visible = true;
+                        }
+                    }
+                    // Restaura padrões específicos
+                    const balancoNivel = this.layouts.balanco.find(c => c.key === 'nivel');
+                    if (balancoNivel) balancoNivel.visible = false;
+                    this.mostrarToast('Layout restaurado para o padrão! ↩');
+                },
+
+                mostrarToast(msg) {
+                    this.toastMsg = msg;
+                    this.toastVisivel = true;
+                    setTimeout(() => { this.toastVisivel = false; }, 3000);
+                },
+            };
+        }
+    </script>
+</body>
+</html>

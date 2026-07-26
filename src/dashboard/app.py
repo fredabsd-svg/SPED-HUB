@@ -72,7 +72,7 @@ logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.7.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.8.0")
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
@@ -1022,6 +1022,52 @@ async def api_layout(ecd_id: int = Query(...), relatorio: str = Query("balanco")
 
 
 # ── Entry point ─────────────────────────────────────────────────────────────
+
+
+def main():
+    import uvicorn
+
+# ── Rotas: Fase 10 — Comparar Multi-ECD ─────────────────────────────────
+
+@app.get("/comparar", response_class=HTMLResponse)
+async def comparar_page(request: Request):
+    """Página de comparação multi-ECD."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+    return HTMLResponse(jinja_env.get_template("comparar.html").render({
+        "request": request, "usuario": usuario, "current_page": "comparar",
+    }))
+
+
+@app.get("/layout", response_class=HTMLResponse)
+async def layout_page(request: Request):
+    """Página de layout customizável."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+    return HTMLResponse(jinja_env.get_template("layout.html").render({
+        "request": request, "usuario": usuario, "current_page": "layout",
+    }))
+
+
+@app.get("/api/comparar")
+async def api_comparar(ecd_ids: str = Query(...)):
+    """Comparação multi-ECD — retorna dados de Balanço, DRE e DFC."""
+    ids = [int(x.strip()) for x in ecd_ids.split(",") if x.strip()]
+    if len(ids) < 2:
+        return JSONResponse({"status": "erro", "mensagem": "Selecione pelo menos 2 ECDs"}, status_code=400)
+    ids = ids[:5]
+
+    session = get_session(_get_engine())
+    try:
+        svc = DashboardService(session, ids[0])
+        dados = svc.get_multi_ecd_comparison(ids)
+        if not dados:
+            return JSONResponse({"status": "erro", "mensagem": "Dados insuficientes"}, status_code=404)
+        return dados
+    finally:
+        session.close()
 
 
 def main():
