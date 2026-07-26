@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Layout Customizável — SPED-HUB</title>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1"></script>
     <style>
         :root {
             --primary: #0B4F6C;
@@ -85,14 +86,25 @@
             border: 1px solid var(--border);
             border-radius: 8px;
             transition: all 0.2s;
+            background: var(--card);
         }
-        .column-item:hover { border-color: var(--primary); }
+        .column-item:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .column-item.disabled { opacity: 0.5; }
+        .column-item.sortable-ghost {
+            opacity: 0.4;
+            background: var(--primary-light);
+            border: 2px dashed var(--primary);
+        }
+        .column-item.sortable-chosen {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+        }
         .drag-handle {
             cursor: grab;
             color: var(--text-secondary);
             font-size: 1.25rem;
+            user-select: none;
         }
+        .drag-handle:active { cursor: grabbing; }
         .toggle {
             position: relative;
             width: 48px;
@@ -152,6 +164,12 @@
             z-index: 1000;
             transition: all 0.3s;
         }
+        .drag-hint {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -162,18 +180,19 @@
             <a href="/upload">Upload</a>
             <a href="/comparar">Comparar</a>
             <a href="/layout" class="active">Layout</a>
+            <a href="/webhooks">Webhooks</a>
             <a href="/logout">Sair</a>
         </nav>
     </div>
 
     <div class="container" x-data="layoutApp()" x-init="init()">
         <h2 class="page-title">Layout Customizável</h2>
-        <p class="page-subtitle">Configure quais colunas aparecem em cada tipo de relatório. As preferências são salvas no navegador.</p>
+        <p class="page-subtitle">Arraste para reordenar e use os toggles para mostrar/ocultar colunas. As preferências são salvas no navegador.</p>
 
         <!-- Tabs de relatórios -->
         <div class="tabs">
             <template x-for="(cols, tipo) in layouts" :key="tipo">
-                <div class="tab" :class="{ active: tabAtiva === tipo }" @click="tabAtiva = tipo"
+                <div class="tab" :class="{ active: tabAtiva === tipo }" @click="tabAtiva = tipo; initSortable()"
                      x-text="nomesTabs[tipo]"></div>
             </template>
         </div>
@@ -181,9 +200,10 @@
         <!-- Colunas do relatório ativo -->
         <div class="card">
             <h3 x-text="nomesTabs[tabAtiva] + ' — Colunas'"></h3>
-            <div class="column-list">
+            <p class="drag-hint">🖐️ Arraste as colunas pelo ícone ⋮⋮ para reordenar</p>
+            <div class="column-list" :id="'sortable-' + tabAtiva" x-ref="sortableList">
                 <template x-for="(col, idx) in layouts[tabAtiva]" :key="col.key">
-                    <div class="column-item" :class="{ disabled: !col.visible }">
+                    <div class="column-item" :class="{ disabled: !col.visible }" :data-key="col.key">
                         <span class="drag-handle">⋮⋮</span>
                         <div class="column-info">
                             <div class="label" x-text="col.label"></div>
@@ -204,9 +224,9 @@
 
         <!-- Preview -->
         <div class="card">
-            <h3>📋 Preview — Colunas Visíveis</h3>
+            <h3>📋 Preview — Colunas Visíveis (na ordem atual)</h3>
             <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 1rem;">
-                As colunas marcadas abaixo aparecerão nos relatórios exportados e na visualização.
+                As colunas abaixo aparecerão nos relatórios exportados e na visualização.
             </p>
             <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
                 <template x-for="col in layouts[tabAtiva].filter(c => c.visible)" :key="col.key">
@@ -230,6 +250,7 @@
                 tabAtiva: 'balanco',
                 toastVisivel: false,
                 toastMsg: '',
+                sortableInstances: {},
                 nomesTabs: {
                     balanco: 'Balanço Patrimonial',
                     dre: 'DRE',
@@ -266,6 +287,40 @@
 
                 init() {
                     this.carregar();
+                    this.$nextTick(() => this.initSortable());
+                },
+
+                initSortable() {
+                    // Aguarda o DOM atualizar (Alpine re-render)
+                    this.$nextTick(() => {
+                        const el = document.getElementById('sortable-' + this.tabAtiva);
+                        if (!el) return;
+
+                        // Destroi instância anterior se existir
+                        if (this.sortableInstances[this.tabAtiva]) {
+                            this.sortableInstances[this.tabAtiva].destroy();
+                        }
+
+                        const self = this;
+                        this.sortableInstances[this.tabAtiva] = new Sortable(el, {
+                            handle: '.drag-handle',
+                            animation: 150,
+                            ghostClass: 'sortable-ghost',
+                            chosenClass: 'sortable-chosen',
+                            onEnd(evt) {
+                                const oldIndex = evt.oldIndex;
+                                const newIndex = evt.newIndex;
+                                if (oldIndex !== newIndex) {
+                                    // Reordena o array Alpine
+                                    const cols = self.layouts[self.tabAtiva];
+                                    const [moved] = cols.splice(oldIndex, 1);
+                                    cols.splice(newIndex, 0, moved);
+                                    // Força reatividade Alpine
+                                    self.layouts[self.tabAtiva] = [...cols];
+                                }
+                            },
+                        });
+                    });
                 },
 
                 carregar() {
@@ -275,14 +330,25 @@
                             const data = JSON.parse(saved);
                             for (const [tipo, cols] of Object.entries(data)) {
                                 if (this.layouts[tipo]) {
-                                    // Merge: mantém estrutura, atualiza visible
+                                    // Reconstrói a ordem e visibilidade a partir do salvo
+                                    const newOrder = [];
+                                    const savedKeys = new Set();
                                     for (const savedCol of cols) {
                                         const local = this.layouts[tipo].find(c => c.key === savedCol.key);
                                         if (local) {
                                             local.visible = savedCol.visible;
                                             if (savedCol.width) local.width = savedCol.width;
+                                            newOrder.push(local);
+                                            savedKeys.add(savedCol.key);
                                         }
                                     }
+                                    // Adiciona colunas novas que não estavam salvas
+                                    for (const local of this.layouts[tipo]) {
+                                        if (!savedKeys.has(local.key)) {
+                                            newOrder.push(local);
+                                        }
+                                    }
+                                    this.layouts[tipo] = newOrder;
                                 }
                             }
                         } catch (e) {
@@ -302,14 +368,35 @@
 
                 restaurar() {
                     localStorage.removeItem('sped-hub-layout');
-                    for (const cols of Object.values(this.layouts)) {
-                        for (const col of cols) {
-                            col.visible = true;
-                        }
-                    }
-                    // Restaura padrões específicos
-                    const balancoNivel = this.layouts.balanco.find(c => c.key === 'nivel');
-                    if (balancoNivel) balancoNivel.visible = false;
+                    // Restaura defaults
+                    this.layouts = {
+                        balanco: [
+                            { key: 'cod_cta', label: 'Conta', visible: true, width: 120 },
+                            { key: 'nome_cta', label: 'Descrição', visible: true, width: 300 },
+                            { key: 'nivel', label: 'Nível', visible: false, width: 60 },
+                            { key: 'saldo_atual', label: 'Saldo Atual', visible: true, width: 150 },
+                            { key: 'saldo_anterior', label: 'Saldo Anterior', visible: true, width: 150 },
+                        ],
+                        dre: [
+                            { key: 'descricao', label: 'Descrição', visible: true, width: 350 },
+                            { key: 'valor_atual', label: 'Valor Atual', visible: true, width: 150 },
+                            { key: 'valor_anterior', label: 'Valor Anterior', visible: true, width: 150 },
+                        ],
+                        dfc: [
+                            { key: 'descricao', label: 'Descrição', visible: true, width: 350 },
+                            { key: 'valor', label: 'Valor', visible: true, width: 150 },
+                            { key: 'valor_anterior', label: 'Valor Anterior', visible: true, width: 150 },
+                        ],
+                        diario: [
+                            { key: 'num_lcto', label: 'Nº Lcto', visible: true, width: 100 },
+                            { key: 'data', label: 'Data', visible: true, width: 100 },
+                            { key: 'cod_cta', label: 'Conta', visible: true, width: 120 },
+                            { key: 'historico', label: 'Histórico', visible: true, width: 300 },
+                            { key: 'debito', label: 'Débito', visible: true, width: 130 },
+                            { key: 'credito', label: 'Crédito', visible: true, width: 130 },
+                        ],
+                    };
+                    this.$nextTick(() => this.initSortable());
                     this.mostrarToast('Layout restaurado para o padrão! ↩');
                 },
 

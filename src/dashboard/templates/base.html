@@ -310,6 +310,9 @@
         <ul class="navbar-nav">
             <li><a href="/" class="{% if current_page == 'dashboard' %}active{% endif %}">📊 Dashboard</a></li>
             <li><a href="/upload" class="{% if current_page == 'upload' %}active{% endif %}">📤 Upload</a></li>
+            <li><a href="/comparar" class="{% if current_page == 'comparar' %}active{% endif %}">📊 Comparar</a></li>
+            <li><a href="/layout" class="{% if current_page == 'layout' %}active{% endif %}">⚙️ Layout</a></li>
+            <li><a href="/webhooks" class="{% if current_page == 'webhooks' %}active{% endif %}">🔔 Webhooks</a></li>
             {% if usuario %}
             <li><span class="navbar-user">{{ usuario.nome }}</span></li>
             <li><a href="/logout">🚪 Sair</a></li>
@@ -322,7 +325,7 @@
     </main>
 
     <footer class="footer">
-        SPED-HUB v0.3.0 — Plataforma de Conformidade Fiscal
+        SPED-HUB v0.9.0 — Plataforma de Conformidade Fiscal
     </footer>
 
     {% block scripts %}{% endblock %}

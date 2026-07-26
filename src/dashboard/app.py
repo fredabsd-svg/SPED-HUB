@@ -72,7 +72,7 @@ logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.8.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.9.0")
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
@@ -1024,6 +1024,24 @@ async def api_layout(ecd_id: int = Query(...), relatorio: str = Query("balanco")
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 
+
+
+# ── Rota: Dashboard de Webhooks (Fase 11) ──────────────────────────────────
+
+
+@app.get("/webhooks", response_class=HTMLResponse)
+async def webhooks_page(request: Request):
+    """Dashboard de monitoramento de webhooks."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return HTMLResponse(jinja_env.get_template("webhooks.html").render({
+        "request": request,
+        "usuario": usuario,
+        "current_page": "webhooks",
+    }))
+
 def main():
     import uvicorn
 
@@ -1069,6 +1087,24 @@ async def api_comparar(ecd_ids: str = Query(...)):
     finally:
         session.close()
 
+
+
+
+# ── Rota: Dashboard de Webhooks (Fase 11) ──────────────────────────────────
+
+
+@app.get("/webhooks", response_class=HTMLResponse)
+async def webhooks_page(request: Request):
+    """Dashboard de monitoramento de webhooks."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    return HTMLResponse(jinja_env.get_template("webhooks.html").render({
+        "request": request,
+        "usuario": usuario,
+        "current_page": "webhooks",
+    }))
 
 def main():
     import uvicorn

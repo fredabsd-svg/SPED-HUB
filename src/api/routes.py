@@ -40,6 +40,7 @@ from src.db.models import (
     PlanoConta,
     SaldoPeriodico,
     SaldoResultado,
+    WebhookDelivery,
     WebhookRegistration,
     criar_engine,
     get_session,
@@ -84,7 +85,7 @@ async def health_check():
 
     return {
         "status": "ok",
-        "version": "0.8.0",
+        "version": "0.9.0",
         "database": db_status,
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
@@ -627,3 +628,51 @@ def _descricao_evento(tipo: str) -> str:
         "ecd.validada": "Disparado quando a validação de integridade é concluída",
         "relatorio.gerado": "Disparado quando um relatório contábil é gerado",
     }.get(tipo, tipo)
+# ── Webhooks Dashboard (Fase 11) ─────────────────────────────────────────────
+
+
+@router.get("/webhooks/dashboard")
+async def webhook_dashboard_stats(api_key=Depends(requer_api_key)):
+    """Estatísticas agregadas do dashboard de webhooks."""
+    svc = WebhookService(_get_db_path())
+    return svc.get_dashboard_stats()
+
+
+@router.get("/webhooks/deliveries")
+async def listar_deliveries(
+    webhook_id: int | None = None,
+    status: str | None = None,
+    limite: int = 50,
+    api_key=Depends(requer_api_key),
+):
+    """Lista histórico de entregas de webhooks."""
+    svc = WebhookService(_get_db_path())
+    deliveries = svc.get_deliveries(webhook_id=webhook_id, status=status, limite=limite)
+    return {
+        "total": len(deliveries),
+        "dados": [
+            {
+                "id": d.id,
+                "webhook_id": d.webhook_id,
+                "evento": d.evento,
+                "status": d.status,
+                "status_code": d.status_code,
+                "error_message": d.error_message,
+                "tentativa": d.tentativa,
+                "criado_em": d.criado_em.isoformat() if d.criado_em else None,
+                "concluido_em": d.concluido_em.isoformat() if d.concluido_em else None,
+            }
+            for d in deliveries
+        ],
+    }
+
+
+@router.post("/webhooks/retry")
+async def retry_webhooks(
+    webhook_id: int | None = None,
+    api_key=Depends(requer_api_key),
+):
+    """Reenvia entregas com falha (retry manual)."""
+    svc = WebhookService(_get_db_path())
+    result = svc.retry_failed(webhook_id=webhook_id)
+    return {"status": "ok", **result}

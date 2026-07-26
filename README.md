@@ -94,7 +94,7 @@ sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 
 ```bash
 pytest tests/ -v
-# 134 testes — 100% passando
+# 183 testes — 100% passando
 ```
 
 ## Estrutura do Projeto

@@ -1,6 +1,7 @@
 """Modelos SQLAlchemy para o SPED-HUB.
 
 Todas as tabelas de dados têm chave lógica (CNPJ, periodo_ini, periodo_fin).
+Fase 11: +Escritorio (multi-tenancy), +WebhookDelivery (dashboard de webhooks).
 """
 
 import datetime
@@ -32,6 +33,30 @@ def _hash_sensivel(valor: str) -> str:
     return hashlib.sha256(valor.encode()).hexdigest()[:12]
 
 
+# ── Multi-Tenancy (Fase 11) ────────────────────────────────────────────────
+
+
+class Escritorio(Base):
+    """Escritório contábil — raiz do isolamento multi-tenant."""
+
+    __tablename__ = "escritorios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome: Mapped[str] = mapped_column(String(150), nullable=False)
+    slug: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    cnpj: Mapped[str | None] = mapped_column(String(14))
+    ativo: Mapped[bool] = mapped_column(default=True)
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+
+    usuarios: Mapped[list["Usuario"]] = relationship(back_populates="escritorio")
+    empresas: Mapped[list["Empresa"]] = relationship(back_populates="escritorio")
+
+    def __repr__(self):
+        return f"<Escritorio {self.slug}>"
+
+
 # ── Autenticação ────────────────────────────────────────────────────────────
 
 
@@ -47,12 +72,16 @@ class Usuario(Base):
     salt: Mapped[str] = mapped_column(String(64), nullable=False)
     ativo: Mapped[bool] = mapped_column(default=True)
     admin: Mapped[bool] = mapped_column(default=False)
+    escritorio_id: Mapped[int | None] = mapped_column(
+        ForeignKey("escritorios.id"), nullable=True, index=True
+    )
     criado_em: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
     )
     ultimo_login: Mapped[datetime.datetime | None] = mapped_column(DateTime)
 
     # Relacionamentos
+    escritorio: Mapped["Escritorio | None"] = relationship(back_populates="usuarios")
     sessoes: Mapped[list["Sessao"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
     empresas: Mapped[list["UsuarioEmpresa"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
 
@@ -137,8 +166,12 @@ class Empresa(Base):
     tip_ecd: Mapped[str | None] = mapped_column(String(1))
     ident_mf: Mapped[str | None] = mapped_column(String(1))
     ind_esc_cons: Mapped[str | None] = mapped_column(String(1))
+    escritorio_id: Mapped[int | None] = mapped_column(
+        ForeignKey("escritorios.id"), nullable=True, index=True
+    )
 
     # Relacionamentos
+    escritorio: Mapped["Escritorio | None"] = relationship(back_populates="empresas")
     ecds: Mapped[list["ECD"]] = relationship(back_populates="empresa", cascade="all, delete-orphan")
     usuarios: Mapped[list["UsuarioEmpresa"]] = relationship(back_populates="empresa", cascade="all, delete-orphan")
 
@@ -477,17 +510,50 @@ class WebhookRegistration(Base):
     secret: Mapped[str | None] = mapped_column(String(128))  # HMAC secret
     descricao: Mapped[str] = mapped_column(String(255), default="")
     ativo: Mapped[bool] = mapped_column(default=True)
+    max_retries: Mapped[int] = mapped_column(default=3)
     criado_em: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
     )
     ultimo_envio: Mapped[datetime.datetime | None] = mapped_column(DateTime)
     total_envios: Mapped[int] = mapped_column(default=0)
+    total_falhas: Mapped[int] = mapped_column(default=0)
+
+    deliveries: Mapped[list["WebhookDelivery"]] = relationship(
+        back_populates="webhook", cascade="all, delete-orphan"
+    )
 
     def get_eventos(self) -> list[str]:
         return json.loads(self.eventos)
 
     def __repr__(self):
         return f"<Webhook {self.id} → {self.url[:50]}>"
+
+
+class WebhookDelivery(Base):
+    """Histórico de entregas de webhook (Fase 11)."""
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    webhook_id: Mapped[int] = mapped_column(
+        ForeignKey("webhooks.id"), nullable=False, index=True
+    )
+    evento: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")  # pending, success, failed, retrying
+    status_code: Mapped[int | None] = mapped_column()
+    request_body: Mapped[str | None] = mapped_column(Text)
+    response_body: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    tentativa: Mapped[int] = mapped_column(default=1)
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    concluido_em: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    webhook: Mapped["WebhookRegistration"] = relationship(back_populates="deliveries")
+
+    def __repr__(self):
+        return f"<WebhookDelivery {self.id} {self.evento} {self.status}>"
 
 
 # ── Engine Factory ─────────────────────────────────────────────────────────

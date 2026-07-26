@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webhooks — SPED-HUB</title>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        :root {
+            --primary: #0B4F6C;
+            --primary-light: #E8F3F7;
+            --bg: #F8F9FB;
+            --card: #FFFFFF;
+            --text: #1A1A2E;
+            --text-secondary: #6B6B85;
+            --border: #E2E2EC;
+            --success: #10B981;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .navbar {
+            background: var(--primary);
+            color: white;
+            padding: 0 2rem;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .navbar h1 { font-size: 1.25rem; font-weight: 700; }
+        .navbar nav { display: flex; gap: 1.5rem; }
+        .navbar nav a {
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            padding: 0.25rem 0;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .navbar nav a:hover, .navbar nav a.active {
+            color: white;
+            border-bottom-color: white;
+        }
+        .container { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+        .page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+        .page-subtitle { color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 2rem; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            text-align: center;
+        }
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 800;
+            color: var(--primary);
+        }
+        .stat-card .stat-label {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+        .stat-card.success .stat-value { color: var(--success); }
+        .stat-card.danger .stat-value { color: var(--danger); }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .card h3 { font-size: 1.125rem; font-weight: 700; margin-bottom: 1rem; color: var(--primary); }
+
+        .chart-container { position: relative; height: 250px; margin-bottom: 1rem; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+        th {
+            text-align: left;
+            padding: 0.75rem 1rem;
+            background: var(--primary-light);
+            color: var(--primary);
+            font-weight: 700;
+            font-size: 0.8125rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        tr:hover td { background: var(--bg); }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+        .badge-success { background: #D1FAE5; color: #065F46; }
+        .badge-danger { background: #FEE2E2; color: #991B1B; }
+        .badge-warning { background: #FEF3C7; color: #92400E; }
+        .badge-pending { background: #E0E7FF; color: #3730A3; }
+
+        .btn {
+            padding: 0.5rem 1.25rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-sm { padding: 0.25rem 0.75rem; font-size: 0.75rem; }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+        .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+
+        .tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1.5rem;
+            border-bottom: 2px solid var(--border);
+        }
+        .tab {
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: var(--primary); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>🔔 SPED-HUB — Webhooks</h1>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/upload">Upload</a>
+            <a href="/comparar">Comparar</a>
+            <a href="/layout">Layout</a>
+            <a href="/webhooks" class="active">Webhooks</a>
+            <a href="/logout">Sair</a>
+        </nav>
+    </div>
+
+    <div class="container" x-data="webhookDashboard()" x-init="init()">
+        <h2 class="page-title">Dashboard de Webhooks</h2>
+        <p class="page-subtitle">Monitore as integrações com sistemas de terceiros em tempo real.</p>
+
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" x-text="stats.total_webhooks">0</div>
+                <div class="stat-label">Webhooks Registrados</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" x-text="stats.webhooks_ativos">0</div>
+                <div class="stat-label">Webhooks Ativos</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-value" x-text="stats.taxa_sucesso + '%'">100%</div>
+                <div class="stat-label">Taxa de Sucesso</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" x-text="stats.deliveries_24h">0</div>
+                <div class="stat-label">Entregas (24h)</div>
+            </div>
+        </div>
+
+        <!-- Chart -->
+        <div class="card">
+            <h3>📊 Entregas — Sucesso vs Falha</h3>
+            <div class="chart-container">
+                <canvas id="deliveryChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab" :class="{ active: tabAtiva === 'deliveries' }" @click="tabAtiva = 'deliveries'">📬 Entregas Recentes</div>
+            <div class="tab" :class="{ active: tabAtiva === 'webhooks' }" @click="tabAtiva = 'webhooks'">⚙️ Webhooks</div>
+        </div>
+
+        <!-- Deliveries Table -->
+        <div class="card" x-show="tabAtiva === 'deliveries'">
+            <h3>Últimas Entregas</h3>
+            <template x-if="deliveries.length === 0">
+                <div class="empty-state">
+                    <div class="icon">📭</div>
+                    <p>Nenhuma entrega registrada ainda.</p>
+                </div>
+            </template>
+            <template x-if="deliveries.length > 0">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Webhook</th>
+                            <th>Evento</th>
+                            <th>Status</th>
+                            <th>HTTP</th>
+                            <th>Tentativa</th>
+                            <th>Data</th>
+                            <th>Erro</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="d in deliveries" :key="d.id">
+                            <tr>
+                                <td x-text="'#' + d.id"></td>
+                                <td x-text="'#' + d.webhook_id"></td>
+                                <td><span class="badge badge-pending" x-text="d.evento"></span></td>
+                                <td>
+                                    <span class="badge"
+                                          :class="{
+                                              'badge-success': d.status === 'success',
+                                              'badge-danger': d.status === 'failed',
+                                              'badge-warning': d.status === 'retrying',
+                                              'badge-pending': d.status === 'pending'
+                                          }"
+                                          x-text="d.status"></span>
+                                </td>
+                                <td x-text="d.status_code || '—'"></td>
+                                <td x-text="d.tentativa"></td>
+                                <td x-text="d.criado_em ? d.criado_em.slice(0, 16).replace('T', ' ') : ''"></td>
+                                <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" x-text="d.error_message || '—'"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </template>
+        </div>
+
+        <!-- Webhooks Table -->
+        <div class="card" x-show="tabAtiva === 'webhooks'">
+            <h3>Webhooks Registrados</h3>
+            <template x-if="webhooks.length === 0">
+                <div class="empty-state">
+                    <div class="icon">🔕</div>
+                    <p>Nenhum webhook registrado. Use a API REST para registrar.</p>
+                </div>
+            </template>
+            <template x-if="webhooks.length > 0">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>URL</th>
+                            <th>Eventos</th>
+                            <th>Status</th>
+                            <th>Envios</th>
+                            <th>Falhas</th>
+                            <th>Último Envio</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="wh in webhooks" :key="wh.id">
+                            <tr>
+                                <td x-text="'#' + wh.id"></td>
+                                <td style="max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" x-text="wh.url"></td>
+                                <td>
+                                    <template x-for="evt in wh.eventos" :key="evt">
+                                        <span class="badge badge-pending" style="margin-right:4px;" x-text="evt"></span>
+                                    </template>
+                                </td>
+                                <td>
+                                    <span class="badge" :class="wh.ativo ? 'badge-success' : 'badge-danger'"
+                                          x-text="wh.ativo ? 'Ativo' : 'Inativo'"></span>
+                                </td>
+                                <td x-text="wh.total_envios"></td>
+                                <td x-text="wh.total_falhas || 0"></td>
+                                <td x-text="wh.ultimo_envio ? wh.ultimo_envio.slice(0, 16).replace('T', ' ') : '—'"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </template>
+        </div>
+    </div>
+
+    <script>
+        function webhookDashboard() {
+            return {
+                tabAtiva: 'deliveries',
+                stats: {
+                    total_webhooks: 0,
+                    webhooks_ativos: 0,
+                    total_deliveries: 0,
+                    total_success: 0,
+                    total_failed: 0,
+                    taxa_sucesso: 100,
+                    deliveries_24h: 0,
+                    success_24h: 0,
+                },
+                deliveries: [],
+                webhooks: [],
+                chart: null,
+
+                async init() {
+                    await Promise.all([
+                        this.loadStats(),
+                        this.loadDeliveries(),
+                        this.loadWebhooks(),
+                    ]);
+                    this.renderChart();
+                },
+
+                async loadStats() {
+                    try {
+                        const resp = await fetch('/api/v1/webhooks/dashboard');
+                        if (resp.ok) {
+                            this.stats = await resp.json();
+                        }
+                    } catch (e) {
+                        console.error('Erro ao carregar stats:', e);
+                    }
+                },
+
+                async loadDeliveries() {
+                    try {
+                        const resp = await fetch('/api/v1/webhooks/deliveries?limite=50');
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            this.deliveries = data.dados || [];
+                        }
+                    } catch (e) {
+                        console.error('Erro ao carregar deliveries:', e);
+                    }
+                },
+
+                async loadWebhooks() {
+                    try {
+                        const resp = await fetch('/api/v1/webhooks');
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            this.webhooks = data.dados || [];
+                        }
+                    } catch (e) {
+                        console.error('Erro ao carregar webhooks:', e);
+                    }
+                },
+
+                renderChart() {
+                    const ctx = document.getElementById('deliveryChart');
+                    if (!ctx) return;
+                    if (this.chart) this.chart.destroy();
+
+                    this.chart = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Sucesso', 'Falha'],
+                            datasets: [{
+                                data: [this.stats.total_success, this.stats.total_failed],
+                                backgroundColor: ['#10B981', '#EF4444'],
+                                borderWidth: 0,
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { position: 'bottom' },
+                            },
+                        },
+                    });
+                },
+            };
+        }
+    </script>
+</body>
+</html>
