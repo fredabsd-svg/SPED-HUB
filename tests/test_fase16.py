@@ -121,7 +121,7 @@ class TestOperationalSnapshot:
             minutes=15,
         )
 
-        assert snapshot["version"] == APP_VERSION == "0.14.0"
+        assert snapshot["version"] == APP_VERSION
         assert snapshot["http"]["requests"] == 1
         assert snapshot["database"]["status"] == "ok"
         assert snapshot["database"]["companies"] == 0
@@ -151,7 +151,7 @@ class TestMonitoringEndpoints:
         response = app_client.get("/api/monitoring/summary?minutes=15")
         assert response.status_code == 200
         data = response.json()
-        assert data["version"] == "0.14.0"
+        assert data["version"] == APP_VERSION
         assert data["http"]["requests"] >= 1
         assert data["database"]["status"] == "ok"
 

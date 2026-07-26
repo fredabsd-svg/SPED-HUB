@@ -3,6 +3,8 @@
 Todas as tabelas de dados têm chave lógica (CNPJ, periodo_ini, periodo_fin).
 Fase 11: +Escritorio (multi-tenancy), +WebhookDelivery (dashboard de webhooks).
 Fase 13: +RateLimitConfig, +AuditLog (rate limiting e auditoria).
+Fase 17: ``criar_engine`` aceita URL genérica (SQLite ou PostgreSQL) lendo
+também de :mod:`src.settings`.
 """
 
 import datetime
@@ -23,7 +25,10 @@ from sqlalchemy import (
     create_engine,
     event,
 )
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
+
+from src.settings import get_settings
 
 
 class Base(DeclarativeBase):
@@ -659,29 +664,104 @@ class AsyncJob(Base):
         return f"<AsyncJob {self.id} {self.tipo} {self.status}>"
 
 
+# ── Engine Factory (Fase 17: banco configurável) ───────────────────────────
 
-# ── Engine Factory ─────────────────────────────────────────────────────────
+
+# Casos especiais do SQLite que têm URL canônica própria.
+_SQLITE_INLINE_URLS = {
+    ":memory:": "sqlite:///:memory:",
+    "": "sqlite:///:memory:",
+}
 
 
-def criar_engine(caminho: str = "sped_hub.db", echo: bool = False):
-    """Cria engine SQLite com WAL mode e foreign keys ativadas."""
-    engine = create_engine(f"sqlite:///{caminho}", echo=echo)
+def _caminho_para_url_sqlite(caminho: str) -> str:
+    """Converte caminho de arquivo em URL SQLite preservando o contrato da Fase 16.
 
-    @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    Regras:
+        * ``:memory:`` e vazio → ``sqlite:///:memory:`` (banco em memória,
+          uma instância por engine — esta é a forma historicamente usada).
+        * Caminho absoluto → ``sqlite:///{caminho}`` (3 barras + path).
+        * Caminho relativo → ``sqlite:///./{caminho}`` (resolve a partir do cwd).
+    """
+    if caminho in _SQLITE_INLINE_URLS:
+        return _SQLITE_INLINE_URLS[caminho]
+    if caminho.startswith("/"):
+        return f"sqlite:///{caminho}"
+    return f"sqlite:///./{caminho}"
+
+
+def _normalizar_database_url(caminho: str | None) -> str:
+    """Converte um caminho SQLite em URL, mas mantém URLs explícitas."""
+    if caminho is None:
+        return get_settings().database_url
+    if "://" in caminho:
+        return caminho
+    return _caminho_para_url_sqlite(caminho)
+
+
+def criar_engine(
+    caminho: str | None = None,
+    *,
+    url: str | None = None,
+    echo: bool | None = None,
+):
+    """Cria engine SQLAlchemy.
+
+    Parâmetros:
+        caminho: aceita caminho de arquivo (legado, p.ex. ``":memory:"`` ou
+            ``"sped_hub.db"``) ou uma URL completa (``"sqlite:///..."``,
+            ``"postgresql+psycopg://..."``).  Quando contém ``://`` é tratado
+            como URL diretamente.
+        url: URL canônica (tem precedência sobre ``caminho``).
+        echo: ativa ``echo`` do SQLAlchemy.  Quando ``None``, usa
+            ``settings.database_echo``.
+
+    Para bancos SQLite, ativa ``WAL`` e ``foreign_keys=ON`` (exceto em
+    ``:memory:``, onde WAL não é suportado e é ignorado silenciosamente).
+    Para outros backends, apenas retorna a engine configurada para a URL
+    fornecida.
+    """
+    final_url = url or _normalizar_database_url(caminho) or get_settings().database_url
+
+    if echo is None:
+        echo = get_settings().database_echo
+
+    is_sqlite_memory = final_url == "sqlite:///:memory:"
+    is_sqlite = final_url.startswith("sqlite")
+
+    engine = create_engine(final_url, echo=echo, future=True)
+
+    if is_sqlite and not is_sqlite_memory:
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                # WAL não funciona em :memory:, mas fora dele é seguro.
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA foreign_keys=ON")
+            finally:
+                cursor.close()
 
     return engine
 
 
-def init_db(engine) -> None:
-    """Cria todas as tabelas."""
+def init_db(engine: Engine | None = None) -> None:
+    """Cria todas as tabelas.
+
+    Quando ``engine`` é ``None``, cria uma nova a partir das settings.  Útil
+    para CLI/workers que já estão configurados para um banco específico
+    através do ambiente.
+    """
+    if engine is None:
+        engine = criar_engine()
     Base.metadata.create_all(engine)
 
 
-def get_session(engine):
-    """Retorna uma nova sessão."""
+def get_session(engine: Engine | None = None) -> Session:
+    """Retorna uma nova sessão.
+
+    Mantido retrocompatível: aceita uma engine explícita ou usa settings.
+    """
+    if engine is None:
+        engine = criar_engine()
     return Session(engine)
