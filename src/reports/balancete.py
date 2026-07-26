@@ -10,6 +10,7 @@ import datetime
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.models import PlanoConta, SaldoPeriodico
@@ -88,9 +89,9 @@ class Balancete:
         # Busca plano de contas
         plano = {
             c.cod_cta: c
-            for c in self.session.query(PlanoConta)
-            .filter(PlanoConta.ecd_id == self.ecd_id)
-            .all()
+            for c in self.session.execute(
+                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
+            ).scalars()
         }
 
         # Monta linhas

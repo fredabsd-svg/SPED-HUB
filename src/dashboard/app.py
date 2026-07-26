@@ -71,7 +71,7 @@ logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.6.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.6.1")
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
@@ -901,24 +901,6 @@ async def api_layout(ecd_id: int = Query(...), relatorio: str = Query("balanco")
     finally:
         session.close()
 
-
-@app.get("/api/v1/health")
-async def api_v1_health():
-    """Health check público (Fase 7)."""
-    try:
-        session = get_session(_get_engine())
-        session.execute(select(1))
-        session.close()
-        db_status = "ok"
-    except Exception:
-        db_status = "error"
-
-    return {
-        "status": "ok",
-        "version": "0.6.0",
-        "database": db_status,
-        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-    }
 
 
 # ── Entry point ─────────────────────────────────────────────────────────────

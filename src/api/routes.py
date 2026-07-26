@@ -72,7 +72,7 @@ async def health_check():
 
     return {
         "status": "ok",
-        "version": "0.6.0",
+        "version": "0.6.1",
         "database": db_status,
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
@@ -393,7 +393,7 @@ async def api_diario(
             "lancamentos": [
                 {
                     "num_lcto": l.num_lcto,
-                    "data": l.data.isoformat() if hasattr(l, "data") else str(l.data),
+                    "data": str(l.data),
                     "ind_lcto": l.ind_lcto if hasattr(l, "ind_lcto") else "",
                     "total_debito": l.total_debito if hasattr(l, "total_debito") else 0.0,
                     "total_credito": l.total_credito if hasattr(l, "total_credito") else 0.0,
