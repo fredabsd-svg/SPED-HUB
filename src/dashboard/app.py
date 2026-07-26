@@ -39,10 +39,10 @@ API REST v1 (autenticação por X-API-Key):
 
 import datetime
 import os
-import hashlib
 import io
 import logging
 import sys
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Query, Request, UploadFile
@@ -52,8 +52,9 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.db.models import criar_engine, get_session, init_db
+from src.db.models import ECD, Empresa, criar_engine, get_session, init_db
 from src.db.repository import Repository
+from src.ecd_importer import ECDImportError, ECDImportService
 from src.parsers.ecd import ECDParser
 from src.parsers.efd import EFDParser
 from src.parsers.ecf import ECFParser
@@ -63,7 +64,13 @@ from src.reports.dre import DRE
 from src.reports.diario import LivroDiario
 from src.reports.dfc import DFC
 from src.reports.base import fmt_moeda, fmt_data
-from src.auth import AuthService, init_auth, get_auth, get_usuario_atual, requer_autenticacao
+from src.auth import (
+    aplicar_escopo_empresas,
+    get_auth,
+    get_usuario_atual,
+    init_auth,
+    usuario_pode_acessar_ecd,
+)
 from src.filters.engine import FilterCriteria
 from src.api.routes import router as api_v1_router
 from src.audit import AuditService, init_audit_service, get_audit_service
@@ -71,13 +78,16 @@ from src.ratelimit import init_limiter
 from src.api.graphql import graphql_router
 from src.email_service import EmailService, init_email_service, get_email_service
 from src.cache.redis_cache import RedisCacheService
+from src.uploads import save_upload
+from src.monitoring import build_operational_snapshot, metrics_collector
+from src.version import APP_VERSION
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.13.0")
+app = FastAPI(title="SPED-HUB Dashboard", version=APP_VERSION)
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
@@ -92,9 +102,10 @@ jinja_env = Environment(
     autoescape=select_autoescape(['html']),
 )
 
-# Banco padrão
-DB_PATH = Path("sped_hub.db")
-if not DB_PATH.is_absolute():
+# Banco configurado (resolvido antes de inicializar serviços globais)
+_configured_db = os.environ.get("SPED_HUB_DB", "sped_hub.db")
+DB_PATH = Path(_configured_db)
+if _configured_db != ":memory:" and not DB_PATH.is_absolute():
     DB_PATH = Path.cwd() / DB_PATH
 
 # Inicializa auth e banco
@@ -110,11 +121,87 @@ def _get_engine():
     return criar_engine(db)
 
 
+_PUBLIC_API_PATHS = {
+    "/api/login",
+    "/api/register",
+    "/api/health/full",
+}
+
+
+@app.middleware("http")
+async def collect_request_metrics(request: Request, call_next):
+    """Registra status e latência sem armazenar query strings ou payloads."""
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        metrics_collector.record(
+            request.method,
+            request.url.path,
+            status_code,
+            (time.perf_counter() - started) * 1000,
+        )
+
+
+@app.middleware("http")
+async def require_dashboard_api_auth(request: Request, call_next):
+    """Protege APIs internas; REST v1 e GraphQL têm autenticação própria."""
+    path = request.url.path.rstrip("/") or "/"
+    is_external_api = path.startswith("/api/v1") or path.startswith("/api/v2/graphql")
+    if path.startswith("/api/") and path not in _PUBLIC_API_PATHS and not is_external_api:
+        usuario = await get_usuario_atual(request)
+        if usuario is None:
+            return JSONResponse(
+                {"status": "erro", "mensagem": "Não autenticado"},
+                status_code=401,
+            )
+        request.state.usuario = usuario
+
+        admin_prefixes = (
+            "/api/audit",
+            "/api/cache",
+            "/api/email",
+            "/api/worker",
+            "/api/redis",
+            "/api/monitoring",
+        )
+        if path.startswith(admin_prefixes) and not usuario.admin:
+            return JSONResponse(
+                {"status": "erro", "mensagem": "Acesso administrativo necessário"},
+                status_code=403,
+            )
+
+        raw_ids = []
+        if request.query_params.get("ecd_id"):
+            raw_ids.append(request.query_params["ecd_id"])
+        if request.query_params.get("ecd_ids"):
+            raw_ids.extend(request.query_params["ecd_ids"].split(","))
+        ecd_ids = {int(value.strip()) for value in raw_ids if value.strip().isdigit()}
+        if ecd_ids:
+            session = get_session(_get_engine())
+            try:
+                if any(
+                    not usuario_pode_acessar_ecd(session, usuario, ecd_id)
+                    for ecd_id in ecd_ids
+                ):
+                    return JSONResponse(
+                        {"status": "erro", "mensagem": "ECD não encontrada"},
+                        status_code=404,
+                    )
+            finally:
+                session.close()
+    return await call_next(request)
+
+
 # ── Filtros Jinja2 ─────────────────────────────────────────────────────────
 
 jinja_env.globals["fmt_moeda"] = fmt_moeda
 jinja_env.globals["fmt_data"] = fmt_data
 jinja_env.globals["now"] = datetime.datetime.now
+jinja_env.globals["app_version"] = APP_VERSION
 
 
 # ── Rotas: Autenticação ────────────────────────────────────────────────────
@@ -252,11 +339,12 @@ async def dashboard(request: Request):
 
     session = get_session(_get_engine())
     try:
-        from sqlalchemy import select, desc
-        from src.db.models import ECD
+        from sqlalchemy import desc
 
+        latest_stmt = select(ECD).join(Empresa)
+        latest_stmt = aplicar_escopo_empresas(latest_stmt, usuario)
         ecd = session.execute(
-            select(ECD).order_by(desc(ECD.importado_em)).limit(1)
+            latest_stmt.order_by(desc(ECD.importado_em)).limit(1)
         ).scalar_one_or_none()
 
         if ecd:
@@ -265,9 +353,9 @@ async def dashboard(request: Request):
             evolucao = svc.get_evolucao_patrimonial()
             composicao = svc.get_composicao_ativo()
             dre_waterfall = svc.get_dre_waterfall()
-            ecds = svc.get_ecds_disponiveis()
+            ecds = svc.get_ecds_disponiveis(usuario)
             # Dados para comparativo
-            comparativo = svc.get_comparativo_empresas() if len(ecds) > 1 else None
+            comparativo = svc.get_comparativo_empresas(usuario) if len(ecds) > 1 else None
         else:
             data = None
             evolucao = None
@@ -310,196 +398,56 @@ async def upload_page(request: Request):
 
 
 @app.post("/api/upload")
-async def api_upload(file: UploadFile = File(...)):
-    """Upload e processamento de arquivo ECD."""
-    if not file.filename or not file.filename.lower().endswith((".txt", ".ecd")):
-        return JSONResponse({"status": "erro", "mensagem": "Formato inválido. Envie um arquivo .txt ou .ecd"}, status_code=400)
-
-    upload_dir = Path("/workspace/uploads")
-    upload_dir.mkdir(exist_ok=True)
-    temp_path = upload_dir / file.filename
-
-    content = await file.read()
-    temp_path.write_bytes(content)
-    hash_arquivo = hashlib.sha256(content).hexdigest()
-
-    engine = _get_engine()
-    session = get_session(engine)
-    repo = Repository(session)
-
+async def api_upload(request: Request, file: UploadFile = File(...)):
+    """Upload e importação incremental de arquivo ECD."""
+    saved = await save_upload(file, (".txt", ".ecd"))
+    session = get_session(_get_engine())
     try:
-        parser = ECDParser()
-        registros = parser.parse_todos(temp_path)
-
-        from collections import defaultdict
-        grupos = defaultdict(list)
-        for r in registros:
-            grupos[r["_reg"]].append(r)
-
-        if not grupos.get("0000"):
-            return JSONResponse({"status": "erro", "mensagem": "Arquivo não contém registro 0000 — não é uma ECD válida"}, status_code=400)
-
-        r0000 = grupos["0000"][0]
-        empresa = repo.upsert_empresa({
-            "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
-            "nome": r0000.get("NOME", ""),
-            "uf": r0000.get("UF", ""),
-            "ie": r0000.get("IE", ""),
-            "cod_mun": str(int(r0000.get("COD_MUN", 0))).zfill(7) if r0000.get("COD_MUN") else None,
-            "im": r0000.get("IM", ""),
-            "ind_sit_esp": int(r0000.get("IND_SIT_ESP", 0)) if r0000.get("IND_SIT_ESP") else None,
-            "ind_nire": int(r0000.get("IND_NIRE", 0)) if r0000.get("IND_NIRE") else None,
-            "ind_fin_esc": int(r0000.get("IND_FIN_ESC", 0)) if r0000.get("IND_FIN_ESC") else None,
-            "ind_grande_por": int(r0000.get("IND_GRANDE_POR", 0)) if r0000.get("IND_GRANDE_POR") else None,
-            "tip_ecd": r0000.get("TIP_ECD", ""),
-            "ident_mf": r0000.get("IDENT_MF", ""),
-            "ind_esc_cons": r0000.get("IND_ESC_CONS", ""),
-        })
-
-        rI010 = grupos["I010"][0] if grupos["I010"] else {}
-        leiaute = rI010.get("COD_VER_LC", "009")
-
-        def _parse_data(valor):
-            if len(valor) == 8 and valor.isdigit():
-                return datetime.date(int(valor[4:8]), int(valor[2:4]), int(valor[0:2]))
-            return datetime.date.today()
-
-        dt_ini = _parse_data(str(int(r0000.get("DT_INI", 0))).zfill(8))
-        dt_fin = _parse_data(str(int(r0000.get("DT_FIN", 0))).zfill(8))
-
-        ecd = repo.criar_ecd(empresa.id, {
-            "leiaute": leiaute,
-            "dt_ini": dt_ini,
-            "dt_fin": dt_fin,
-            "ind_esc": rI010.get("IND_ESC", ""),
-            "cod_ver_lc": leiaute,
-            "hash_arquivo": hash_arquivo,
-            "nome_arquivo": file.filename,
-        })
-
-        # Plano de Contas
-        contas = []
-        for r in grupos["I050"]:
-            contas.append({
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_cta_sup": r.get("COD_CTA_SUP", ""),
-                "nome_cta": r.get("NOME_CTA", ""),
-                "cod_nat": r.get("COD_NAT", "01"),
-                "ind_cta": r.get("IND_CTA", "A"),
-                "nivel": int(r.get("NIVEL", 0)),
-                "dt_alt": _parse_data(str(int(r.get("DT_ALT", 0))).zfill(8)) if r.get("DT_ALT") else None,
-            })
-        repo.inserir_plano_contas(ecd.id, contas)
-
-        # Contas Referenciais
-        refs = []
-        for r in grupos["I051"]:
-            refs.append({"cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""), "cod_cta_ref": r.get("COD_CTA_REF", "")})
-        repo.inserir_contas_referenciais(ecd.id, refs)
-
-        # Aglutinações
-        agls = []
-        for r in grupos["I052"]:
-            agls.append({"cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""), "cod_agl": r.get("COD_AGL", "")})
-        repo.inserir_aglutinacoes(ecd.id, agls)
-
-        # Históricos
-        hists = []
-        for r in grupos["I075"]:
-            hists.append({"cod_hist": r.get("COD_HIST", ""), "descr_hist": r.get("DESCR_HIST", "")})
-        repo.inserir_historicos_padrao(ecd.id, hists)
-
-        # Saldos Periódicos
-        saldos = []
-        for r in grupos["I155"]:
-            saldos.append({
-                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-                "dt_ini": dt_ini, "dt_fin": dt_fin,
-                "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0, "ind_dc_ini": r.get("IND_DC_INI", "D"),
-                "vl_deb": r.get("VL_DEB", 0.0) or 0.0, "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
-                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-            })
-        repo.inserir_saldos_periodicos(ecd.id, saldos)
-
-        # Saldos Resultado
-        saldos_res = []
-        for r in grupos["I355"]:
-            saldos_res.append({
-                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-                "dt_res": dt_fin,
-                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-            })
-        repo.inserir_saldos_resultado(ecd.id, saldos_res)
-
-        # Lançamentos
-        lancs = []
-        for r in grupos["I200"]:
-            lancs.append({
-                "num_lcto": r.get("NUM_LCTO", ""),
-                "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)) if r.get("DT_LCTO") else dt_ini,
-                "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
-                "ind_lcto": r.get("IND_LCTO", "N"),
-                "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-            })
-        repo.inserir_lancamentos(ecd.id, lancs)
-
-        partidas = []
-        for r in grupos["I250"]:
-            partidas.append({
-                "num_lcto": r.get("NUM_LCTO", ""),
-                "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat() if r.get("DT_LCTO") else dt_ini.isoformat(),
-                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-                "vl_dc": r.get("VL_DC", 0.0) or 0.0, "ind_dc": r.get("IND_DC", "D"),
-                "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-                "cod_hist_pad": r.get("COD_HIST_PAD", ""), "hist": r.get("HIST", ""),
-                "cod_part": r.get("COD_PART", ""),
-            })
-        repo.inserir_partidas(ecd.id, partidas)
-
-        repo.commit()
-
-        # Registra auditoria
-        svc_audit = AuditService(str(DB_PATH))
-        svc_audit.registrar(
-            acao="ecd.upload",
-            recurso=f"ECD #{ecd.id} ({empresa.nome})",
-            detalhes={
-                "contas": len(contas),
-                "lancamentos": len(lancs),
-                "partidas": len(partidas),
-                "arquivo": file.filename,
-            },
+        result = ECDImportService(session).importar(
+            saved.path,
+            hash_arquivo=saved.sha256,
+            nome_arquivo=saved.original_name,
+            escritorio_id=request.state.usuario.escritorio_id,
         )
-
-        return JSONResponse({
-            "status": "ok",
-            "mensagem": f"ECD importada com sucesso! {len(contas)} contas, {len(lancs)} lançamentos, {len(partidas)} partidas.",
-            "ecd_id": ecd.id,
-            "empresa": empresa.nome,
-            "periodo": f"{dt_ini} a {dt_fin}",
-        })
-
-    except Exception as e:
-        repo.rollback()
+        AuditService(os.environ.get("SPED_HUB_DB", str(DB_PATH))).registrar(
+            acao="ecd.upload",
+            recurso=f"ECD #{result.ecd_id} ({result.empresa})",
+            detalhes=result.to_dict(),
+        )
+        return JSONResponse(
+            {
+                "status": "ok",
+                "mensagem": (
+                    "ECD importada com sucesso! "
+                    f"{result.contas} contas, {result.lancamentos} lançamentos, "
+                    f"{result.partidas} partidas."
+                ),
+                "ecd_id": result.ecd_id,
+                "empresa": result.empresa,
+                "periodo": result.periodo,
+            }
+        )
+    except ECDImportError as exc:
+        return JSONResponse(
+            {"status": "erro", "mensagem": str(exc)},
+            status_code=400,
+        )
+    except Exception as exc:
         logger.exception("Erro ao importar ECD")
-        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
+        return JSONResponse(
+            {"status": "erro", "mensagem": str(exc)},
+            status_code=500,
+        )
     finally:
         session.close()
-        if temp_path.exists():
-            temp_path.unlink()
+        saved.path.unlink(missing_ok=True)
 
 
 @app.post("/api/upload-efd")
 async def api_upload_efd(file: UploadFile = File(...)):
     """Upload de arquivo EFD-Contribuições."""
-    if not file.filename or not file.filename.lower().endswith((".txt", ".efd")):
-        return JSONResponse({"status": "erro", "mensagem": "Formato inválido"}, status_code=400)
-
-    upload_dir = Path("/workspace/uploads")
-    upload_dir.mkdir(exist_ok=True)
-    temp_path = upload_dir / file.filename
-    content = await file.read()
-    temp_path.write_bytes(content)
+    saved = await save_upload(file, (".txt", ".efd"))
+    temp_path = saved.path
 
     try:
         parser = EFDParser()
@@ -520,14 +468,8 @@ async def api_upload_efd(file: UploadFile = File(...)):
 @app.post("/api/upload-ecf")
 async def api_upload_ecf(file: UploadFile = File(...)):
     """Upload de arquivo ECF."""
-    if not file.filename or not file.filename.lower().endswith((".txt", ".ecf")):
-        return JSONResponse({"status": "erro", "mensagem": "Formato inválido"}, status_code=400)
-
-    upload_dir = Path("/workspace/uploads")
-    upload_dir.mkdir(exist_ok=True)
-    temp_path = upload_dir / file.filename
-    content = await file.read()
-    temp_path.write_bytes(content)
+    saved = await save_upload(file, (".txt", ".ecf"))
+    temp_path = saved.path
 
     try:
         parser = ECFParser()
@@ -562,7 +504,7 @@ async def api_kpis(request: Request, ecd_id: int = Query(...)):
 
 
 @app.get("/api/graficos")
-async def api_graficos(ecd_id: int = Query(...)):
+async def api_graficos(request: Request, ecd_id: int = Query(...)):
     session = get_session(_get_engine())
     try:
         svc = DashboardService(session, ecd_id)
@@ -572,7 +514,7 @@ async def api_graficos(ecd_id: int = Query(...)):
             "composicao": svc.get_composicao_ativo(),
             "dre_waterfall": svc.get_dre_waterfall(),
             "dfc": svc.get_dfc_data(),
-            "comparativo": svc.get_comparativo_empresas(),
+            "comparativo": svc.get_comparativo_empresas(request.state.usuario),
         }
     finally:
         session.close()
@@ -645,11 +587,11 @@ async def api_dfc(request: Request, ecd_id: int = Query(...)):
 
 
 @app.get("/api/ecds")
-async def api_ecds():
+async def api_ecds(request: Request):
     session = get_session(_get_engine())
     try:
         svc = DashboardService(session, 0)
-        return svc.get_ecds_disponiveis()
+        return svc.get_ecds_disponiveis(request.state.usuario)
     finally:
         session.close()
 
@@ -665,6 +607,8 @@ async def auditoria_page(request: Request):
     usuario = await get_usuario_atual(request)
     if not usuario:
         return RedirectResponse(url="/login", status_code=302)
+    if not usuario.admin:
+        return _monitoring_forbidden()
 
     return HTMLResponse(jinja_env.get_template("auditoria.html").render({
         "request": request,
@@ -741,202 +685,66 @@ async def api_audit_limpar(
 
 
 @app.post("/api/upload-async")
-async def api_upload_async(file: UploadFile = File(...)):
-    """Upload assíncrono de ECD — retorna job_id para polling.
+async def api_upload_async(request: Request, file: UploadFile = File(...)):
+    """Upload assíncrono de ECD com importação incremental e polling."""
+    from src.async_jobs import get_async_job_service, init_async_job_service
 
-    Ideal para arquivos grandes (>50MB). O cliente faz polling em
-    GET /api/jobs/{job_id} para acompanhar o progresso.
-    """
-    import asyncio
-    from src.async_jobs import AsyncJobService, get_async_job_service, init_async_job_service
-
-    if not file.filename or not file.filename.lower().endswith((".txt", ".ecd")):
-        return JSONResponse({"status": "erro", "mensagem": "Formato inválido. Envie um arquivo .txt ou .ecd"}, status_code=400)
-
-    upload_dir = Path("/workspace/uploads")
-    upload_dir.mkdir(exist_ok=True)
-    temp_path = upload_dir / file.filename
-
-    content = await file.read()
-    temp_path.write_bytes(content)
-
-    # Cria job
-    init_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
-    job_svc = get_async_job_service()
-    job = job_svc.criar(
+    saved = await save_upload(file, (".txt", ".ecd"))
+    escritorio_id = request.state.usuario.escritorio_id
+    db_path = os.environ.get("SPED_HUB_DB", str(DB_PATH))
+    init_async_job_service(db_path)
+    job_service = get_async_job_service()
+    job = job_service.criar(
         tipo="ecd_import",
-        parametros={"arquivo": file.filename, "tamanho_bytes": len(content)},
+        parametros={
+            "arquivo": saved.original_name,
+            "tamanho_bytes": saved.size_bytes,
+            "usuario_id": request.state.usuario.id,
+            "escritorio_id": escritorio_id,
+        },
     )
 
-    # Inicia processamento em background
     import threading
-    def _processar():
+
+    def process_upload():
+        session = get_session(criar_engine(db_path))
         try:
-            job_svc.atualizar_progresso(job.id, 5.0, "Iniciando parser...")
-
-            parser = ECDParser()
-            job_svc.atualizar_progresso(job.id, 10.0, "Parser carregado, lendo arquivo...")
-
-            # Conta registros primeiro para estimar progresso
-            contagem = parser.contar_registros(temp_path)
-            total_regs = sum(contagem.values())
-            job_svc.atualizar_progresso(job.id, 15.0, f"Detectados {total_regs} registros")
-
-            # Processa em lotes
-            registros = []
-            lotes_processados = 0
-            for lote in parser.parse_em_lotes(temp_path, tamanho_lote=500):
-                registros.extend(lote)
-                lotes_processados += 1
-                progresso = min(90.0, 15.0 + (lotes_processados / max(1, total_regs / 500)) * 75.0)
-                job_svc.atualizar_progresso(job.id, progresso, f"Processando lote {lotes_processados}...")
-
-            job_svc.atualizar_progresso(job.id, 90.0, "Salvando no banco...")
-
-            # Agrupa e salva
-            from collections import defaultdict
-            grupos = defaultdict(list)
-            for r in registros:
-                grupos[r["_reg"]].append(r)
-
-            if not grupos.get("0000"):
-                raise ValueError("Arquivo não contém registro 0000")
-
-            engine_local = _get_engine()
-            session_local = get_session(engine_local)
-            repo = Repository(session_local)
-
-            try:
-                r0000 = grupos["0000"][0]
-                empresa = repo.upsert_empresa({
-                    "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
-                    "nome": r0000.get("NOME", ""),
-                    "uf": r0000.get("UF", ""),
-                    "ie": r0000.get("IE", ""),
-                    "cod_mun": str(int(r0000.get("COD_MUN", 0))).zfill(7) if r0000.get("COD_MUN") else None,
-                    "im": r0000.get("IM", ""),
-                    "ind_sit_esp": int(r0000.get("IND_SIT_ESP", 0)) if r0000.get("IND_SIT_ESP") else None,
-                    "ind_nire": int(r0000.get("IND_NIRE", 0)) if r0000.get("IND_NIRE") else None,
-                    "ind_fin_esc": int(r0000.get("IND_FIN_ESC", 0)) if r0000.get("IND_FIN_ESC") else None,
-                    "ind_grande_por": int(r0000.get("IND_GRANDE_POR", 0)) if r0000.get("IND_GRANDE_POR") else None,
-                    "tip_ecd": r0000.get("TIP_ECD", ""),
-                    "ident_mf": r0000.get("IDENT_MF", ""),
-                    "ind_esc_cons": r0000.get("IND_ESC_CONS", ""),
-                })
-
-                rI010 = grupos["I010"][0] if grupos["I010"] else {}
-                leiaute = rI010.get("COD_VER_LC", "009")
-
-                def _parse_data(valor):
-                    if len(valor) == 8 and valor.isdigit():
-                        return datetime.date(int(valor[4:8]), int(valor[2:4]), int(valor[0:2]))
-                    return datetime.date.today()
-
-                dt_ini = _parse_data(str(int(r0000.get("DT_INI", 0))).zfill(8))
-                dt_fin = _parse_data(str(int(r0000.get("DT_FIN", 0))).zfill(8))
-
-                hash_arquivo_local = hashlib.sha256(content).hexdigest()
-                ecd = repo.criar_ecd(empresa.id, {
-                    "leiaute": leiaute,
-                    "dt_ini": dt_ini,
-                    "dt_fin": dt_fin,
-                    "ind_esc": rI010.get("IND_ESC", ""),
-                    "cod_ver_lc": leiaute,
-                    "hash_arquivo": hash_arquivo_local,
-                    "nome_arquivo": file.filename,
-                })
-
-                # Plano de Contas
-                contas = []
-                for r in grupos["I050"]:
-                    contas.append({
-                        "cod_cta": r.get("COD_CTA", ""),
-                        "cod_cta_sup": r.get("COD_CTA_SUP", ""),
-                        "nome_cta": r.get("NOME_CTA", ""),
-                        "cod_nat": r.get("COD_NAT", "01"),
-                        "ind_cta": r.get("IND_CTA", "A"),
-                        "nivel": int(r.get("NIVEL", 0)),
-                        "dt_alt": _parse_data(str(int(r.get("DT_ALT", 0))).zfill(8)) if r.get("DT_ALT") else None,
-                    })
-                repo.inserir_plano_contas(ecd.id, contas)
-
-                # Saldos
-                saldos = []
-                for r in grupos["I155"]:
-                    saldos.append({
-                        "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-                        "dt_ini": dt_ini, "dt_fin": dt_fin,
-                        "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0, "ind_dc_ini": r.get("IND_DC_INI", "D"),
-                        "vl_deb": r.get("VL_DEB", 0.0) or 0.0, "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
-                        "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-                    })
-                repo.inserir_saldos_periodicos(ecd.id, saldos)
-
-                # Lançamentos e partidas
-                lancs = []
-                for r in grupos["I200"]:
-                    lancs.append({
-                        "num_lcto": r.get("NUM_LCTO", ""),
-                        "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)) if r.get("DT_LCTO") else dt_ini,
-                        "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
-                        "ind_lcto": r.get("IND_LCTO", "N"),
-                        "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-                    })
-                repo.inserir_lancamentos(ecd.id, lancs)
-
-                partidas = []
-                for r in grupos["I250"]:
-                    partidas.append({
-                        "num_lcto": r.get("NUM_LCTO", ""),
-                        "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat() if r.get("DT_LCTO") else dt_ini.isoformat(),
-                        "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-                        "vl_dc": r.get("VL_DC", 0.0) or 0.0, "ind_dc": r.get("IND_DC", "D"),
-                        "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-                        "cod_hist_pad": r.get("COD_HIST_PAD", ""), "hist": r.get("HIST", ""),
-                        "cod_part": r.get("COD_PART", ""),
-                    })
-                repo.inserir_partidas(ecd.id, partidas)
-
-                repo.commit()
-
-                job_svc.concluir(job.id, {
-                    "ecd_id": ecd.id,
-                    "empresa": empresa.nome,
-                    "periodo": f"{dt_ini} a {dt_fin}",
-                    "contas": len(contas),
-                    "lancamentos": len(lancs),
-                    "partidas": len(partidas),
-                    "total_registros": total_regs,
-                })
-            finally:
-                session_local.close()
-
-        except Exception as e:
+            result = ECDImportService(session).importar(
+                saved.path,
+                hash_arquivo=saved.sha256,
+                nome_arquivo=saved.original_name,
+                escritorio_id=escritorio_id,
+                progress=lambda pct, msg: job_service.atualizar_progresso(
+                    job.id, pct, msg, persistir=False
+                ),
+            )
+            job_service.concluir(job.id, result.to_dict())
+        except Exception as exc:
             logger.exception("Erro no job assíncrono #%d", job.id)
-            job_svc.falhar(job.id, str(e))
+            job_service.falhar(job.id, str(exc))
         finally:
-            if temp_path.exists():
-                temp_path.unlink()
+            session.close()
+            saved.path.unlink(missing_ok=True)
 
-    thread = threading.Thread(target=_processar, daemon=True)
-    thread.start()
-
-    return JSONResponse({
-        "status": "ok",
-        "mensagem": "Processamento iniciado em background",
-        "job_id": job.id,
-        "poll_url": f"/api/jobs/{job.id}",
-    })
+    threading.Thread(target=process_upload, daemon=True).start()
+    return JSONResponse(
+        {
+            "status": "ok",
+            "mensagem": "Processamento iniciado em background",
+            "job_id": job.id,
+            "poll_url": f"/api/jobs/{job.id}",
+        }
+    )
 
 
 @app.get("/api/jobs/{job_id}")
-async def api_job_status(job_id: int):
+async def api_job_status(request: Request, job_id: int):
     """Consulta status de um job assíncrono."""
-    from src.async_jobs import get_async_job_service, init_async_job_service
+    from src.async_jobs import get_async_job_service
 
-    init_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
-    svc = get_async_job_service()
-    info = svc.obter(job_id)
+    svc = get_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
+    usuario = request.state.usuario
+    info = svc.obter(job_id, usuario_id=usuario.id, admin=usuario.admin)
     if info is None:
         return JSONResponse({"status": "erro", "mensagem": "Job não encontrado"}, status_code=404)
 
@@ -954,13 +762,13 @@ async def api_job_status(job_id: int):
 
 
 @app.get("/api/jobs")
-async def api_jobs_list(status: str | None = Query(None)):
+async def api_jobs_list(request: Request, status: str | None = Query(None)):
     """Lista jobs assíncronos."""
-    from src.async_jobs import get_async_job_service, init_async_job_service
+    from src.async_jobs import get_async_job_service
 
-    init_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
-    svc = get_async_job_service()
-    jobs = svc.listar(status=status)
+    svc = get_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
+    usuario = request.state.usuario
+    jobs = svc.listar(status=status, usuario_id=usuario.id, admin=usuario.admin)
     return {
         "total": len(jobs),
         "dados": [
@@ -1449,15 +1257,14 @@ async def webhooks_page(request: Request):
     usuario = await get_usuario_atual(request)
     if not usuario:
         return RedirectResponse(url="/login", status_code=302)
+    if not usuario.admin:
+        return _monitoring_forbidden()
 
     return HTMLResponse(jinja_env.get_template("webhooks.html").render({
         "request": request,
         "usuario": usuario,
         "current_page": "webhooks",
     }))
-
-def main():
-    import uvicorn
 
 # ── Rotas: Fase 10 — Comparar Multi-ECD ─────────────────────────────────
 
@@ -1504,29 +1311,6 @@ async def api_comparar(ecd_ids: str = Query(...)):
 
 
 
-# ── Rota: Dashboard de Webhooks (Fase 11) ──────────────────────────────────
-
-
-@app.get("/webhooks", response_class=HTMLResponse)
-async def webhooks_page(request: Request):
-    """Dashboard de monitoramento de webhooks."""
-    usuario = await get_usuario_atual(request)
-    if not usuario:
-        return RedirectResponse(url="/login", status_code=302)
-
-    return HTMLResponse(jinja_env.get_template("webhooks.html").render({
-        "request": request,
-        "usuario": usuario,
-        "current_page": "webhooks",
-    }))
-
-def main():
-    import uvicorn
-    uvicorn.run("src.dashboard.app:app", host="0.0.0.0", port=8000, reload=True)
-
-
-if __name__ == "__main__":
-    main()
 
 # ── Rotas: Fase 12 — API Keys UI ────────────────────────────────────────────
 
@@ -1536,6 +1320,8 @@ async def api_keys_page(request: Request):
     usuario = await get_usuario_atual(request)
     if not usuario:
         return RedirectResponse(url="/login", status_code=302)
+    if not usuario.admin:
+        return _monitoring_forbidden()
 
     return HTMLResponse(jinja_env.get_template("api_keys.html").render({
         "request": request,
@@ -1544,13 +1330,71 @@ async def api_keys_page(request: Request):
     }))
 
 
-def main():
-    import uvicorn
-    uvicorn.run("src.dashboard.app:app", host="0.0.0.0", port=8000, reload=True)
+# ── Rotas: Fase 16 — Monitoramento Operacional ─────────────────────────────
 
 
-if __name__ == "__main__":
-    main()
+def _monitoring_forbidden(api: bool = False):
+    if api:
+        return JSONResponse(
+            {"status": "erro", "mensagem": "Acesso administrativo necessário"},
+            status_code=403,
+        )
+    return HTMLResponse("Acesso administrativo necessário", status_code=403)
+
+
+@app.get("/monitoring", response_class=HTMLResponse)
+async def monitoring_page(request: Request):
+    """Dashboard operacional restrito a administradores."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+    if not usuario.admin:
+        return _monitoring_forbidden()
+    return HTMLResponse(
+        jinja_env.get_template("monitoring.html").render(
+            {
+                "request": request,
+                "usuario": usuario,
+                "current_page": "monitoring",
+                "app_version": APP_VERSION,
+            }
+        )
+    )
+
+
+@app.get("/api/monitoring/summary")
+async def api_monitoring_summary(
+    request: Request,
+    minutes: int = Query(60, ge=1, le=1440),
+):
+    """Snapshot agregado de saúde, tráfego e serviços internos."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse(
+            {"status": "erro", "mensagem": "Não autenticado"}, status_code=401
+        )
+    if not usuario.admin:
+        return _monitoring_forbidden(api=True)
+    return build_operational_snapshot(
+        metrics_collector,
+        db_path=os.environ.get("SPED_HUB_DB", str(DB_PATH)),
+        minutes=minutes,
+    )
+
+
+@app.post("/api/monitoring/reset")
+async def api_monitoring_reset(request: Request):
+    """Limpa somente a janela HTTP em memória; não remove dados de negócio."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse(
+            {"status": "erro", "mensagem": "Não autenticado"}, status_code=401
+        )
+    if not usuario.admin:
+        return _monitoring_forbidden(api=True)
+    metrics_collector.reset()
+    return {"status": "ok", "mensagem": "Métricas HTTP reiniciadas"}
+
 
 # ── Rotas: Fase 15 — Email, Worker Status, Redis Cache ────────────────────
 
@@ -1663,5 +1507,18 @@ async def api_health_full():
     except Exception as e:
         status["workers"] = f"error: {e}"
 
-    return {"status": "ok", "version": "0.13.0", "components": status}
+    return {"status": "ok", "version": APP_VERSION, "components": status}
 
+
+def main():
+    """Inicia o dashboard usando configuração de ambiente."""
+    import uvicorn
+
+    host = os.environ.get("SPED_HUB_HOST", "127.0.0.1")
+    port = int(os.environ.get("SPED_HUB_PORT", "8000"))
+    reload_enabled = os.environ.get("SPED_HUB_RELOAD", "false").lower() == "true"
+    uvicorn.run("src.dashboard.app:app", host=host, port=port, reload=reload_enabled)
+
+
+if __name__ == "__main__":
+    main()

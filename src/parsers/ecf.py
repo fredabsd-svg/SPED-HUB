@@ -100,8 +100,6 @@ class ECFParser:
 
     def extrair_resumo(self, caminho: Path) -> dict:
         """Extrai resumo da ECF: IRPJ/CSLL apurados, lucro tributável, etc."""
-        registros = self.parse_todos(caminho)
-
         resumo = {
             "empresa": {"cnpj": "", "nome": ""},
             "periodo": {"dt_ini": "", "dt_fin": ""},
@@ -109,10 +107,11 @@ class ECFParser:
             "lucro_tributavel": 0.0,
             "irpj": 0.0,
             "csll": 0.0,
-            "total_registros": len(registros),
+            "total_registros": 0,
         }
 
-        for r in registros:
+        for r in self.parse(caminho):
+            resumo["total_registros"] += 1
             reg = r["_reg"]
             campos = r["_campos"]
 

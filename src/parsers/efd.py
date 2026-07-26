@@ -217,18 +217,17 @@ class EFDParser:
 
     def extrair_resumo(self, caminho: Path) -> dict:
         """Extrai resumo da EFD-Contribuições: PIS/COFINS apurados, créditos, etc."""
-        registros = self.parse_todos(caminho)
-
         resumo = {
             "empresa": {"cnpj": "", "nome": ""},
             "periodo": {"dt_ini": "", "dt_fin": ""},
             "pis": {"debito": 0.0, "credito": 0.0, "saldo": 0.0},
             "cofins": {"debito": 0.0, "credito": 0.0, "saldo": 0.0},
             "receita_bruta": 0.0,
-            "total_registros": len(registros),
+            "total_registros": 0,
         }
 
-        for r in registros:
+        for r in self.parse(caminho):
+            resumo["total_registros"] += 1
             reg = r["_reg"]
             campos = r["_campos"]
 

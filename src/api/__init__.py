@@ -10,6 +10,7 @@ Fase 13: +Rate limiting, +Logs de auditoria, +Configuração de rate limit por A
 
 import datetime
 import hashlib
+import hmac
 import secrets
 import logging
 from functools import wraps
@@ -49,7 +50,7 @@ def gerar_api_key() -> tuple[str, str]:
 
 def verificar_api_key(chave: str, hash_armazenado: str) -> bool:
     """Verifica se a chave confere com o hash armazenado."""
-    return _hash_key(chave) == hash_armazenado
+    return hmac.compare_digest(_hash_key(chave), hash_armazenado)
 
 
 async def get_api_key(request: Request) -> str | None:
@@ -57,16 +58,20 @@ async def get_api_key(request: Request) -> str | None:
     return request.headers.get("X-API-Key")
 
 
-async def requer_api_key(request: Request, db_path: str = None):
-    if db_path is None:
-        import os as _os
-        db_path = _os.environ.get("SPED_HUB_DB", "sped_hub.db")
-    """Dependency que valida API Key, aplica rate limit e registra auditoria.
-
-    Retorna o registro da API Key se válida.
-    """
+async def validar_requisicao_api(request: Request, db_path: str):
+    """Valida API key; sessões do dashboard também podem consumir a API."""
     chave = await get_api_key(request)
     if not chave:
+        from src.auth import get_usuario_atual
+
+        usuario = await get_usuario_atual(request)
+        if usuario is not None:
+            if usuario.admin:
+                return usuario
+            raise HTTPException(
+                status_code=403,
+                detail="Acesso administrativo necessário para a API externa",
+            )
         raise HTTPException(status_code=401, detail="X-API-Key header obrigatório")
 
     engine = criar_engine(db_path)
@@ -76,15 +81,19 @@ async def requer_api_key(request: Request, db_path: str = None):
         api_key = session.execute(
             select(ApiKey).where(
                 ApiKey.key_hash == hash_chave,
-                ApiKey.ativo == True,
+                ApiKey.ativo.is_(True),
             )
         ).scalar_one_or_none()
 
         if not api_key:
             raise HTTPException(status_code=403, detail="API Key inválida ou inativa")
 
-        if api_key.expira_em and api_key.expira_em < datetime.datetime.now(datetime.UTC):
-            raise HTTPException(status_code=403, detail="API Key expirada")
+        if api_key.expira_em:
+            expira_em = api_key.expira_em
+            if expira_em.tzinfo is None:
+                expira_em = expira_em.replace(tzinfo=datetime.UTC)
+            if expira_em < datetime.datetime.now(datetime.UTC):
+                raise HTTPException(status_code=403, detail="API Key expirada")
 
         # ── Rate Limiting (Fase 13) ──
         limiter = get_limiter(db_path)
@@ -120,10 +129,23 @@ async def requer_api_key(request: Request, db_path: str = None):
         api_key.ultimo_uso = datetime.datetime.now(datetime.UTC)
         api_key.total_requisicoes = (api_key.total_requisicoes or 0) + 1
         session.commit()
-
+        session.refresh(api_key)
+        session.expunge(api_key)
         return api_key
     finally:
         session.close()
+
+
+async def requer_api_key(request: Request):
+    """Dependência HTTP sem parâmetros de caminho controláveis pelo cliente."""
+    import os
+
+    return await validar_requisicao_api(
+        request,
+        os.environ.get("SPED_HUB_DB", "sped_hub.db"),
+    )
+
+
 
 
 # ── API Key Service (Fase 12) ───────────────────────────────────────────────

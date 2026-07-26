@@ -451,13 +451,16 @@ class DashboardService:
 
         return {"labels": labels, "valores": valores, "totais": totais}
 
-    def get_comparativo_empresas(self) -> dict | None:
-        """Dados para gráfico comparativo entre ECDs/empresas."""
+    def get_comparativo_empresas(self, usuario=None) -> dict | None:
+        """Dados comparativos limitados ao escopo do usuário."""
+        stmt = select(ECD, Empresa.nome).join(Empresa)
+        if usuario is not None and not usuario.admin:
+            if usuario.escritorio_id is None:
+                stmt = stmt.where(Empresa.escritorio_id.is_(None))
+            else:
+                stmt = stmt.where(Empresa.escritorio_id == usuario.escritorio_id)
         ecds = self.session.execute(
-            select(ECD, Empresa.nome)
-            .join(Empresa)
-            .order_by(ECD.importado_em.desc())
-            .limit(5)
+            stmt.order_by(ECD.importado_em.desc()).limit(5)
         ).all()
 
         if len(ecds) < 2:
@@ -608,12 +611,16 @@ class DashboardService:
             "preferencias_salvas": None,  # Futuro: carregar do banco
         }
 
-    def get_ecds_disponiveis(self) -> list[dict]:
-        """Lista ECDs disponíveis para seleção."""
+    def get_ecds_disponiveis(self, usuario=None) -> list[dict]:
+        """Lista ECDs disponíveis no escopo do usuário."""
+        stmt = select(ECD, Empresa.nome).join(Empresa)
+        if usuario is not None and not usuario.admin:
+            if usuario.escritorio_id is None:
+                stmt = stmt.where(Empresa.escritorio_id.is_(None))
+            else:
+                stmt = stmt.where(Empresa.escritorio_id == usuario.escritorio_id)
         ecds = self.session.execute(
-            select(ECD, Empresa.nome)
-            .join(Empresa)
-            .order_by(ECD.importado_em.desc())
+            stmt.order_by(ECD.importado_em.desc())
         ).all()
 
         return [

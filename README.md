@@ -51,6 +51,8 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 
 ```bash
 pip install -e ".[dev]"
+
+> **Versão atual:** 0.14.0 — Observabilidade, monitoramento e hardening multi-tenant.
 ```
 
 ### Docker
@@ -96,7 +98,7 @@ sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 
 ```bash
 pytest tests/ -v
-# 287 testes — 100% passando
+# 345 testes — 100% passando (Fases 1-16)
 ```
 
 ## Estrutura do Projeto

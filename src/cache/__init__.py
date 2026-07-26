@@ -194,7 +194,8 @@ def cached(ttl: int = 300, prefix: str = ""):
             key_parts.append(json.dumps(args, default=str))
             key_parts.append(json.dumps(kwargs, default=str, sort_keys=True))
             key_raw = "|".join(key_parts)
-            key = hashlib.sha256(key_raw.encode()).hexdigest()[:32]
+            digest = hashlib.sha256(key_raw.encode()).hexdigest()[:32]
+            key = f"{prefix}{digest}"
 
             # Tenta cache
             cached_value = cache.get(key)

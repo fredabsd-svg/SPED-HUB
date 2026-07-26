@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Monitoramento — SPED-HUB{% endblock %}
+
+{% block head %}
+<style>
+    .monitor-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:24px; }
+    .monitor-title { font-size:1.55rem; color:var(--gray-900); }
+    .monitor-subtitle { color:var(--gray-500); font-size:.85rem; margin-top:4px; }
+    .monitor-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .health-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(175px,1fr)); gap:14px; margin-bottom:20px; }
+    .health-card { background:white; border:1px solid var(--gray-200); border-radius:10px; padding:16px; box-shadow:var(--shadow); }
+    .health-label { color:var(--gray-500); font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+    .health-value { color:var(--gray-900); font-size:1.5rem; font-weight:750; margin-top:6px; }
+    .health-detail { color:var(--gray-400); font-size:.72rem; margin-top:3px; }
+    .status-dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:6px; }
+    .status-ok { background:var(--success); }
+    .status-warning { background:var(--warning); }
+    .status-error { background:var(--danger); }
+    .monitor-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
+    .metric-list { display:grid; gap:10px; }
+    .metric-row { display:flex; justify-content:space-between; align-items:center; gap:16px; border-bottom:1px solid var(--gray-100); padding-bottom:8px; }
+    .metric-row:last-child { border-bottom:0; padding-bottom:0; }
+    .metric-name { color:var(--gray-500); font-size:.82rem; }
+    .metric-number { color:var(--gray-800); font-weight:700; font-variant-numeric:tabular-nums; }
+    .route-path { font-family:'SF Mono','Fira Code',monospace; word-break:break-word; }
+    .method { display:inline-block; min-width:48px; padding:2px 6px; border-radius:4px; text-align:center; background:var(--primary-light); color:var(--primary); font-size:.7rem; font-weight:700; }
+    .monitor-loading { opacity:.55; pointer-events:none; }
+    .monitor-error { background:#FEE2E2; color:#991B1B; border:1px solid #FECACA; border-radius:8px; padding:12px; margin-bottom:16px; }
+    @media (max-width:850px) { .monitor-grid { grid-template-columns:1fr; } .monitor-header { flex-direction:column; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div x-data="monitoringApp()" x-init="init()" :class="loading ? 'monitor-loading' : ''">
+    <div class="monitor-header">
+        <div>
+            <h1 class="monitor-title">📡 Monitoramento Operacional</h1>
+            <p class="monitor-subtitle">Tráfego, latência e saúde dos serviços — SPED-HUB v{{ app_version }}</p>
+        </div>
+        <div class="monitor-actions">
+            <select class="form-select" x-model.number="minutes" @change="load()">
+                <option :value="15">Últimos 15 min</option>
+                <option :value="60">Última hora</option>
+                <option :value="360">Últimas 6 horas</option>
+                <option :value="1440">Últimas 24 horas</option>
+            </select>
+            <label style="font-size:.78rem;color:var(--gray-500);display:flex;align-items:center;gap:5px;">
+                <input type="checkbox" x-model="autoRefresh"> Auto 15s
+            </label>
+            <button class="btn btn-outline btn-sm" @click="load()">🔄 Atualizar</button>
+        </div>
+    </div>
+
+    <div class="monitor-error" x-show="error" x-text="error"></div>
+
+    <div class="health-grid">
+        <div class="health-card">
+            <div class="health-label">Requisições</div>
+            <div class="health-value" x-text="fmt(data?.http?.requests)">0</div>
+            <div class="health-detail"><span x-text="data?.http?.requests_per_minute ?? 0"></span> por minuto</div>
+        </div>
+        <div class="health-card">
+            <div class="health-label">Latência P95</div>
+            <div class="health-value"><span x-text="data?.http?.p95_latency_ms ?? 0"></span> ms</div>
+            <div class="health-detail">Média <span x-text="data?.http?.avg_latency_ms ?? 0"></span> ms</div>
+        </div>
+        <div class="health-card">
+            <div class="health-label">Erros 5xx</div>
+            <div class="health-value" :style="(data?.http?.errors_5xx ?? 0) > 0 ? 'color:var(--danger)' : ''" x-text="fmt(data?.http?.errors_5xx)">0</div>
+            <div class="health-detail"><span x-text="data?.http?.error_rate_pct ?? 0"></span>% das requisições</div>
+        </div>
+        <div class="health-card">
+            <div class="health-label">Banco de Dados</div>
+            <div class="health-value" style="font-size:1.05rem;">
+                <span class="status-dot" :class="data?.database?.status === 'ok' ? 'status-ok' : 'status-error'"></span>
+                <span x-text="data?.database?.status === 'ok' ? 'Operacional' : 'Falha'"></span>
+            </div>
+            <div class="health-detail"><span x-text="humanBytes(data?.database?.size_bytes)"></span></div>
+        </div>
+        <div class="health-card">
+            <div class="health-label">Jobs Ativos</div>
+            <div class="health-value" x-text="fmt(data?.database?.active_jobs)">0</div>
+            <div class="health-detail"><span x-text="fmt(data?.database?.failed_jobs)"></span> falhas na janela</div>
+        </div>
+        <div class="health-card">
+            <div class="health-label">Cache</div>
+            <div class="health-value"><span x-text="data?.cache?.hit_rate_pct ?? 0"></span>%</div>
+            <div class="health-detail"><span x-text="fmt(data?.cache?.entries)"></span> entradas · hit rate</div>
+        </div>
+    </div>
+
+    <div class="monitor-grid">
+        <section class="card">
+            <div class="card-header">Latência HTTP</div>
+            <div class="card-body metric-list">
+                <div class="metric-row"><span class="metric-name">P50</span><span class="metric-number" x-text="(data?.http?.p50_latency_ms ?? 0) + ' ms'"></span></div>
+                <div class="metric-row"><span class="metric-name">P95</span><span class="metric-number" x-text="(data?.http?.p95_latency_ms ?? 0) + ' ms'"></span></div>
+                <div class="metric-row"><span class="metric-name">P99</span><span class="metric-number" x-text="(data?.http?.p99_latency_ms ?? 0) + ' ms'"></span></div>
+                <div class="metric-row"><span class="metric-name">Uptime</span><span class="metric-number" x-text="humanDuration(data?.http?.uptime_seconds)"></span></div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card-header">Dados e Operação</div>
+            <div class="card-body metric-list">
+                <div class="metric-row"><span class="metric-name">Empresas</span><span class="metric-number" x-text="fmt(data?.database?.companies)"></span></div>
+                <div class="metric-row"><span class="metric-name">ECDs</span><span class="metric-number" x-text="fmt(data?.database?.ecds)"></span></div>
+                <div class="metric-row"><span class="metric-name">Eventos de auditoria</span><span class="metric-number" x-text="fmt(data?.database?.audit_events)"></span></div>
+                <div class="metric-row"><span class="metric-name">Webhooks falhos</span><span class="metric-number" x-text="fmt(data?.database?.failed_webhooks)"></span></div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card-header">Serviços Internos</div>
+            <div class="card-body metric-list">
+                <div class="metric-row"><span class="metric-name">Workers</span><span class="metric-number" x-text="data?.workers?.status ?? '—'"></span></div>
+                <div class="metric-row"><span class="metric-name">Fila pendente / ativa</span><span class="metric-number"><span x-text="fmt(data?.workers?.pending)"></span> / <span x-text="fmt(data?.workers?.active)"></span></span></div>
+                <div class="metric-row"><span class="metric-name">E-mails enviados / falhos</span><span class="metric-number"><span x-text="fmt(data?.email?.enviados)"></span> / <span x-text="fmt(data?.email?.falhas)"></span></span></div>
+                <div class="metric-row"><span class="metric-name">Processo</span><span class="metric-number"><span x-text="humanBytes(data?.process?.rss_bytes)"></span> · <span x-text="fmt(data?.process?.threads)"></span> threads</span></div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card-header">Status HTTP</div>
+            <div class="card-body metric-list">
+                <template x-for="entry in Object.entries(data?.http?.status_classes ?? {})" :key="entry[0]">
+                    <div class="metric-row"><span class="metric-name" x-text="entry[0]"></span><span class="metric-number" x-text="fmt(entry[1])"></span></div>
+                </template>
+                <div x-show="Object.keys(data?.http?.status_classes ?? {}).length === 0" class="text-muted">Sem requisições na janela.</div>
+            </div>
+        </section>
+    </div>
+
+    <section class="card">
+        <div class="card-header">Rotas mais acessadas</div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Método</th><th>Rota normalizada</th><th class="text-right">Req.</th><th class="text-right">Média</th><th class="text-right">P95</th><th class="text-right">Erros</th></tr></thead>
+                <tbody>
+                    <template x-for="route in data?.http?.top_routes ?? []" :key="route.method + route.path">
+                        <tr>
+                            <td><span class="method" x-text="route.method"></span></td>
+                            <td class="route-path" x-text="route.path"></td>
+                            <td class="text-right" x-text="fmt(route.requests)"></td>
+                            <td class="text-right" x-text="route.avg_ms + ' ms'"></td>
+                            <td class="text-right" x-text="route.p95_ms + ' ms'"></td>
+                            <td class="text-right" :style="route.errors ? 'color:var(--danger);font-weight:700' : ''" x-text="fmt(route.errors)"></td>
+                        </tr>
+                    </template>
+                    <tr x-show="(data?.http?.top_routes ?? []).length === 0"><td colspan="6" class="text-center text-muted" style="padding:24px;">Aguardando tráfego para compor as métricas.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <p class="text-muted" style="font-size:.72rem;margin-top:12px;" x-show="data?.generated_at">Atualizado em <span x-text="formatDate(data?.generated_at)"></span>.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function monitoringApp() {
+    return {
+        data: null,
+        error: '',
+        loading: false,
+        minutes: 60,
+        autoRefresh: true,
+        timer: null,
+        init() {
+            this.load();
+            this.timer = setInterval(() => { if (this.autoRefresh) this.load(); }, 15000);
+        },
+        async load() {
+            this.loading = true;
+            this.error = '';
+            try {
+                const response = await fetch(`/api/monitoring/summary?minutes=${this.minutes}`, { headers: { 'Accept': 'application/json' } });
+                if (!response.ok) throw new Error((await response.json()).mensagem || `HTTP ${response.status}`);
+                this.data = await response.json();
+            } catch (error) {
+                this.error = `Não foi possível carregar as métricas: ${error.message}`;
+            } finally {
+                this.loading = false;
+            }
+        },
+        fmt(value) { return Number(value ?? 0).toLocaleString('pt-BR'); },
+        humanBytes(value) {
+            let bytes = Number(value ?? 0);
+            if (bytes < 1024) return `${bytes} B`;
+            const units = ['KB', 'MB', 'GB', 'TB'];
+            let index = -1;
+            do { bytes /= 1024; index++; } while (bytes >= 1024 && index < units.length - 1);
+            return `${bytes.toFixed(bytes >= 10 ? 1 : 2)} ${units[index]}`;
+        },
+        humanDuration(value) {
+            const seconds = Math.max(0, Number(value ?? 0));
+            if (seconds < 60) return `${Math.round(seconds)}s`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+            return `${Math.floor(seconds / 86400)}d ${Math.floor((seconds % 86400) / 3600)}h`;
+        },
+        formatDate(value) { return value ? new Date(value).toLocaleString('pt-BR') : '—'; },
+    };
+}
+</script>
+{% endblock %}

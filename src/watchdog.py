@@ -8,10 +8,7 @@ Uso:
 """
 
 import argparse
-import datetime
-import hashlib
 import logging
-import os
 import sys
 import time
 from pathlib import Path
@@ -19,8 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.db.models import criar_engine, get_session, init_db
-from src.db.repository import Repository
-from src.parsers.ecd import ECDParser
+from src.ecd_importer import DuplicateECDImportError, ECDImportService, hash_file
 
 logger = logging.getLogger("sped-hub.watchdog")
 
@@ -29,148 +25,40 @@ _processed: dict[str, float] = {}
 
 
 def _hash_file(path: Path) -> str:
-    """SHA-256 do arquivo."""
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
-def _parse_data(valor: str) -> datetime.date:
-    """Parse de data DDMMAAAA."""
-    if len(valor) == 8 and valor.isdigit():
-        return datetime.date(int(valor[4:8]), int(valor[2:4]), int(valor[0:2]))
-    return datetime.date.today()
+    """SHA-256 incremental do arquivo."""
+    return hash_file(path)
 
 
 def processar_arquivo(caminho: Path, db_path: str) -> bool:
-    """Importa um arquivo ECD. Retorna True se sucesso."""
+    """Importa uma ECD nova; arquivos repetidos são ignorados."""
+    file_hash = _hash_file(caminho)
+    if file_hash in _processed:
+        logger.debug("Arquivo já processado: %s", caminho.name)
+        return False
+
     engine = criar_engine(db_path)
     init_db(engine)
     session = get_session(engine)
-    repo = Repository(session)
-
     try:
-        file_hash = _hash_file(caminho)
-
-        # Verifica se já foi processado
-        if file_hash in _processed:
-            logger.debug("Arquivo já processado: %s", caminho.name)
-            return False
-
-        logger.info("Importando %s...", caminho.name)
-
-        parser = ECDParser()
-        registros = parser.parse_todos(caminho)
-
-        from collections import defaultdict
-        grupos = defaultdict(list)
-        for r in registros:
-            grupos[r["_reg"]].append(r)
-
-        if not grupos.get("0000"):
-            logger.warning("Arquivo sem registro 0000: %s", caminho.name)
-            return False
-
-        r0000 = grupos["0000"][0]
-        empresa = repo.upsert_empresa({
-            "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
-            "nome": r0000.get("NOME", ""),
-            "uf": r0000.get("UF", ""),
-            "ie": r0000.get("IE", ""),
-            "cod_mun": str(int(r0000.get("COD_MUN", 0))).zfill(7) if r0000.get("COD_MUN") else None,
-            "im": r0000.get("IM", ""),
-            "ind_sit_esp": int(r0000.get("IND_SIT_ESP", 0)) if r0000.get("IND_SIT_ESP") else None,
-            "ind_nire": int(r0000.get("IND_NIRE", 0)) if r0000.get("IND_NIRE") else None,
-            "ind_fin_esc": int(r0000.get("IND_FIN_ESC", 0)) if r0000.get("IND_FIN_ESC") else None,
-            "ind_grande_por": int(r0000.get("IND_GRANDE_POR", 0)) if r0000.get("IND_GRANDE_POR") else None,
-            "tip_ecd": r0000.get("TIP_ECD", ""),
-            "ident_mf": r0000.get("IDENT_MF", ""),
-            "ind_esc_cons": r0000.get("IND_ESC_CONS", ""),
-        })
-
-        rI010 = grupos["I010"][0] if grupos["I010"] else {}
-        leiaute = rI010.get("COD_VER_LC", "009")
-        dt_ini = _parse_data(str(int(r0000.get("DT_INI", 0))).zfill(8))
-        dt_fin = _parse_data(str(int(r0000.get("DT_FIN", 0))).zfill(8))
-
-        ecd = repo.criar_ecd(empresa.id, {
-            "leiaute": leiaute,
-            "dt_ini": dt_ini,
-            "dt_fin": dt_fin,
-            "ind_esc": rI010.get("IND_ESC", ""),
-            "cod_ver_lc": leiaute,
-            "hash_arquivo": file_hash,
-            "nome_arquivo": caminho.name,
-        })
-
-        # Plano de Contas
-        contas = []
-        for r in grupos["I050"]:
-            contas.append({
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_cta_sup": r.get("COD_CTA_SUP", ""),
-                "nome_cta": r.get("NOME_CTA", ""),
-                "cod_nat": r.get("COD_NAT", "01"),
-                "ind_cta": r.get("IND_CTA", "A"),
-                "nivel": int(r.get("NIVEL", 0)),
-                "dt_alt": _parse_data(str(int(r.get("DT_ALT", 0))).zfill(8)) if r.get("DT_ALT") else None,
-            })
-        repo.inserir_plano_contas(ecd.id, contas)
-
-        # Saldos Periódicos
-        saldos = []
-        for r in grupos["I155"]:
-            saldos.append({
-                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-                "dt_ini": dt_ini, "dt_fin": dt_fin,
-                "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0, "ind_dc_ini": r.get("IND_DC_INI", "D"),
-                "vl_deb": r.get("VL_DEB", 0.0) or 0.0, "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
-                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-            })
-        repo.inserir_saldos_periodicos(ecd.id, saldos)
-
-        # Saldos Resultado
-        saldos_res = []
-        for r in grupos["I355"]:
-            saldos_res.append({
-                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-                "dt_res": dt_fin,
-                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-            })
-        repo.inserir_saldos_resultado(ecd.id, saldos_res)
-
-        # Lançamentos e Partidas
-        lancs = []
-        for r in grupos["I200"]:
-            lancs.append({
-                "num_lcto": r.get("NUM_LCTO", ""),
-                "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)) if r.get("DT_LCTO") else dt_ini,
-                "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
-                "ind_lcto": r.get("IND_LCTO", "N"),
-                "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-            })
-        repo.inserir_lancamentos(ecd.id, lancs)
-
-        partidas = []
-        for r in grupos["I250"]:
-            partidas.append({
-                "num_lcto": r.get("NUM_LCTO", ""),
-                "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat() if r.get("DT_LCTO") else dt_ini.isoformat(),
-                "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-                "vl_dc": r.get("VL_DC", 0.0) or 0.0, "ind_dc": r.get("IND_DC", "D"),
-                "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-                "cod_hist_pad": r.get("COD_HIST_PAD", ""), "hist": r.get("HIST", ""),
-                "cod_part": r.get("COD_PART", ""),
-            })
-        repo.inserir_partidas(ecd.id, partidas)
-
-        repo.commit()
+        result = ECDImportService(session).importar(
+            caminho,
+            hash_arquivo=file_hash,
+            progress=lambda pct, msg: logger.debug("%.0f%% — %s", pct, msg),
+        )
         _processed[file_hash] = time.time()
-        logger.info("ECD #%d importada: %s (%d contas, %d lançamentos)",
-                     ecd.id, empresa.nome, len(contas), len(lancs))
+        logger.info(
+            "ECD #%d importada: %s (%d contas, %d lançamentos)",
+            result.ecd_id,
+            result.empresa,
+            result.contas,
+            result.lancamentos,
+        )
         return True
-
+    except DuplicateECDImportError:
+        _processed[file_hash] = time.time()
+        logger.info("ECD já importada: %s", caminho.name)
+        return False
     except Exception:
-        repo.rollback()
         logger.exception("Erro ao importar %s", caminho.name)
         return False
     finally:

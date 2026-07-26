@@ -68,6 +68,24 @@ def cache_svc():
     return svc
 
 
+def _authenticated_client(app, db_path: str, email: str):
+    """Cria cliente autenticado para as APIs internas do dashboard."""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    register = client.post(
+        "/api/register",
+        data={"email": email, "nome": "Teste Fase 14", "senha": "senha123"},
+    )
+    assert register.status_code == 200
+    login = client.post(
+        "/api/login",
+        data={"email": email, "senha": "senha123"},
+    )
+    assert login.status_code == 200
+    return client
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Testes: AsyncJobService
 # ═══════════════════════════════════════════════════════════════════════════
@@ -420,8 +438,7 @@ class TestUploadAsync:
         init_limiter(db_path)
         init_async_job_service(db_path)
 
-        from fastapi.testclient import TestClient
-        client = TestClient(app)
+        client = _authenticated_client(app, db_path, "async@fase14.test")
 
         # Cria arquivo ECD de teste
         ecd_content = (
@@ -511,8 +528,7 @@ class TestUploadAsync:
         init_limiter(db_path)
         init_async_job_service(db_path)
 
-        from fastapi.testclient import TestClient
-        client = TestClient(app)
+        client = _authenticated_client(app, db_path, "missing-job@fase14.test")
 
         resp = client.get("/api/jobs/99999")
         assert resp.status_code == 404
@@ -534,8 +550,7 @@ class TestUploadAsync:
         init_limiter(db_path)
         init_async_job_service(db_path)
 
-        from fastapi.testclient import TestClient
-        client = TestClient(app)
+        client = _authenticated_client(app, db_path, "jobs@fase14.test")
 
         resp = client.get("/api/jobs")
         assert resp.status_code == 200
@@ -557,8 +572,7 @@ class TestUploadAsync:
         init_audit_service(db_path)
         init_limiter(db_path)
 
-        from fastapi.testclient import TestClient
-        client = TestClient(app)
+        client = _authenticated_client(app, db_path, "cache@fase14.test")
 
         resp = client.get("/api/cache/stats")
         assert resp.status_code == 200

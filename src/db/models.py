@@ -489,7 +489,7 @@ class ApiKey(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(100), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    prefixo: Mapped[str] = mapped_column(String(8), nullable=False)  # "spd_xxxx" para exibição
+    prefixo: Mapped[str] = mapped_column(String(11), nullable=False)  # "spd_xxxx" para exibição
     ativo: Mapped[bool] = mapped_column(default=True)
     criado_em: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=lambda: datetime.datetime.now(datetime.UTC)

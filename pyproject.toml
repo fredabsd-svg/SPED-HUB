@@ -1,6 +1,6 @@
 [project]
 name = "sped-hub"
-version = "0.13.0"
+version = "0.14.0"
 description = "Plataforma multiempresa de conformidade fiscal para escritórios contábeis"
 readme = "README.md"
 requires-python = ">=3.11"

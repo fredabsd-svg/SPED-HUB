@@ -11,7 +11,7 @@ from typing import Callable
 
 from fastapi import Cookie, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import Sessao, Usuario, UsuarioEmpresa, criar_engine, get_session, init_db
@@ -155,11 +155,28 @@ class AuthService:
 
     def __init__(self, db_path: str = "sped_hub.db"):
         self.db_path = db_path
+        self._ensure_admin_for_existing_installation()
 
     def _get_session(self) -> Session:
         engine = criar_engine(self.db_path)
         init_db(engine)
         return get_session(engine)
+
+    def _ensure_admin_for_existing_installation(self) -> None:
+        """Migra instalações antigas promovendo o usuário mais antigo uma vez."""
+        session = self._get_session()
+        try:
+            users = session.execute(
+                select(Usuario).order_by(Usuario.criado_em.asc(), Usuario.id.asc())
+            ).scalars().all()
+            if users and not any(user.admin for user in users):
+                users[0].admin = True
+                session.commit()
+                logger.warning(
+                    "Instalação sem administrador: usuário #%d promovido", users[0].id
+                )
+        finally:
+            session.close()
 
     def registrar(self, email: str, nome: str, senha: str, escritorio_id: int | None = None) -> Usuario:
         """Registra um novo usuário."""
@@ -172,12 +189,16 @@ class AuthService:
                 raise ValueError("Email já cadastrado")
 
             senha_hash, salt = Usuario.hash_senha(senha)
+            is_first_user = (
+                session.execute(select(func.count(Usuario.id))).scalar_one() == 0
+            )
             usuario = Usuario(
                 email=email,
                 nome=nome,
                 senha_hash=senha_hash,
                 salt=salt,
                 escritorio_id=escritorio_id,
+                admin=is_first_user,
             )
             session.add(usuario)
             session.commit()
@@ -302,6 +323,35 @@ async def get_usuario_atual(request: Request) -> Usuario | None:
     if not token:
         return None
     return get_auth().validar_token(token)
+
+
+def aplicar_escopo_empresas(stmt, usuario: Usuario):
+    """Restringe uma query com Empresa ao escritório do usuário."""
+    if usuario.admin:
+        return stmt
+    from src.db.models import Empresa
+
+    if usuario.escritorio_id is None:
+        return stmt.where(Empresa.escritorio_id.is_(None))
+    return stmt.where(Empresa.escritorio_id == usuario.escritorio_id)
+
+
+def usuario_pode_acessar_ecd(session: Session, usuario: Usuario, ecd_id: int) -> bool:
+    """Confirma acesso a uma ECD sem revelar existência entre tenants."""
+    if usuario.admin:
+        from src.db.models import ECD
+
+        return session.get(ECD, ecd_id) is not None
+
+    from src.db.models import ECD, Empresa
+
+    stmt = (
+        select(ECD.id)
+        .join(Empresa, ECD.empresa_id == Empresa.id)
+        .where(ECD.id == ecd_id)
+    )
+    stmt = aplicar_escopo_empresas(stmt, usuario)
+    return session.execute(stmt).scalar_one_or_none() is not None
 
 
 def requer_autenticacao(redirect: bool = True):

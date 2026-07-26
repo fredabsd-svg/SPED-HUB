@@ -18,17 +18,16 @@ Uso:
 """
 
 import datetime
-import json
 import logging
-import multiprocessing
 import os
 import signal
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from multiprocessing import Process, Queue, Value
-from typing import Any, Callable
+from queue import Empty
+from typing import Callable
 
 logger = logging.getLogger("sped-hub.worker_queue")
 
@@ -52,6 +51,7 @@ class Task:
     progresso: float = 0.0
     resultado: dict | None = None
     erro: str | None = None
+    mensagem: str = ""
     tentativas: int = 0
     max_tentativas: int = 3
     criado_em: float = field(default_factory=time.time)
@@ -66,6 +66,7 @@ class Task:
             "progresso": self.progresso,
             "resultado": self.resultado,
             "erro": self.erro,
+            "mensagem": self.mensagem,
             "tentativas": self.tentativas,
             "max_tentativas": self.max_tentativas,
             "criado_em": datetime.datetime.fromtimestamp(
@@ -243,7 +244,7 @@ class WorkerQueue:
 
         logger.info("Worker %d iniciado", worker_id)
 
-        while running.value:
+        while True:
             try:
                 task = task_queue.get(timeout=1)
             except Exception:
@@ -255,18 +256,22 @@ class WorkerQueue:
             task.status = TaskStatus.RUNNING.value
             task.iniciado_em = time.time()
             task.tentativas += 1
+            task.mensagem = "Processamento iniciado"
+            result_queue.put(("update", replace(task)))
 
             handler = self._handlers.get(task.tipo)
             if handler is None:
                 task.status = TaskStatus.FAILED.value
                 task.erro = f"Handler não registrado para tipo: {task.tipo}"
                 task.concluido_em = time.time()
-                result_queue.put(task)
+                result_queue.put(("final", replace(task)))
                 continue
 
             try:
                 def update_progress(pct: float, msg: str = ""):
                     task.progresso = min(100.0, max(0.0, pct))
+                    task.mensagem = msg
+                    result_queue.put(("update", replace(task)))
 
                 resultado = handler(task.payload, update_progress)
                 task.status = TaskStatus.COMPLETED.value
@@ -278,6 +283,8 @@ class WorkerQueue:
                     task.erro = str(e)
                     # Backoff exponencial
                     delay = 2 ** (task.tentativas - 1)
+                    task.mensagem = f"Nova tentativa em {delay}s"
+                    result_queue.put(("update", replace(task)))
                     logger.warning(
                         "Task %s falhou (tentativa %d/%d), retry em %ds: %s",
                         task.id,
@@ -300,26 +307,35 @@ class WorkerQueue:
                     )
 
             task.concluido_em = time.time()
-            result_queue.put(task)
+            result_queue.put(("final", replace(task)))
 
         logger.info("Worker %d encerrado", worker_id)
 
     def process_results(self):
-        """Processa resultados pendentes (chamar periodicamente no loop principal)."""
+        """Aplica eventos de status e resultados produzidos pelos workers."""
         if self._result_queue is None:
             return
 
-        while not self._result_queue.empty():
+        while True:
             try:
-                task: Task = self._result_queue.get_nowait()
-                self._tasks[task.id] = task
+                event, task = self._result_queue.get_nowait()
+            except Empty:
+                break
+            except (EOFError, OSError):
+                logger.exception("Falha ao ler fila de resultados")
+                break
 
+            self._tasks[task.id] = task
+            if event != "final":
+                continue
+
+            try:
                 if task.status == TaskStatus.COMPLETED.value and self._on_complete:
                     self._on_complete(task)
                 elif task.status == TaskStatus.FAILED.value and self._on_failure:
                     self._on_failure(task)
             except Exception:
-                break
+                logger.exception("Callback da task %s falhou", task.id)
 
 
 # Instância global

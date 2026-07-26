@@ -14,6 +14,7 @@ from typing import Optional
 import strawberry
 from strawberry.fastapi import GraphQLRouter
 from strawberry.types import Info
+from fastapi import Depends
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,7 @@ from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
 from src.validators.integridade import ValidadorIntegridade
+from src.api import requer_api_key
 
 logger = logging.getLogger("sped-hub.graphql")
 
@@ -659,4 +661,9 @@ class Query:
 # ── Schema e Router ─────────────────────────────────────────────────────────
 
 schema = strawberry.Schema(query=Query)
-graphql_router = GraphQLRouter(schema, path="/api/v2/graphql")
+graphql_router = GraphQLRouter(
+    schema,
+    path="/api/v2/graphql",
+    dependencies=[Depends(requer_api_key)],
+    allow_queries_via_get=False,
+)

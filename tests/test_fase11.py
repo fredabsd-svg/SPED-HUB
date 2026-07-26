@@ -1,5 +1,6 @@
 """Testes da Fase 11 — Dashboard de Webhooks, Drag & Drop Layout, Multi-Tenancy."""
 
+import asyncio
 import datetime
 import json
 import os
@@ -214,8 +215,13 @@ class TestWebhookServiceFase11:
         finally:
             session.close()
 
-        result = svc.retry_failed(webhook_id=wh.id)
+        async def fake_send(webhook, event):
+            return True
+
+        svc._enviar_com_retry = fake_send
+        result = asyncio.run(svc.retry_failed(webhook_id=wh.id))
         assert result["reenviados"] == 1
+        assert result["sucessos"] == 1
         assert result["total_falhas"] == 1
 
     def test_webhook_total_falhas(self, db_fase11):
@@ -362,9 +368,13 @@ class TestAPIWebhookDashboard:
         result = asyncio.run(listar_deliveries(api_key="test"))
         assert result["total"] >= 1
 
-    def test_retry_endpoint(self, db_fase11):
+    def test_retry_endpoint(self, db_fase11, monkeypatch):
         from src.api.routes import retry_webhooks
-        import asyncio
+
+        async def fake_send(self, webhook, event):
+            return True
+
+        monkeypatch.setattr(WebhookService, "_enviar_com_retry", fake_send)
 
         svc = WebhookService(db_fase11)
         wh = svc.registrar(url="https://a.com/hook", eventos=["ecd.importada"])

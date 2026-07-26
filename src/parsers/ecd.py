@@ -125,9 +125,11 @@ class ECDParser:
         # Pilha de pais ativos
         pais: dict[str, dict] = {}
 
-        with open(caminho, encoding=encoding, errors="replace") as f:
-            for num_linha, linha in enumerate(f, 1):
-                linha = linha.strip()
+        offset_bytes = 0
+        with open(caminho, "rb") as stream:
+            for num_linha, raw_line in enumerate(stream, 1):
+                offset_bytes += len(raw_line)
+                linha = raw_line.decode(encoding, errors="replace").strip()
                 if not linha:
                     continue
                 registro = _parse_linha(linha, self.metadados)
@@ -151,11 +153,13 @@ class ECDParser:
 
                 if reg_nome in REGISTROS_INTERESSE:
                     registro["_linha"] = num_linha
+                    registro["_offset_bytes"] = offset_bytes
                     yield registro
 
     def parse_todos(self, caminho: Path) -> list[dict]:
         """Parse completo retornando lista (para testes e arquivos pequenos)."""
         return list(self.parse(caminho))
+
     def parse_em_lotes(self, caminho: Path, tamanho_lote: int = 1000):
         """Parse streaming em lotes para arquivos grandes (>100MB).
 
@@ -188,7 +192,7 @@ class ECDParser:
         """
         contagem: dict[str, int] = {}
         for registro in self.parse(caminho):
-            reg = registro['_reg']
+            reg = registro["_reg"]
             contagem[reg] = contagem.get(reg, 0) + 1
         return contagem
 

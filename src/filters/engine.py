@@ -287,8 +287,9 @@ class FilterEngine:
         if criterios.cod_hist_pad:
             stmt = stmt.where(Partida.cod_hist_pad.in_(criterios.cod_hist_pad))
         if criterios.sem_historico:
+            from sqlalchemy import or_
             stmt = stmt.where(
-                (Partida.hist == None) | (Partida.hist == "")
+                or_(Partida.hist.is_(None), Partida.hist == "")
             )
 
         # Tipo de lançamento

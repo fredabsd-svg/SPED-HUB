@@ -11,14 +11,13 @@ Subcomandos:
 
 import argparse
 import datetime
-import hashlib
 import logging
 import sys
 from pathlib import Path
 
 from src.db.models import criar_engine, get_session, init_db
 from src.db.repository import Repository
-from src.parsers.ecd import ECDParser
+from src.ecd_importer import ECDImportService
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.balancete import Balancete
 from src.reports.razao import Razao
@@ -75,188 +74,34 @@ def _build_criterios(args) -> FilterCriteria:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def cmd_importar_ecd(args):
-    """Importa arquivo ECD."""
+    """Importa arquivo ECD de forma incremental."""
+    caminho = Path(args.arquivo)
+    if not caminho.is_file():
+        logger.error("Arquivo não encontrado: %s", caminho)
+        raise SystemExit(1)
+
     engine = criar_engine(args.db)
     init_db(engine)
     session = get_session(engine)
-    repo = Repository(session)
-
-    caminho = Path(args.arquivo)
-    if not caminho.exists():
-        logger.error("Arquivo não encontrado: %s", caminho)
-        sys.exit(1)
-
-    logger.info("Importando %s...", caminho.name)
-
-    with open(caminho, "rb") as f:
-        hash_arquivo = hashlib.sha256(f.read()).hexdigest()
-
-    parser = ECDParser()
-    registros = parser.parse_todos(caminho)
-    logger.info("Parse concluído: %d registros de interesse", len(registros))
-
-    from collections import defaultdict
-    grupos = defaultdict(list)
-    for r in registros:
-        grupos[r["_reg"]].append(r)
-
-    # ── 0000: Empresa ──
-    r0000 = grupos["0000"][0] if grupos["0000"] else {}
-    empresa = repo.upsert_empresa({
-        "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
-        "nome": r0000.get("NOME", ""),
-        "uf": r0000.get("UF", ""),
-        "ie": r0000.get("IE", ""),
-        "cod_mun": str(int(r0000.get("COD_MUN", 0))).zfill(7) if r0000.get("COD_MUN") else None,
-        "im": r0000.get("IM", ""),
-        "ind_sit_esp": int(r0000.get("IND_SIT_ESP", 0)) if r0000.get("IND_SIT_ESP") else None,
-        "ind_nire": int(r0000.get("IND_NIRE", 0)) if r0000.get("IND_NIRE") else None,
-        "ind_fin_esc": int(r0000.get("IND_FIN_ESC", 0)) if r0000.get("IND_FIN_ESC") else None,
-        "ind_grande_por": int(r0000.get("IND_GRANDE_POR", 0)) if r0000.get("IND_GRANDE_POR") else None,
-        "tip_ecd": r0000.get("TIP_ECD", ""),
-        "ident_mf": r0000.get("IDENT_MF", ""),
-        "ind_esc_cons": r0000.get("IND_ESC_CONS", ""),
-    })
-    logger.info("Empresa: %s", empresa.nome)
-
-    rI010 = grupos["I010"][0] if grupos["I010"] else {}
-    leiaute = rI010.get("COD_VER_LC", "009")
-
-    dt_ini = _parse_data(str(int(r0000.get("DT_INI", 0))).zfill(8))
-    dt_fin = _parse_data(str(int(r0000.get("DT_FIN", 0))).zfill(8))
-
-    ecd = repo.criar_ecd(empresa.id, {
-        "leiaute": leiaute,
-        "dt_ini": dt_ini,
-        "dt_fin": dt_fin,
-        "ind_esc": rI010.get("IND_ESC", ""),
-        "cod_ver_lc": leiaute,
-        "hash_arquivo": hash_arquivo,
-        "nome_arquivo": caminho.name,
-    })
-    logger.info("ECD id=%d: %s a %s", ecd.id, dt_ini, dt_fin)
-
-    # ── I050: Plano de Contas ──
-    contas = []
-    for r in grupos["I050"]:
-        contas.append({
-            "cod_cta": r.get("COD_CTA", ""),
-            "cod_cta_sup": r.get("COD_CTA_SUP", ""),
-            "nome_cta": r.get("NOME_CTA", ""),
-            "cod_nat": r.get("COD_NAT", "01"),
-            "ind_cta": r.get("IND_CTA", "A"),
-            "nivel": int(r.get("NIVEL", 0)),
-            "dt_alt": _parse_data(str(int(r.get("DT_ALT", 0))).zfill(8)) if r.get("DT_ALT") else None,
-        })
-    n = repo.inserir_plano_contas(ecd.id, contas)
-    logger.info("Plano de contas: %d contas", n)
-
-    # ── I051: Contas Referenciais ──
-    refs = []
-    for r in grupos["I051"]:
-        refs.append({
-            "cod_cta": r.get("COD_CTA", ""),
-            "cod_ccus": r.get("COD_CCUS", ""),
-            "cod_cta_ref": r.get("COD_CTA_REF", ""),
-        })
-    n = repo.inserir_contas_referenciais(ecd.id, refs)
-    logger.info("Contas referenciais: %d", n)
-
-    # ── I052: Aglutinações ──
-    agls = []
-    for r in grupos["I052"]:
-        agls.append({
-            "cod_cta": r.get("COD_CTA", ""),
-            "cod_ccus": r.get("COD_CCUS", ""),
-            "cod_agl": r.get("COD_AGL", ""),
-        })
-    n = repo.inserir_aglutinacoes(ecd.id, agls)
-    logger.info("Aglutinações: %d", n)
-
-    # ── I100: Centros de Custo ──
-    centros = []
-    for r in grupos["I100"]:
-        centros.append({
-            "cod_ccus": r.get("COD_CCUS", ""),
-            "ccus": r.get("CCUS", ""),
-            "dt_alt": _parse_data(str(int(r.get("DT_ALT", 0))).zfill(8)) if r.get("DT_ALT") else None,
-        })
-    n = repo.inserir_centros_custo(ecd.id, centros)
-    logger.info("Centros de custo: %d", n)
-
-    # ── I075: Históricos Padronizados ──
-    hists = []
-    for r in grupos["I075"]:
-        hists.append({
-            "cod_hist": r.get("COD_HIST", ""),
-            "descr_hist": r.get("DESCR_HIST", ""),
-        })
-    n = repo.inserir_historicos_padrao(ecd.id, hists)
-    logger.info("Históricos padronizados: %d", n)
-
-    # ── I150/I155: Saldos Periódicos ──
-    saldos = []
-    for r in grupos["I155"]:
-        saldos.append({
-            "cod_cta": r.get("COD_CTA", ""),
-            "cod_ccus": r.get("COD_CCUS", ""),
-            "dt_ini": dt_ini,
-            "dt_fin": dt_fin,
-            "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0,
-            "ind_dc_ini": r.get("IND_DC_INI", "D"),
-            "vl_deb": r.get("VL_DEB", 0.0) or 0.0,
-            "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
-            "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0,
-            "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-        })
-    n = repo.inserir_saldos_periodicos(ecd.id, saldos)
-    logger.info("Saldos periódicos: %d", n)
-
-    # ── I350/I355: Saldos Resultado ──
-    saldos_res = []
-    for r in grupos["I355"]:
-        saldos_res.append({
-            "cod_cta": r.get("COD_CTA", ""),
-            "cod_ccus": r.get("COD_CCUS", ""),
-            "dt_res": dt_fin,
-            "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0,
-            "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-        })
-    n = repo.inserir_saldos_resultado(ecd.id, saldos_res)
-    logger.info("Saldos resultado: %d", n)
-
-    # ── I200/I250: Lançamentos e Partidas ──
-    lancs = []
-    for r in grupos["I200"]:
-        lancs.append({
-            "num_lcto": r.get("NUM_LCTO", ""),
-            "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)) if r.get("DT_LCTO") else dt_ini,
-            "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
-            "ind_lcto": r.get("IND_LCTO", "N"),
-            "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-        })
-    n = repo.inserir_lancamentos(ecd.id, lancs)
-    logger.info("Lançamentos: %d", n)
-
-    partidas = []
-    for r in grupos["I250"]:
-        partidas.append({
-            "num_lcto": r.get("NUM_LCTO", ""),
-            "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat() if r.get("DT_LCTO") else dt_ini.isoformat(),
-            "cod_cta": r.get("COD_CTA", ""),
-            "cod_ccus": r.get("COD_CCUS", ""),
-            "vl_dc": r.get("VL_DC", 0.0) or 0.0,
-            "ind_dc": r.get("IND_DC", "D"),
-            "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-            "cod_hist_pad": r.get("COD_HIST_PAD", ""),
-            "hist": r.get("HIST", ""),
-            "cod_part": r.get("COD_PART", ""),
-        })
-    n = repo.inserir_partidas(ecd.id, partidas)
-    logger.info("Partidas: %d", n)
-
-    repo.commit()
-    logger.info("Importação concluída com sucesso. ECD id=%d", ecd.id)
+    try:
+        logger.info("Importando %s em modo incremental...", caminho.name)
+        result = ECDImportService(session).importar(
+            caminho,
+            progress=lambda pct, msg: logger.info("%.0f%% — %s", pct, msg),
+        )
+        logger.info(
+            "Importação concluída: ECD #%d, %d contas, %d lançamentos, %d partidas",
+            result.ecd_id,
+            result.contas,
+            result.lancamentos,
+            result.partidas,
+        )
+        return result
+    except Exception:
+        logger.exception("Falha ao importar %s", caminho.name)
+        raise SystemExit(1)
+    finally:
+        session.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -368,7 +213,7 @@ def _cmd_balanco(session, ecd, criterios, args):
     if totais["diferenca"] > 0.01:
         print(f"  ⚠ Diferença: {totais['diferenca']:,.2f}")
     else:
-        print(f"  ✓ Balanço fecha!")
+        print("  ✓ Balanço fecha!")
 
 
 def _cmd_dre(session, ecd, criterios):

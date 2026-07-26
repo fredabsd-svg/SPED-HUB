@@ -58,6 +58,7 @@ from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
 from src.validators.integridade import ValidadorIntegridade
 from src.webhooks import EVENTOS_DISPONIVEIS, WebhookService
+from src.version import APP_VERSION
 
 logger = logging.getLogger("sped-hub.api.v1")
 
@@ -90,7 +91,7 @@ async def health_check():
 
     return {
         "status": "ok",
-        "version": "0.12.0",
+        "version": APP_VERSION,
         "database": db_status,
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
@@ -566,7 +567,10 @@ async def registrar_webhook(
             )
 
     svc = WebhookService(_get_db_path())
-    wh = svc.registrar(url=url, eventos=eventos, secret=secret, descricao=descricao)
+    try:
+        wh = svc.registrar(url=url, eventos=eventos, secret=secret, descricao=descricao)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {
         "status": "ok",
@@ -595,14 +599,17 @@ async def atualizar_webhook(
                     detail=f"Evento inválido: {evt}",
                 )
 
-    wh = svc.atualizar(
-        webhook_id=webhook_id,
-        url=payload.get("url"),
-        eventos=eventos,
-        secret=payload.get("secret"),
-        descricao=payload.get("descricao"),
-        ativo=payload.get("ativo"),
-    )
+    try:
+        wh = svc.atualizar(
+            webhook_id=webhook_id,
+            url=payload.get("url"),
+            eventos=eventos,
+            secret=payload.get("secret"),
+            descricao=payload.get("descricao"),
+            ativo=payload.get("ativo"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook não encontrado")
@@ -679,7 +686,7 @@ async def retry_webhooks(
 ):
     """Reenvia entregas com falha (retry manual)."""
     svc = WebhookService(_get_db_path())
-    result = svc.retry_failed(webhook_id=webhook_id)
+    result = await svc.retry_failed(webhook_id=webhook_id)
     return {"status": "ok", **result}
 
 

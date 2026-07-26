@@ -23,8 +23,10 @@ import os
 import smtplib
 import threading
 from dataclasses import dataclass, field
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("sped-hub.email")
@@ -73,6 +75,7 @@ class EmailService:
         # Histórico
         self._sent: list[EmailMessage] = []
         self._max_history = 100
+        self._history_lock = threading.Lock()
 
         # Detecta modo
         if self._modo == "auto":
@@ -127,25 +130,23 @@ class EmailService:
         return msg
 
     def _do_enviar(self, msg: EmailMessage):
-        """Executa o envio real."""
+        """Executa o envio e registra tanto sucessos quanto falhas."""
         try:
             if self._modo == "log":
                 self._log_send(msg)
-                msg.status = "enviado"
-                msg.enviado_em = datetime.datetime.now(datetime.UTC).isoformat()
             else:
                 self._smtp_send(msg)
-                msg.status = "enviado"
-                msg.enviado_em = datetime.datetime.now(datetime.UTC).isoformat()
-
-            self._sent.append(msg)
-            if len(self._sent) > self._max_history:
-                self._sent = self._sent[-self._max_history:]
-
-        except Exception as e:
+            msg.status = "enviado"
+            msg.enviado_em = datetime.datetime.now(datetime.UTC).isoformat()
+        except Exception as exc:
             msg.status = "falha"
-            msg.erro = str(e)
-            logger.error("Falha ao enviar email para %s: %s", msg.para, e)
+            msg.erro = str(exc)
+            logger.error("Falha ao enviar email para %s: %s", msg.para, exc)
+        finally:
+            with self._history_lock:
+                self._sent.append(msg)
+                if len(self._sent) > self._max_history:
+                    del self._sent[:-self._max_history]
 
     def _log_send(self, msg: EmailMessage):
         """Modo log: apenas registra o email."""
@@ -161,16 +162,27 @@ class EmailService:
 
     def _smtp_send(self, msg: EmailMessage):
         """Envia via SMTP real."""
-        mime = MIMEMultipart("alternative")
+        mime = MIMEMultipart("mixed")
         mime["From"] = self._from
         mime["To"] = msg.para
         mime["Subject"] = msg.assunto
         if msg.cc:
             mime["Cc"] = ", ".join(msg.cc)
 
-        mime.attach(MIMEText(msg.corpo, "plain", "utf-8"))
+        body = MIMEMultipart("alternative")
+        body.attach(MIMEText(msg.corpo, "plain", "utf-8"))
         if msg.corpo_html:
-            mime.attach(MIMEText(msg.corpo_html, "html", "utf-8"))
+            body.attach(MIMEText(msg.corpo_html, "html", "utf-8"))
+        mime.attach(body)
+
+        for attachment in msg.anexos:
+            name = Path(str(attachment.get("nome", "anexo.bin"))).name
+            data = attachment.get("dados", b"")
+            if not isinstance(data, bytes):
+                raise TypeError(f"Dados do anexo '{name}' devem ser bytes")
+            part = MIMEApplication(data)
+            part.add_header("Content-Disposition", "attachment", filename=name)
+            mime.attach(part)
 
         with smtplib.SMTP(self._host, self._port, timeout=10) as server:
             if self._use_tls:
@@ -258,23 +270,27 @@ SPED-HUB — Plataforma de Conformidade Fiscal
 
     def historico(self, limite: int = 20) -> list[dict]:
         """Retorna histórico de envios."""
+        with self._history_lock:
+            messages = list(self._sent[-limite:])
         return [
             {
-                "para": m.para,
-                "assunto": m.assunto,
-                "status": m.status,
-                "enviado_em": m.enviado_em,
-                "erro": m.erro,
+                "para": message.para,
+                "assunto": message.assunto,
+                "status": message.status,
+                "enviado_em": message.enviado_em,
+                "erro": message.erro,
             }
-            for m in self._sent[-limite:]
+            for message in messages
         ]
 
     def stats(self) -> dict:
         """Estatísticas de envio."""
-        enviados = sum(1 for m in self._sent if m.status == "enviado")
-        falhas = sum(1 for m in self._sent if m.status == "falha")
+        with self._history_lock:
+            messages = list(self._sent)
+        enviados = sum(1 for message in messages if message.status == "enviado")
+        falhas = sum(1 for message in messages if message.status == "falha")
         return {
-            "total": len(self._sent),
+            "total": len(messages),
             "enviados": enviados,
             "falhas": falhas,
             "modo": self._modo,

@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.worker_queue import WorkerQueue, init_worker_queue, get_worker_queue
+from src.worker_queue import init_worker_queue
 from src.cache.redis_cache import RedisCacheService
 
 logging.basicConfig(
@@ -34,147 +34,35 @@ WORKER_COUNT = int(os.environ.get("WORKER_COUNT", "4"))
 
 
 def handler_ecd_import(payload: dict, update_progress):
-    """Handler para importação de ECD."""
-    from src.parsers.ecd import ECDParser
+    """Handler incremental para importação de ECD."""
     from src.db.models import criar_engine, get_session, init_db
-    from src.db.repository import Repository
-    from collections import defaultdict
-    import datetime
-    import hashlib
+    from src.ecd_importer import ECDImportService
 
-    arquivo = payload.get("arquivo", "")
-    filepath = Path("/workspace/uploads") / arquivo
+    raw_path = payload.get("path")
+    if raw_path:
+        filepath = Path(raw_path).resolve()
+    else:
+        upload_dir = Path(os.environ.get("SPED_HUB_UPLOAD_DIR", "/workspace/uploads")).resolve()
+        filename = Path(str(payload.get("arquivo", ""))).name
+        filepath = (upload_dir / filename).resolve()
+        if upload_dir not in filepath.parents:
+            raise ValueError("Caminho de arquivo inválido")
 
-    if not filepath.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {arquivo}")
-
-    update_progress(5.0, "Iniciando parser...")
-
-    parser = ECDParser()
-    update_progress(10.0, "Parser carregado, lendo arquivo...")
-
-    # Conta registros
-    contagem = parser.contar_registros(filepath)
-    total_regs = sum(contagem.values())
-    update_progress(15.0, f"Detectados {total_regs} registros")
-
-    # Processa em lotes
-    registros = []
-    lotes_processados = 0
-    for lote in parser.parse_em_lotes(filepath, tamanho_lote=500):
-        registros.extend(lote)
-        lotes_processados += 1
-        progresso = min(90.0, 15.0 + (lotes_processados / max(1, total_regs / 500)) * 75.0)
-        update_progress(progresso, f"Processando lote {lotes_processados}...")
-
-    update_progress(90.0, "Salvando no banco...")
-
-    # Agrupa e salva
-    grupos = defaultdict(list)
-    for r in registros:
-        grupos[r["_reg"]].append(r)
-
-    if not grupos.get("0000"):
-        raise ValueError("Arquivo não contém registro 0000")
+    if not filepath.is_file():
+        raise FileNotFoundError(f"Arquivo não encontrado: {filepath.name}")
 
     engine = criar_engine(DB_PATH)
     init_db(engine)
     session = get_session(engine)
-    repo = Repository(session)
-
     try:
-        r0000 = grupos["0000"][0]
-        empresa = repo.upsert_empresa({
-            "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
-            "nome": r0000.get("NOME", ""),
-            "uf": r0000.get("UF", ""),
-            "ie": r0000.get("IE", ""),
-        })
-
-        def _parse_data(valor):
-            if len(valor) == 8 and valor.isdigit():
-                return datetime.date(int(valor[4:8]), int(valor[2:4]), int(valor[0:2]))
-            return datetime.date.today()
-
-        dt_ini = _parse_data(str(int(r0000.get("DT_INI", 0))).zfill(8))
-        dt_fin = _parse_data(str(int(r0000.get("DT_FIN", 0))).zfill(8))
-
-        hash_arquivo = hashlib.sha256(filepath.read_bytes()).hexdigest()
-
-        ecd = repo.criar_ecd(empresa.id, {
-            "leiaute": "009",
-            "dt_ini": dt_ini,
-            "dt_fin": dt_fin,
-            "hash_arquivo": hash_arquivo,
-            "nome_arquivo": arquivo,
-        })
-
-        # Plano de Contas
-        contas = []
-        for r in grupos.get("I050", []):
-            contas.append({
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_cta_sup": r.get("COD_CTA_SUP", ""),
-                "nome_cta": r.get("NOME_CTA", ""),
-                "cod_nat": r.get("COD_NAT", "01"),
-                "ind_cta": r.get("IND_CTA", "A"),
-                "nivel": int(r.get("NIVEL", 0)),
-            })
-        repo.inserir_plano_contas(ecd.id, contas)
-
-        # Saldos
-        saldos = []
-        for r in grupos.get("I155", []):
-            saldos.append({
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_ccus": r.get("COD_CCUS", ""),
-                "dt_ini": dt_ini, "dt_fin": dt_fin,
-                "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0,
-                "ind_dc_ini": r.get("IND_DC_INI", "D"),
-                "vl_deb": r.get("VL_DEB", 0.0) or 0.0,
-                "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
-                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0,
-                "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-            })
-        repo.inserir_saldos_periodicos(ecd.id, saldos)
-
-        # Lançamentos
-        lancs = []
-        for r in grupos.get("I200", []):
-            lancs.append({
-                "num_lcto": r.get("NUM_LCTO", ""),
-                "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)),
-                "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
-                "ind_lcto": r.get("IND_LCTO", "N"),
-            })
-        repo.inserir_lancamentos(ecd.id, lancs)
-
-        partidas = []
-        for r in grupos.get("I250", []):
-            partidas.append({
-                "num_lcto": r.get("NUM_LCTO", ""),
-                "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat(),
-                "cod_cta": r.get("COD_CTA", ""),
-                "cod_ccus": r.get("COD_CCUS", ""),
-                "vl_dc": r.get("VL_DC", 0.0) or 0.0,
-                "ind_dc": r.get("IND_DC", "D"),
-                "cod_hist_pad": r.get("COD_HIST_PAD", ""),
-                "hist": r.get("HIST", ""),
-            })
-        repo.inserir_partidas(ecd.id, partidas)
-
-        repo.commit()
-
-        return {
-            "ecd_id": ecd.id,
-            "empresa": empresa.nome,
-            "contas": len(contas),
-            "lancamentos": len(lancs),
-            "partidas": len(partidas),
-        }
-    except Exception:
-        repo.rollback()
-        raise
+        result = ECDImportService(session).importar(
+            filepath,
+            hash_arquivo=payload.get("hash_arquivo"),
+            nome_arquivo=payload.get("nome_arquivo") or filepath.name,
+            escritorio_id=payload.get("escritorio_id"),
+            progress=update_progress,
+        )
+        return result.to_dict()
     finally:
         session.close()
 

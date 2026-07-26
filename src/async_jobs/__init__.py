@@ -56,6 +56,8 @@ class AsyncJobService:
 
     def __init__(self, db_path: str = "sped_hub.db"):
         self.db_path = db_path
+        self._live_progress: dict[int, tuple[float, str]] = {}
+        self._live_lock = threading.Lock()
 
     def _get_session(self) -> Session:
         engine = criar_engine(self.db_path)
@@ -81,13 +83,27 @@ class AsyncJobService:
         finally:
             session.close()
 
-    def atualizar_progresso(self, job_id: int, progresso: float, mensagem: str = ""):
-        """Atualiza o progresso de um job (0-100)."""
+    def atualizar_progresso(
+        self,
+        job_id: int,
+        progresso: float,
+        mensagem: str = "",
+        *,
+        persistir: bool = True,
+    ):
+        """Atualiza progresso persistido ou um overlay seguro em memória."""
+        normalized = min(100.0, max(0.0, progresso))
+        with self._live_lock:
+            self._live_progress[job_id] = (normalized, mensagem)
+
+        if not persistir:
+            return
+
         session = self._get_session()
         try:
             job = session.get(AsyncJob, job_id)
             if job:
-                job.progresso = min(100.0, max(0.0, progresso))
+                job.progresso = normalized
                 if mensagem:
                     job.mensagem = mensagem
                 if job.status == JobStatus.PENDING.value:
@@ -108,6 +124,8 @@ class AsyncJobService:
                 job.resultado = json.dumps(resultado) if resultado else None
                 job.concluido_em = datetime.datetime.now(datetime.UTC)
                 session.commit()
+                with self._live_lock:
+                    self._live_progress.pop(job_id, None)
                 logger.info("Job #%d concluído", job_id)
         finally:
             session.close()
@@ -123,32 +141,83 @@ class AsyncJobService:
                 job.mensagem = f"Falha: {erro[:200]}"
                 job.concluido_em = datetime.datetime.now(datetime.UTC)
                 session.commit()
+                with self._live_lock:
+                    self._live_progress.pop(job_id, None)
                 logger.error("Job #%d falhou: %s", job_id, erro)
         finally:
             session.close()
 
-    def obter(self, job_id: int) -> JobInfo | None:
-        """Obtém informações de um job."""
+    @staticmethod
+    def _parametros(job: AsyncJob) -> dict:
+        if not job.parametros:
+            return {}
+        try:
+            parsed = json.loads(job.parametros)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @classmethod
+    def _pode_acessar(cls, job: AsyncJob, usuario_id: int | None, admin: bool) -> bool:
+        if usuario_id is None or admin:
+            return True
+        return cls._parametros(job).get("usuario_id") == usuario_id
+
+    def obter(
+        self, job_id: int, usuario_id: int | None = None, admin: bool = False
+    ) -> JobInfo | None:
+        """Obtém informações de um job, incluindo progresso ainda não persistido."""
         session = self._get_session()
         try:
             job = session.get(AsyncJob, job_id)
-            if not job:
+            if not job or not self._pode_acessar(job, usuario_id, admin):
                 return None
-            return self._to_info(job)
+            info = self._to_info(job)
         finally:
             session.close()
 
-    def listar(self, status: str | None = None, limite: int = 20) -> list[JobInfo]:
-        """Lista jobs com filtro opcional por status."""
+        with self._live_lock:
+            live = self._live_progress.get(job_id)
+        if live and info.status not in (JobStatus.COMPLETED.value, JobStatus.FAILED.value):
+            info.status = JobStatus.PROCESSING.value
+            info.progresso, live_message = live
+            if live_message:
+                info.mensagem = live_message
+        return info
+
+    def listar(
+        self,
+        status: str | None = None,
+        limite: int = 20,
+        usuario_id: int | None = None,
+        admin: bool = False,
+    ) -> list[JobInfo]:
+        """Lista jobs com filtro opcional, incluindo progresso em memória."""
         session = self._get_session()
         try:
-            query = select(AsyncJob).order_by(desc(AsyncJob.criado_em))
-            if status:
-                query = query.where(AsyncJob.status == status)
-            jobs = session.execute(query.limit(limite)).scalars().all()
-            return [self._to_info(j) for j in jobs]
+            jobs = session.execute(
+                select(AsyncJob).order_by(desc(AsyncJob.criado_em)).limit(limite)
+            ).scalars().all()
+            infos = [
+                self._to_info(job)
+                for job in jobs
+                if self._pode_acessar(job, usuario_id, admin)
+            ]
         finally:
             session.close()
+
+        with self._live_lock:
+            live_snapshot = dict(self._live_progress)
+        for info in infos:
+            live = live_snapshot.get(info.id)
+            if live and info.status not in (JobStatus.COMPLETED.value, JobStatus.FAILED.value):
+                info.status = JobStatus.PROCESSING.value
+                info.progresso, live_message = live
+                if live_message:
+                    info.mensagem = live_message
+        if status:
+            infos = [info for info in infos if info.status == status]
+        return infos
 
     def limpar_antigos(self, horas: int = 24) -> int:
         """Remove jobs concluídos/falhos mais antigos que N horas."""
@@ -208,9 +277,10 @@ def init_async_job_service(db_path: str = "sped_hub.db") -> AsyncJobService:
 
 def get_async_job_service(db_path: str | None = None) -> AsyncJobService:
     global _async_job_service
-    if _async_job_service is None:
-        if db_path is None:
-            import os
-            db_path = os.environ.get("SPED_HUB_DB", "sped_hub.db")
+    if db_path is None:
+        import os
+
+        db_path = os.environ.get("SPED_HUB_DB", "sped_hub.db")
+    if _async_job_service is None or _async_job_service.db_path != db_path:
         return init_async_job_service(db_path)
     return _async_job_service

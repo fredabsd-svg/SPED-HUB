@@ -1,6 +1,6 @@
 # SPED-HUB — Continuidade do Projeto
 
-**Data:** 2026-07-26
+**Data:** 2026-07-27
 
 ## Objetivo da Alteração Atual
 
@@ -98,7 +98,36 @@
 - Serviço `worker` dedicado para processamento assíncrono
 - Variáveis de ambiente para SMTP e Redis
 
-## Próximos Passos (Fase 16+)
+## Fase 16 — Observabilidade, Monitoramento Operacional e Hardening
+
+### 1. Painel de Monitoramento
+- `src/monitoring.py` — `MetricsCollector` thread-safe com janela móvel HTTP, agregação de banco (empresas, ECDs, jobs ativos, falhas), cache, e-mail, fila, processo (RSS, threads) e top rotas (p95, erros)
+- Página `/monitoring` com cards de saúde, latência, dados, serviços internos, status HTTP, auto-refresh de 15s e reset da janela HTTP
+- API `/api/monitoring/summary` com janela configurável (15 min, 1h, 6h, 24h)
+
+### 2. Autorização Administrativa
+- Primeiro usuário registrado é automaticamente promovido a administrador
+- Migração transparente para bancos legados promove o usuário mais antigo se não houver admin
+- Páginas restritas: `/monitoring`, `/api-keys`, `/auditoria`, `/webhooks` (gating por `usuario.admin`)
+- APIs restritas: `/api/audit/*`, `/api/cache/*`, `/api/email/*`, `/api/worker/*`, `/api/redis/*`, `/api/monitoring/*`, REST externa e GraphQL (admin-only)
+- API REST externa exige API key; sessão de usuário só vale se o usuário for administrador
+
+### 3. Isolamento por Escritório
+- `aplicar_escopo_empresas()` e `usuario_pode_acessar_ecd()` aplicam WHERE em `Empresa.escritorio_id`
+- Middleware de auth valida `ecd_id`/`ecd_ids` em query strings e devolve 404 sem vazar existência entre tenants
+- Upload síncrono/assíncrono herda `escritorio_id` do usuário autenticado
+- Jobs assíncronos guardam `usuario_id` em `parametros` e são filtrados por owner no `obter`/`listar`
+- `DashboardService.get_ecds_disponiveis`/`get_comparativo_empresas` aceitam usuário e aplicam o escopo
+
+### 4. Versão e Saúde
+- `src/version.py` com `APP_VERSION = "0.14.0"` consumido por `app.version`, footer e endpoint `/api/v1/health`
+- `/api/health/full` consolidado (database/cache/workers/version) preservado como sonda pública
+
+### 5. Testes adicionados (Fase 16)
+- `tests/test_fase16.py` (13 testes) — autorização, primeira promoção admin, isolamento, snapshot agregado, normalização de path, reset da janela
+- `tests/test_review_regressions.py` (16 testes) — uploads seguros, fila progressiva, webhooks SSRF/retry real, EFD/ECF sem materialização, timezone em API key, comparação de hashes bcrypt-safe
+
+## Próximos Passos (Fase 17+)
 
 1. Deploy real em VPS/cloud com domínio e SSL
 2. Integração nativa com sistemas de terceiros (Domínio, Questor, Alterdata)

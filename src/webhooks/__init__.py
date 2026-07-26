@@ -16,14 +16,16 @@ import asyncio
 import datetime
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
-import time
+import os
+import socket
 from dataclasses import dataclass, field
-from typing import Optional
+from urllib.parse import urlsplit
 
 import httpx
-from sqlalchemy import desc, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
@@ -45,6 +47,55 @@ EVENTOS_DISPONIVEIS = [
 # Exponential backoff: 2s, 4s, 8s, 16s, 32s
 BACKOFF_BASE = 2
 BACKOFF_MAX = 60
+
+
+def validate_webhook_url(url: str, *, resolve: bool = False) -> str:
+    """Valida URL e bloqueia alvos locais/privados para reduzir risco de SSRF."""
+    parsed = urlsplit(url.strip())
+    allow_http = os.environ.get("SPED_HUB_WEBHOOK_ALLOW_HTTP", "false").lower() == "true"
+    allowed_schemes = {"https", "http"} if allow_http else {"https"}
+    if parsed.scheme.lower() not in allowed_schemes:
+        expected = "HTTPS" if not allow_http else "HTTP ou HTTPS"
+        raise ValueError(f"Webhook deve usar {expected}")
+    if not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("URL de webhook inválida")
+    if parsed.fragment:
+        raise ValueError("URL de webhook não pode conter fragmento")
+
+    def ensure_public(address: str) -> None:
+        ip = ipaddress.ip_address(address)
+        if not ip.is_global:
+            raise ValueError("Webhook não pode apontar para endereço local ou privado")
+
+    try:
+        ensure_public(parsed.hostname)
+    except ValueError as exc:
+        # Um hostname comum não é um IP; literais inválidos/privados são rejeitados.
+        try:
+            ipaddress.ip_address(parsed.hostname)
+        except ValueError:
+            if resolve:
+                try:
+                    addresses = {
+                        item[4][0]
+                        for item in socket.getaddrinfo(
+                            parsed.hostname,
+                            parsed.port or (443 if parsed.scheme == "https" else 80),
+                            type=socket.SOCK_STREAM,
+                        )
+                    }
+                except socket.gaierror as dns_error:
+                    raise ValueError("Hostname do webhook não pôde ser resolvido") from dns_error
+                if not addresses:
+                    raise ValueError("Hostname do webhook não possui endereço válido")
+                for address in addresses:
+                    ensure_public(address)
+            elif parsed.hostname.lower() in {"localhost", "localhost.localdomain"}:
+                raise ValueError("Webhook não pode apontar para localhost") from exc
+        else:
+            raise
+
+    return parsed.geturl()
 
 
 @dataclass
@@ -78,6 +129,7 @@ class WebhookService:
         max_retries: int = 3,
     ) -> WebhookRegistration:
         """Registra um novo webhook."""
+        url = validate_webhook_url(url)
         session = self._get_session()
         try:
             wh = WebhookRegistration(
@@ -125,7 +177,7 @@ class WebhookService:
             if not wh:
                 return None
             if url is not None:
-                wh.url = url
+                wh.url = validate_webhook_url(url)
             if eventos is not None:
                 wh.eventos = json.dumps(eventos)
             if secret is not None:
@@ -290,8 +342,10 @@ class WebhookService:
             ).hexdigest()
             headers["X-SPED-HUB-Signature"] = signature
 
-        max_tentativas = wh.max_retries or 3
+        target_url = validate_webhook_url(wh.url, resolve=True)
+        max_tentativas = max(1, wh.max_retries or 3)
 
+        last_error = "Max retries exceeded"
         for tentativa in range(1, max_tentativas + 1):
             # Cria registro de entrega
             delivery = self._criar_delivery(
@@ -300,7 +354,7 @@ class WebhookService:
 
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.post(wh.url, json=payload, headers=headers)
+                    response = await client.post(target_url, json=payload, headers=headers)
 
                 if 200 <= response.status_code < 300:
                     self._atualizar_delivery(
@@ -310,15 +364,17 @@ class WebhookService:
                     self._atualizar_webhook_stats(wh.id, sucesso=True)
                     return True
                 else:
+                    last_error = f"HTTP {response.status_code}"
                     self._atualizar_delivery(
                         delivery.id, "retrying", response.status_code,
                         response.text[:2000],
                         f"HTTP {response.status_code}"
                     )
 
-            except Exception as e:
+            except Exception as exc:
+                last_error = str(exc)[:500]
                 self._atualizar_delivery(
-                    delivery.id, "retrying", error=str(e)[:500]
+                    delivery.id, "retrying", error=last_error
                 )
 
             # Backoff antes do próximo retry
@@ -327,7 +383,7 @@ class WebhookService:
                 await asyncio.sleep(delay)
 
         # Todas as tentativas falharam
-        self._atualizar_delivery(delivery.id, "failed", error="Max retries exceeded")
+        self._atualizar_delivery(delivery.id, "failed", error=last_error)
         self._atualizar_webhook_stats(wh.id, sucesso=False)
         return False
 
@@ -391,35 +447,68 @@ class WebhookService:
         finally:
             session.close()
 
-    def retry_failed(self, webhook_id: int | None = None) -> dict:
-        """Reenvia entregas com falha (para retry manual).
-
-        Returns:
-            dict com contagem de reenvios agendados.
-        """
+    async def retry_failed(self, webhook_id: int | None = None) -> dict:
+        """Reenvia de fato até 100 entregas com falha."""
         session = self._get_session()
         try:
-            query = select(WebhookDelivery).where(
-                WebhookDelivery.status == "failed"
-            )
+            query = select(WebhookDelivery).where(WebhookDelivery.status == "failed")
             if webhook_id:
                 query = query.where(WebhookDelivery.webhook_id == webhook_id)
-
             deliveries = session.execute(
                 query.order_by(WebhookDelivery.criado_em.desc()).limit(100)
             ).scalars().all()
+            pending = [
+                {
+                    "id": delivery.id,
+                    "webhook_id": delivery.webhook_id,
+                    "evento": delivery.evento,
+                    "body": delivery.request_body,
+                }
+                for delivery in deliveries
+            ]
         finally:
             session.close()
 
         reenviados = 0
-        for d in deliveries:
-            wh = self._get_webhook(d.webhook_id)
-            if wh and wh.ativo:
-                # Marca como pending para reenvio
-                self._atualizar_delivery(d.id, "pending")
-                reenviados += 1
+        sucessos = 0
+        falhas = 0
+        for delivery in pending:
+            webhook = self._get_webhook(delivery["webhook_id"])
+            if not webhook or not webhook.ativo:
+                continue
+            try:
+                payload = json.loads(delivery["body"]) if delivery["body"] else {}
+                event_type = payload.get("evento") or delivery["evento"]
+                data = payload.get("dados", {})
+                timestamp = payload.get("timestamp")
+                event = WebhookEvent(tipo=event_type, dados=data)
+                if timestamp:
+                    event.timestamp = timestamp
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Delivery %s possui payload inválido", delivery["id"])
+                falhas += 1
+                continue
 
-        return {"reenviados": reenviados, "total_falhas": len(deliveries)}
+            self._atualizar_delivery(delivery["id"], "retrying")
+            reenviados += 1
+            try:
+                delivered = await self._enviar_com_retry(webhook, event)
+            except ValueError as exc:
+                logger.warning("Retry do webhook %s bloqueado: %s", webhook.id, exc)
+                delivered = False
+            if delivered:
+                sucessos += 1
+                self._atualizar_delivery(delivery["id"], "retried")
+            else:
+                falhas += 1
+                self._atualizar_delivery(delivery["id"], "failed")
+
+        return {
+            "reenviados": reenviados,
+            "sucessos": sucessos,
+            "falhas": falhas,
+            "total_falhas": len(pending),
+        }
 
     def _get_webhook(self, webhook_id: int) -> WebhookRegistration | None:
         session = self._get_session()

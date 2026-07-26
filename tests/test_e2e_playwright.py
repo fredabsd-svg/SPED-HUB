@@ -280,10 +280,13 @@ class TestE2EDashboard:
 
             # Faz upload via API (mais rápido)
             import requests
+            cookies = {cookie["name"]: cookie["value"] for cookie in context.cookies()}
             with open(ecd_file, "rb") as f:
                 resp = requests.post(
                     f"{live_server}/api/upload",
                     files={"file": ("test.txt", f, "text/plain")},
+                    cookies=cookies,
+                    timeout=10,
                 )
             assert resp.status_code == 200
 
@@ -312,11 +315,9 @@ class TestE2EAPI:
     def test_api_ecds_vazia(self, live_server):
         """Lista ECDs vazia."""
         import requests
-        resp = requests.get(f"{live_server}/api/v1/ecds")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "dados" in data
-        assert "total" in data
+        resp = requests.get(f"{live_server}/api/v1/ecds", timeout=10)
+        assert resp.status_code == 401
+        assert "X-API-Key" in resp.json()["detail"]
 
 
 class TestE2EScreenshots:
