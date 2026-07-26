@@ -106,6 +106,21 @@
 5. ⏳ Migração completa para PostgreSQL em produção (Etapas 2-3 da Fase 17)
 6. ⏳ CI/CD com deploy automático (Etapa 6 da Fase 17 — apenas preparação)
 
+## Push pendente — ambiente sem credencial Git (2026-07-28)
+
+- Tentativa de push em 2026-07-28 falhou com `fatal: could not read
+  Username for 'https://github.com': No such device or address`.
+  O sandbox desta conversa não tem credencial Git configurada e
+  `git push` via bash exige autenticação em https. Pela política,
+  não se tenta contornar nem armazenar token em runtime; o push
+  deve ser feito localmente ou em nova conversa com `github_push`.
+- Commits locais prontos no `main` (à frente de `origin/main`):
+  - `1ad08ef` — Fase 17 Etapa 1: Settings + criar_engine multi-dialeto
+  - `a2f8607` — README + continuidade.MD
+  - (a ser criado) registro deste pendente de push
+- A Etapa 2 (PostgreSQL) e demais permanecem pausadas até o push
+  ser resolvido para preservar a ordem cronológica do repositório.
+
 ## Pendências
 
 - Postgres não roda no sandbox de testes (sem psycopg/psycopg2 pré-instalado).
