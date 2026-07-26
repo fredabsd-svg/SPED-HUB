@@ -1,9 +1,24 @@
 # ── SPED-HUB Docker Compose ──
-# Produção: nginx + SSL (Let's Encrypt) + backend FastAPI
+# Produção: nginx + SSL (Let's Encrypt) + backend FastAPI + Redis
 
 version: "3.9"
 
 services:
+  # ── Redis (Cache + Fila) ──
+  redis:
+    image: redis:7-alpine
+    container_name: sped-hub-redis
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   # ── Backend FastAPI ──
   web:
     build: .
@@ -16,12 +31,39 @@ services:
     environment:
       - SPED_HUB_DB=/app/data/sped_hub.db
       - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+      - SMTP_HOST=${SMTP_HOST:-localhost}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-sped-hub@localhost}
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # ── Worker (processamento assíncrono) ──
+  worker:
+    build: .
+    container_name: sped-hub-worker
+    command: python -m src.worker_runner
+    volumes:
+      - sped_hub_data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - SPED_HUB_DB=/app/data/sped_hub.db
+      - PYTHONPATH=/app
+      - REDIS_URL=redis://redis:6379/0
+      - WORKER_COUNT=${WORKER_COUNT:-4}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ── Nginx (proxy reverso + SSL) ──
   nginx:
@@ -39,7 +81,6 @@ services:
     restart: unless-stopped
 
   # ── Certbot (Let's Encrypt) ──
-  # Uso inicial: docker compose run --rm certbot certonly --webroot -w /var/www/certbot -d seu-dominio.com
   certbot:
     image: certbot/certbot:latest
     container_name: sped-hub-certbot
@@ -49,21 +90,8 @@ services:
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
     restart: unless-stopped
 
-  # ── Desenvolvimento (descomente para usar) ──
-  # dev:
-  #   build: .
-  #   container_name: sped-hub-dev
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - .:/app
-  #     - sped_hub_data:/app/data
-  #   environment:
-  #     - SPED_HUB_DB=/app/data/sped_hub.db
-  #     - PYTHONPATH=/app
-  #   command: python -m uvicorn src.dashboard.app:app --host 0.0.0.0 --port 8000 --reload
-  #   restart: unless-stopped
-
 volumes:
   sped_hub_data:
+    driver: local
+  redis_data:
     driver: local

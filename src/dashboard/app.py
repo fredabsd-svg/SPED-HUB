@@ -69,13 +69,15 @@ from src.api.routes import router as api_v1_router
 from src.audit import AuditService, init_audit_service, get_audit_service
 from src.ratelimit import init_limiter
 from src.api.graphql import graphql_router
+from src.email_service import EmailService, init_email_service, get_email_service
+from src.cache.redis_cache import RedisCacheService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.12.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.13.0")
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
@@ -1549,3 +1551,117 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# ── Rotas: Fase 15 — Email, Worker Status, Redis Cache ────────────────────
+
+
+@app.get("/api/email/stats")
+async def api_email_stats(request: Request):
+    """Estatísticas do serviço de email."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
+    svc = get_email_service()
+    return svc.stats()
+
+
+@app.get("/api/email/historico")
+async def api_email_historico(request: Request, limite: int = Query(20, ge=1, le=100)):
+    """Histórico de emails enviados."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
+    svc = get_email_service()
+    return {"dados": svc.historico(limite=limite)}
+
+
+@app.post("/api/email/test")
+async def api_email_test(request: Request):
+    """Envia email de teste (modo log)."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
+    svc = get_email_service()
+    msg = svc.enviar(
+        para=usuario.email,
+        assunto="[SPED-HUB] Email de Teste",
+        corpo=f"Olá {usuario.nome},\n\nEste é um email de teste do SPED-HUB.\n\nSeu sistema de notificações está configurado corretamente.",
+        async_mode=False,
+    )
+    return {"status": "ok", "mensagem": f"Email enviado para {usuario.email}", "detalhes": {"status": msg.status}}
+
+
+@app.get("/api/worker/status")
+async def api_worker_status(request: Request):
+    """Status da fila de workers."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
+    try:
+        from src.worker_queue import get_worker_queue
+        q = get_worker_queue()
+        if q is None:
+            return {"status": "not_initialized", "mensagem": "Worker queue não inicializada"}
+        return {
+            "status": "running",
+            "pending": q.pending_count(),
+            "active": q.active_count(),
+            "total_tasks": len(q.list_tasks()),
+        }
+    except Exception as e:
+        return {"status": "error", "mensagem": str(e)}
+
+
+@app.get("/api/redis/cache/stats")
+async def api_redis_cache_stats(request: Request):
+    """Estatísticas do cache Redis (Fase 15)."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
+    import os
+    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    cache = RedisCacheService(redis_url=redis_url, prefix="api:")
+    stats = cache.stats()
+    return stats
+
+
+@app.get("/api/health/full")
+async def api_health_full():
+    """Health check completo — verifica DB, cache, workers."""
+    import os
+    status = {"database": "ok", "cache": "unknown", "workers": "unknown"}
+
+    # DB
+    try:
+        engine = _get_engine()
+        session = get_session(engine)
+        session.execute(select(1))
+        session.close()
+    except Exception as e:
+        status["database"] = f"error: {e}"
+
+    # Cache
+    try:
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        cache = RedisCacheService(redis_url=redis_url, prefix="health:")
+        cache.set("health", "ok", ttl=10)
+        if cache.get("health") == "ok":
+            status["cache"] = f"ok ({cache.stats()['backend']})"
+        else:
+            status["cache"] = "error: write/read mismatch"
+    except Exception as e:
+        status["cache"] = f"error: {e}"
+
+    # Workers
+    try:
+        from src.worker_queue import get_worker_queue
+        q = get_worker_queue()
+        if q:
+            status["workers"] = f"running ({q.active_count()} active, {q.pending_count()} pending)"
+        else:
+            status["workers"] = "not_initialized"
+    except Exception as e:
+        status["workers"] = f"error: {e}"
+
+    return {"status": "ok", "version": "0.13.0", "components": status}
+

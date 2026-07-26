@@ -4,17 +4,18 @@
 
 ## Objetivo da Alteração Atual
 
-**Fase 14 — Importação Assíncrona, Cache Layer e Benchmark:**
-1. Importação Assíncrona — `AsyncJob` model + `AsyncJobService` com tracking de progresso (0-100%), endpoint `POST /api/upload-async` com processamento em background thread, polling via `GET /api/jobs/{id}`, listagem `GET /api/jobs`, limpeza automática de jobs antigos (>24h)
-2. Cache Layer — `CacheService` em memória com TTL, thread-safe via `threading.Lock`, invalidação por prefixo, estatísticas (hits/misses/hit_rate), decorator `@cached`, endpoint `GET /api/cache/stats`, pronto para migração Redis
-3. Benchmark — geração de ECDs sintéticas (pequena ~1000 regs, média ~5000 regs), testes de performance do parser streaming, validação de tempo (<5s para 1000 regs, <10s para 5000 regs)
-4. Bump v0.12.0 — 287 testes (100% passando)
+**Fase 15 — Redis Cache, Worker Queue, Email e Playwright E2E:**
+1. Redis Cache — `RedisCacheService` com fallback automático para memória, mesma interface do `CacheService`, invalidação por prefixo, estatísticas com backend reportado
+2. Worker Queue — `WorkerQueue` com multiprocessing, pool de workers configurável, retry com backoff exponencial, graceful shutdown, callbacks de conclusão/falha, `worker_runner.py` standalone
+3. Email Service — `EmailService` com modo SMTP e modo log, templates para alertas (job concluído/falha, relatório agendado), envio assíncrono, histórico e estatísticas
+4. Playwright E2E — testes de browser real (login, registro, upload, dashboard), screenshots automáticos, health check completo
+5. Bump v0.13.0 — 316 testes (100% passando)
 
 ## Status Técnico
 
 | Componente | Status |
 |---|---|
-| `pyproject.toml` | ✅ Atualizado (v0.12.0) |
+| `pyproject.toml` | ✅ Atualizado (v0.13.0) |
 | `src/layouts/ecd_v9.yml` | ✅ 30 registros (Fase 1) |
 | `src/parsers/ecd.py` | ✅ Streaming + herança + parse_em_lotes + contar_registros (Fase 9) |
 | `src/parsers/efd.py` | ✅ Parser EFD-Contribuições (Fase 4) |
@@ -38,7 +39,11 @@
 | `src/audit/__init__.py` | ✅ AuditService + logs + estatísticas + limpeza (Fase 13) |
 | `src/async_jobs/__init__.py` | ✅ AsyncJobService + JobInfo + polling + limpeza (Fase 14) |
 | `src/cache/__init__.py` | ✅ CacheService + TTL + @cached + stats (Fase 14) |
-| `src/dashboard/app.py` | ✅ FastAPI app — 52 rotas incluindo /api/upload-async, /api/jobs/*, /api/cache/stats (Fase 14) |
+| `src/cache/redis_cache.py` | ✅ RedisCacheService + fallback memória + stats com backend (Fase 15) |
+| `src/worker_queue.py` | ✅ WorkerQueue + multiprocessing + retry backoff + callbacks (Fase 15) |
+| `src/worker_runner.py` | ✅ Worker standalone com handler ECD (Fase 15) |
+| `src/email_service.py` | ✅ EmailService + SMTP/log + templates alerta + histórico (Fase 15) |
+| `src/dashboard/app.py` | ✅ FastAPI app — 58 rotas incluindo /api/email/*, /api/worker/status, /api/redis/cache/stats, /api/health/full (Fase 15) |
 | `src/dashboard/services.py` | ✅ +multi-ECD, +layout customizável (Fase 7) |
 | `src/dashboard/templates/*` | ✅ Auth, upload, partials, notas, +comparar, +layout, +webhooks, +api_keys, +auditoria (Fase 13) |
 | `src/api/__init__.py` | ✅ API Key auth + ApiKeyService + rate limiting integrado + auditoria (Fase 13) |
@@ -48,67 +53,64 @@
 | `src/watchdog.py` | ✅ Importação automática por polling (Fase 7) |
 | `scripts/cron-import.sh` | ✅ Script de agendamento cron (Fase 10) |
 | `Dockerfile` | ✅ Multi-stage + watchdog (Fase 7) |
-| `docker-compose.yml` | ✅ Produção com nginx + certbot (Fase 7) |
+| `docker-compose.yml` | ✅ Produção com nginx + certbot + Redis + worker (Fase 15) |
 | `nginx.conf` | ✅ Proxy reverso + SSL hardening (Fase 7) |
 | `.github/workflows/ci.yml` | ✅ CI/CD pipeline (Fase 5) |
-| `tests/test_fase14.py` | ✅ 30 testes (Fase 14) |
-| **Total** | **287 testes — 100% passando** |
+| `tests/test_fase15.py` | ✅ 29 testes (Fase 15) |
+| `tests/test_e2e_playwright.py` | ✅ 10 testes E2E com screenshots (Fase 15) |
+| **Total** | **316 testes — 100% passando** |
 
-## O que foi entregue na Fase 14
+## O que foi entregue na Fase 15
 
-### 1. Importação Assíncrona
-- `AsyncJob` — modelo no banco com `tipo`, `status` (pending/processing/completed/failed), `progresso` (0-100%), `parametros` (JSON), `resultado` (JSON), `erro`, `mensagem`, `criado_em`, `concluido_em`
-- `AsyncJobService`:
-  - `criar()` — cria job com status pending
-  - `atualizar_progresso()` — atualiza progresso e transita para processing
-  - `concluir()` — marca como completed com resultado
-  - `falhar()` — marca como failed com mensagem de erro
-  - `obter()` — retorna JobInfo para polling
-  - `listar()` — lista com filtro por status
-  - `limpar_antigos(horas)` — remove jobs concluídos/falhos antigos
-- Endpoint `POST /api/upload-async` — recebe arquivo, cria job, inicia processamento em thread separada
-- Endpoint `GET /api/jobs/{id}` — polling de status/progresso/resultado
-- Endpoint `GET /api/jobs` — listagem de jobs com filtro opcional por status
-- Processamento em lotes via `parse_em_lotes()` com atualização de progresso incremental
-- Thread daemon para não bloquear shutdown
+### 1. Redis Cache
+- `RedisCacheService` — cache distribuído com Redis + fallback automático para memória
+- Mesma interface do `CacheService` (get, set, delete, invalidate_prefix, clear, stats)
+- Conexão com timeout de 2s, reconexão automática em caso de falha
+- Prefixo configurável para namespacing
+- Stats reportam backend ativo (`"redis"` ou `"memory"`)
+- Endpoint `GET /api/redis/cache/stats`
 
-### 2. Cache Layer
-- `CacheService` — cache em memória thread-safe com:
-  - `get(key)` / `set(key, value, ttl)` — operações básicas com TTL
-  - `delete(key)` — remoção individual
-  - `invalidate_prefix(prefix)` — invalidação em massa (ex: "kpi:*")
-  - `clear()` — limpeza total
-  - `stats()` — hits, misses, sets, evictions, hit_rate
-  - Limpeza periódica de entradas expiradas
-  - Limite máximo de entradas com eviction LRU-like
-- Decorator `@cached(ttl, prefix)` — cacheia resultado de funções automaticamente
-- Endpoint `GET /api/cache/stats` — estatísticas em tempo real
-- Pronto para migração para Redis (mesma interface)
+### 2. Worker Queue
+- `WorkerQueue` — fila de processamento com multiprocessing
+- Pool de workers configurável via `WORKER_COUNT`
+- Retry com backoff exponencial (1s, 2s, 4s... até 3 tentativas)
+- Graceful shutdown com poison pills
+- Callbacks `on_complete` e `on_failure`
+- `worker_runner.py` — processo standalone com handler `ecd_import`
+- Endpoint `GET /api/worker/status`
 
-### 3. Benchmark
-- `test_gerar_ecd_sintetica_pequena` — ~1000 registros, valida tempo <5s
-- `test_gerar_ecd_sintetica_media` — ~5000 registros, valida tempo <10s
-- `test_parser_streaming_memoria` — valida que streaming não acumula tudo em memória
-- Métricas: contagem de registros, parse completo, parse em lotes
+### 3. Email Service
+- `EmailService` — envio de emails com SMTP ou modo log
+- Configuração via env vars: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+- Templates: `enviar_alerta_job_concluido`, `enviar_alerta_job_falhou`, `enviar_relatorio_agendado`
+- Envio assíncrono (thread separada) ou síncrono
+- Histórico e estatísticas de envio
+- Endpoints: `GET /api/email/stats`, `GET /api/email/historico`, `POST /api/email/test`
 
-### 4. Correções de Bugs
-- `_get_engine()` — agora usa `SPED_HUB_DB` env var em vez de hardcoded `DB_PATH`
-- `AsyncJobService.limpar_antigos()` — corrigido uso de `.delete()` em resultado de select (SQLAlchemy 2.0 usa `delete()` statement)
-- `AsyncJobService.falhar()` — assinatura correta com parâmetro `erro` obrigatório
+### 4. Playwright E2E
+- Testes de browser real com Chromium do sistema
+- Fluxos: login, registro, upload, dashboard
+- Screenshots automáticos em `/workspace/outputs/`
+- Health check completo: `GET /api/health/full`
 
-## Próximos Passos (Fase 15+)
+### 5. Docker Compose atualizado
+- Serviço `redis` (Redis 7 Alpine) com healthcheck
+- Serviço `worker` dedicado para processamento assíncrono
+- Variáveis de ambiente para SMTP e Redis
+
+## Próximos Passos (Fase 16+)
 
 1. Deploy real em VPS/cloud com domínio e SSL
-2. Testes E2E com Playwright (browser real, screenshots)
-3. Integração nativa com sistemas de terceiros (Domínio, Questor, Alterdata)
-4. Notificações por email (alertas de erro, relatórios agendados)
-5. Migração do cache para Redis
-6. Fila de processamento com workers dedicados (substituir threads)
-7. Suporte a ECDs reais de clientes (testes com arquivos >100MB)
+2. Integração nativa com sistemas de terceiros (Domínio, Questor, Alterdata)
+3. Suporte a ECDs reais de clientes (testes com arquivos >100MB)
+4. Dashboard de monitoramento (métricas, gráficos de uso)
+5. Migração completa para PostgreSQL (produção)
+6. CI/CD com deploy automático
 
 ## Pendências
 
 - Deploy real em VPS/cloud (configuração de domínio + SSL)
 - Integração com sistemas de terceiros
-- Cache em memória não persiste entre restarts (Redis na Fase 15)
+- Redis server não disponível no CI — fallback para memória funciona
+- Playwright E2E requer Chromium do sistema (não roda no CI padrão)
 - Rate limiting em memória não persiste entre restarts (aceitável para v1)
