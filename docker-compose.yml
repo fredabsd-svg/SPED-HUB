@@ -1,14 +1,15 @@
 # ── SPED-HUB Docker Compose ──
-# Produção: servidor web + volume persistente
+# Produção: nginx + SSL (Let's Encrypt) + backend FastAPI
 
 version: "3.9"
 
 services:
+  # ── Backend FastAPI ──
   web:
     build: .
     container_name: sped-hub-web
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - sped_hub_data:/app/data
       - ./uploads:/app/uploads
@@ -17,10 +18,36 @@ services:
       - PYTHONPATH=/app
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ecds')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # ── Nginx (proxy reverso + SSL) ──
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: sped-hub-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+
+  # ── Certbot (Let's Encrypt) ──
+  # Uso inicial: docker compose run --rm certbot certonly --webroot -w /var/www/certbot -d seu-dominio.com
+  certbot:
+    image: certbot/certbot:latest
+    container_name: sped-hub-certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot:rw
+      - ./certbot/conf:/etc/letsencrypt:rw
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    restart: unless-stopped
 
   # ── Desenvolvimento (descomente para usar) ──
   # dev:

@@ -26,6 +26,11 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **Notas explicativas automáticas** — Contexto operacional, práticas contábeis, capital social, imobilizado, eventos subsequentes
 - **Evolução multi-período** — Gráfico temporal com Ativo, Passivo, PL e Resultado através de múltiplos exercícios
 - **Fontes profissionais** — Inter (Google Fonts) nos PDFs exportados
+- **API REST v1** — Endpoints versionados com autenticação por API Key (X-API-Key)
+- **Multi-ECD lado a lado** — Comparação de até 5 ECDs simultaneamente
+- **Watchdog** — Importação automática de ECDs por polling
+- **Layout customizável** — Configuração de colunas visíveis por tipo de relatório
+- **Deploy produção** — nginx + SSL (Let's Encrypt) + docker-compose pronto
 - **Navegação entre múltiplas ECDs** importadas
 - **Design responsivo** com tema profissional
 
@@ -78,13 +83,16 @@ sped-hub info
 sped-hub-dashboard
 # Acesse http://localhost:8000
 # Registre-se em /register e faça login
+
+# Watchdog (importação automática)
+sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 ```
 
 ## Testes
 
 ```bash
 pytest tests/ -v
-# 86 testes — 100% passando
+# 107 testes — 100% passando
 ```
 
 ## Estrutura do Projeto
@@ -132,11 +140,16 @@ src/
 │           ├── dfc.html
 │           ├── diario.html
 │           └── notas.html       # (Fase 6)
+├── watchdog.py         # Importação automática (Fase 7)
+├── api/                 # API REST v1 (Fase 7)
+│   ├── __init__.py      # API Key auth
+│   └── routes.py        # 12 endpoints versionados
 └── layouts/            # Layouts de registros
     └── ecd_v9.yml      # 30 registros ECD
 
 tests/
 ├── test_fase2.py       # Balanço, DRE, Diário, Export (17 testes)
+├── test_fase7.py       # API v1, Multi-ECD, Watchdog, Layout (21 testes)
 ├── test_filters.py     # Filtros (13 testes)
 ├── test_parsers.py     # Parsers (16 testes)
 ├── test_reports.py     # Balancete, Razão, Formatação (17 testes)

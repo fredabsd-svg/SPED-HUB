@@ -21,6 +21,20 @@ Rotas:
   GET  /api/export/xlsx     — Exporta relatório para XLSX
   GET  /api/ecds            — Lista ECDs disponíveis
   GET  /api/filtros/aplicar — Aplica filtros e retorna dados filtrados
+
+API REST v1 (autenticação por X-API-Key):
+  GET  /api/v1/health            — Health check público
+  GET  /api/v1/empresas          — Lista empresas
+  GET  /api/v1/empresas/{id}     — Detalhes da empresa
+  GET  /api/v1/ecds              — Lista ECDs
+  GET  /api/v1/ecds/{id}         — Detalhes da ECD
+  GET  /api/v1/ecds/{id}/balanco — Balanço Patrimonial
+  GET  /api/v1/ecds/{id}/dre     — DRE
+  GET  /api/v1/ecds/{id}/dfc     — DFC
+  GET  /api/v1/ecds/{id}/diario  — Livro Diário (paginado)
+  GET  /api/v1/ecds/{id}/kpis    — KPIs
+  GET  /api/v1/ecds/{id}/notas   — Notas Explicativas
+  GET  /api/v1/ecds/{id}/validar — Validações de integridade
 """
 
 import datetime
@@ -31,6 +45,7 @@ import sys
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Query, Request, UploadFile
+from sqlalchemy import select
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -49,13 +64,17 @@ from src.reports.dfc import DFC
 from src.reports.base import fmt_moeda, fmt_data
 from src.auth import AuthService, init_auth, get_auth, get_usuario_atual, requer_autenticacao
 from src.filters.engine import FilterCriteria
+from src.api.routes import router as api_v1_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.5.0")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.6.0")
+
+# ── API REST v1 ──────────────────────────────────────────────────────────
+app.include_router(api_v1_router)
 
 # Templates
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -835,7 +854,7 @@ async def api_export_lote(
 
                 from weasyprint import HTML as WHTML
                 pdf_bytes = WHTML(string=html).write_pdf()
-                nome_arquivo = f"{tipo}_{ecd_id}_{empresa.nome[:20] if empresa else }.pdf"
+                nome_arquivo = f"{tipo}_{ecd_id}_{empresa.nome[:20] if empresa else 'NI'}.pdf"
                 zf.writestr(nome_arquivo, pdf_bytes)
 
         buf.seek(0)
@@ -850,6 +869,57 @@ async def api_export_lote(
         return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
     finally:
         session.close()
+
+
+# ── Rotas: Fase 7 ──────────────────────────────────────────────────────────
+
+@app.get("/api/multi-ecd")
+async def api_multi_ecd(ecd_ids: str = Query(...)):
+    """Comparação lado a lado de múltiplas ECDs (Fase 7)."""
+    session = get_session(_get_engine())
+    try:
+        ids = [int(x.strip()) for x in ecd_ids.split(",") if x.strip().isdigit()]
+        if len(ids) < 2:
+            return JSONResponse({"status": "erro", "mensagem": "Mínimo de 2 ECDs para comparação"}, status_code=400)
+        if len(ids) > 5:
+            return JSONResponse({"status": "erro", "mensagem": "Máximo de 5 ECDs para comparação"}, status_code=400)
+
+        svc = DashboardService(session, ids[0])
+        data = svc.get_multi_ecd_comparison(ids)
+        return data or {"status": "erro", "mensagem": "Dados insuficientes"}
+    finally:
+        session.close()
+
+
+@app.get("/api/layout")
+async def api_layout(ecd_id: int = Query(...), relatorio: str = Query("balanco")):
+    """Configuração de layout customizável para relatórios (Fase 7)."""
+    session = get_session(_get_engine())
+    try:
+        svc = DashboardService(session, ecd_id)
+        return svc.get_layout_customizavel(ecd_id, relatorio)
+    finally:
+        session.close()
+
+
+@app.get("/api/v1/health")
+async def api_v1_health():
+    """Health check público (Fase 7)."""
+    try:
+        session = get_session(_get_engine())
+        session.execute(select(1))
+        session.close()
+        db_status = "ok"
+    except Exception:
+        db_status = "error"
+
+    return {
+        "status": "ok",
+        "version": "0.6.0",
+        "database": db_status,
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+    }
+
 
 # ── Entry point ─────────────────────────────────────────────────────────────
 

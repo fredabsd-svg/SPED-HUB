@@ -439,6 +439,30 @@ class FilterView(Base):
         self.criterios_json = json.dumps(criterios, ensure_ascii=False)
 
 
+# ── API Keys (Fase 7) ──────────────────────────────────────────────────────
+
+
+class ApiKey(Base):
+    """Chave de API para acesso à API REST externa."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome: Mapped[str] = mapped_column(String(100), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    prefixo: Mapped[str] = mapped_column(String(8), nullable=False)  # "spd_xxxx" para exibição
+    ativo: Mapped[bool] = mapped_column(default=True)
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    expira_em: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    ultimo_uso: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    total_requisicoes: Mapped[int] = mapped_column(default=0)
+
+    def __repr__(self):
+        return f"<ApiKey {self.nome} ({self.prefixo}...)>"
+
+
 # ── Engine Factory ─────────────────────────────────────────────────────────
 
 

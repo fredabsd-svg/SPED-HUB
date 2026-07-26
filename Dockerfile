@@ -38,4 +38,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ecds')" || exit 1
 
+# Servidor web
 CMD ["python", "-m", "uvicorn", "src.dashboard.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Para watchdog (descomente e use em conjunto com o servidor):
+# CMD ["sh", "-c", "python -m uvicorn src.dashboard.app:app --host 0.0.0.0 --port 8000 & python -m src.watchdog --dir /app/uploads --db /app/data/sped_hub.db --interval 30"]

@@ -486,6 +486,128 @@ class DashboardService:
             "resultados": resultados,
         }
 
+
+    def get_multi_ecd_comparison(self, ecd_ids: list[int]) -> dict | None:
+        """Comparação lado a lado de múltiplas ECDs (Fase 7).
+
+        Retorna dados de Balanço, DRE e DFC para cada ECD selecionada,
+        permitindo visualização lado a lado no dashboard.
+
+        Args:
+            ecd_ids: Lista de IDs de ECDs a comparar (máx 5).
+
+        Returns:
+            dict com ecds (lista de metadados), balanco (matriz), dre (matriz), dfc (matriz)
+            ou None se menos de 2 ECDs.
+        """
+        if len(ecd_ids) < 2:
+            return None
+
+        ecd_ids = ecd_ids[:5]  # Limite de 5
+
+        from src.db.models import ECD, Empresa
+
+        ecds_data = []
+        balanco_data: dict[str, list] = {"labels": [], "ativo": [], "passivo": [], "pl": []}
+        dre_data: dict[str, list] = {"labels": [], "receita_bruta": [], "resultado_liquido": [], "margem": []}
+        dfc_data: dict[str, list] = {"labels": [], "operacional": [], "investimento": [], "financiamento": [], "variacao": []}
+
+        for ecd_id in ecd_ids:
+            ecd = self.session.get(ECD, ecd_id)
+            if not ecd:
+                continue
+            empresa = self.session.get(Empresa, ecd.empresa_id)
+            label = f"{empresa.nome[:20] if empresa else '?'} {ecd.dt_ini.year if ecd.dt_ini else ''}"
+
+            # Balanço
+            balanco = BalancoPatrimonial(self.session, ecd_id)
+            _, _, totais_b = balanco.gerar()
+            balanco_data["labels"].append(label)
+            balanco_data["ativo"].append(totais_b["ativo"])
+            balanco_data["passivo"].append(totais_b["passivo"])
+            balanco_data["pl"].append(totais_b["pl"])
+
+            # DRE
+            dre = DRE(self.session, ecd_id)
+            _, _, totais_d = dre.gerar()
+            receita = totais_d.get("receita_bruta", 0.0)
+            resultado = totais_d.get("resultado_liquido", 0.0)
+            margem = (resultado / receita * 100) if receita > 0 else 0.0
+            dre_data["labels"].append(label)
+            dre_data["receita_bruta"].append(receita)
+            dre_data["resultado_liquido"].append(resultado)
+            dre_data["margem"].append(round(margem, 2))
+
+            # DFC
+            dfc = DFC(self.session, ecd_id)
+            _, _, totais_f = dfc.gerar()
+            dfc_data["labels"].append(label)
+            dfc_data["operacional"].append(totais_f.get("operacional", 0.0))
+            dfc_data["investimento"].append(totais_f.get("investimento", 0.0))
+            dfc_data["financiamento"].append(totais_f.get("financiamento", 0.0))
+            dfc_data["variacao"].append(totais_f.get("variacao_caixa", 0.0))
+
+            ecds_data.append({
+                "id": ecd_id,
+                "empresa": empresa.nome if empresa else "",
+                "periodo": f"{ecd.dt_ini} a {ecd.dt_fin}",
+            })
+
+        return {
+            "ecds": ecds_data,
+            "balanco": balanco_data,
+            "dre": dre_data,
+            "dfc": dfc_data,
+        }
+
+    def get_layout_customizavel(self, ecd_id: int, relatorio: str = "balanco") -> dict:
+        """Retorna configuração de layout customizável para relatórios (Fase 7).
+
+        Permite que o frontend salve preferências de colunas visíveis,
+        ordenação e agrupamento.
+
+        Args:
+            ecd_id: ID da ECD
+            relatorio: Tipo de relatório (balanco, dre, dfc, diario)
+
+        Returns:
+            dict com colunas disponíveis, colunas padrão e preferências salvas.
+        """
+        colunas_default = {
+            "balanco": [
+                {"key": "cod_cta", "label": "Conta", "visible": True, "width": 120},
+                {"key": "nome_cta", "label": "Descrição", "visible": True, "width": 300},
+                {"key": "nivel", "label": "Nível", "visible": False, "width": 60},
+                {"key": "saldo_atual", "label": "Saldo Atual", "visible": True, "width": 150},
+                {"key": "saldo_anterior", "label": "Saldo Anterior", "visible": True, "width": 150},
+            ],
+            "dre": [
+                {"key": "descricao", "label": "Descrição", "visible": True, "width": 350},
+                {"key": "valor_atual", "label": "Valor Atual", "visible": True, "width": 150},
+                {"key": "valor_anterior", "label": "Valor Anterior", "visible": True, "width": 150},
+            ],
+            "dfc": [
+                {"key": "descricao", "label": "Descrição", "visible": True, "width": 350},
+                {"key": "valor", "label": "Valor", "visible": True, "width": 150},
+                {"key": "valor_anterior", "label": "Valor Anterior", "visible": True, "width": 150},
+            ],
+            "diario": [
+                {"key": "num_lcto", "label": "Nº Lcto", "visible": True, "width": 100},
+                {"key": "data", "label": "Data", "visible": True, "width": 100},
+                {"key": "cod_cta", "label": "Conta", "visible": True, "width": 120},
+                {"key": "historico", "label": "Histórico", "visible": True, "width": 300},
+                {"key": "debito", "label": "Débito", "visible": True, "width": 130},
+                {"key": "credito", "label": "Crédito", "visible": True, "width": 130},
+            ],
+        }
+
+        return {
+            "relatorio": relatorio,
+            "ecd_id": ecd_id,
+            "colunas": colunas_default.get(relatorio, []),
+            "preferencias_salvas": None,  # Futuro: carregar do banco
+        }
+
     def get_ecds_disponiveis(self) -> list[dict]:
         """Lista ECDs disponíveis para seleção."""
         ecds = self.session.execute(
