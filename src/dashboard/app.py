@@ -65,16 +65,20 @@ from src.reports.base import fmt_moeda, fmt_data
 from src.auth import AuthService, init_auth, get_auth, get_usuario_atual, requer_autenticacao
 from src.filters.engine import FilterCriteria
 from src.api.routes import router as api_v1_router
+from src.api.graphql import graphql_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version="0.6.1")
+app = FastAPI(title="SPED-HUB Dashboard", version="0.7.0")
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
+
+# ── GraphQL API v2 ───────────────────────────────────────────────────────
+app.include_router(graphql_router)
 
 # Templates
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -767,6 +771,120 @@ async def api_filtros_aplicar(
         session.close()
 
 
+
+
+# ── Rotas: Fase 9 — Exportação Multi-formato ───────────────────────────────
+
+@app.get("/api/export/multi-formato")
+async def api_export_multi_formato(
+    ecd_id: int = Query(...),
+    formatos: str = Query("pdf,xlsx,csv"),
+):
+    """Exportacao multi-formato: gera ZIP com PDF, XLSX e CSV para uma ECD."""
+    import csv
+    import io as io_mod
+    import zipfile
+
+    session = get_session(_get_engine())
+    try:
+        from src.reports.export_engine import ExportEngine, WhiteLabel
+        from src.reports.base import ReportContext
+        from src.db.models import ECD, Empresa
+
+        ecd = session.get(ECD, ecd_id)
+        if not ecd:
+            return JSONResponse({"status": "erro", "mensagem": "ECD nao encontrada"}, status_code=404)
+
+        empresa = session.get(Empresa, ecd.empresa_id)
+
+        wl = WhiteLabel()
+        export = ExportEngine()
+        ctx = ReportContext(
+            titulo="",
+            empresa_nome=empresa.nome if empresa else "",
+            empresa_cnpj=empresa.cnpj if empresa else "",
+            periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}",
+        )
+
+        formatos_list = [f.strip().lower() for f in formatos.split(",")]
+        zip_buffer = io_mod.BytesIO()
+
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for tipo in ["balanco", "dre", "dfc"]:
+                if tipo == "balanco":
+                    balanco = BalancoPatrimonial(session, ecd_id)
+                    ctx_rel, grupos, totais = balanco.gerar()
+                    ctx.titulo = ctx_rel.titulo
+                elif tipo == "dre":
+                    dre = DRE(session, ecd_id)
+                    ctx_rel, linhas, totais = dre.gerar()
+                    ctx.titulo = ctx_rel.titulo
+                elif tipo == "dfc":
+                    dfc = DFC(session, ecd_id)
+                    ctx_rel, linhas, totais = dfc.gerar()
+                    ctx.titulo = ctx_rel.titulo
+
+                if "pdf" in formatos_list:
+                    if tipo == "balanco":
+                        html = export.render_html("balanco.html", ctx, wl, grupos=grupos, totais=totais)
+                    elif tipo == "dre":
+                        html = export.render_html("dre.html", ctx, wl, linhas=linhas, totais=totais)
+                    elif tipo == "dfc":
+                        html = export.render_html("dfc.html", ctx, wl, linhas=linhas, totais=totais)
+                    from weasyprint import HTML as WHTML
+                    pdf_bytes = WHTML(string=html).write_pdf()
+                    zf.writestr(f"{tipo}_{ecd_id}.pdf", pdf_bytes)
+
+                if "xlsx" in formatos_list:
+                    xlsx_buffer = io_mod.BytesIO()
+                    if tipo == "balanco":
+                        linhas_dict = []
+                        for secao, nome in [("ativo", "Ativo"), ("passivo", "Passivo"), ("pl", "PL")]:
+                            for l in grupos[secao]:
+                                linhas_dict.append({"secao": nome, "cod_cta": l.cod_cta, "nome_cta": l.nome_cta, "saldo_atual": l.saldo_atual})
+                        colunas = ["secao", "cod_cta", "nome_cta", "saldo_atual"]
+                    elif tipo == "dre":
+                        linhas_dict = [{"tipo": l.tipo, "descricao": l.descricao, "valor_atual": l.valor_atual} for l in linhas]
+                        colunas = ["tipo", "descricao", "valor_atual"]
+                    elif tipo == "dfc":
+                        linhas_dict = [{"tipo": l.tipo, "descricao": l.descricao, "valor": l.valor} for l in linhas]
+                        colunas = ["tipo", "descricao", "valor"]
+                    export.export_xlsx_to_buffer(xlsx_buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
+                    zf.writestr(f"{tipo}_{ecd_id}.xlsx", xlsx_buffer.getvalue())
+
+                if "csv" in formatos_list:
+                    csv_buffer = io_mod.StringIO()
+                    if tipo == "balanco":
+                        writer = csv.writer(csv_buffer)
+                        writer.writerow(["secao", "cod_cta", "nome_cta", "saldo_atual"])
+                        for secao, nome in [("ativo", "Ativo"), ("passivo", "Passivo"), ("pl", "PL")]:
+                            for l in grupos[secao]:
+                                writer.writerow([nome, l.cod_cta, l.nome_cta, l.saldo_atual])
+                    elif tipo == "dre":
+                        writer = csv.writer(csv_buffer)
+                        writer.writerow(["tipo", "descricao", "valor_atual"])
+                        for l in linhas:
+                            writer.writerow([l.tipo, l.descricao, l.valor_atual])
+                    elif tipo == "dfc":
+                        writer = csv.writer(csv_buffer)
+                        writer.writerow(["tipo", "descricao", "valor"])
+                        for l in linhas:
+                            writer.writerow([l.tipo, l.descricao, l.valor])
+                    zf.writestr(f"{tipo}_{ecd_id}.csv", csv_buffer.getvalue().encode("utf-8-sig"))
+
+        zip_buffer.seek(0)
+
+        return Response(
+            content=zip_buffer.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=sped_hub_export_{ecd_id}.zip"},
+        )
+
+    except Exception as e:
+        logger.exception("Erro ao exportar multi-formato")
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
+    finally:
+        session.close()
 
 
 # ── Rotas: Fase 6 ──────────────────────────────────────────────────────────

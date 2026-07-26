@@ -20,6 +20,7 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **Filtros interativos** — Por natureza, nível, período, conta, nome e saldo zero
 - **Exportação direta** — PDF e XLSX para Balanço, DRE e DFC com um clique
 - **Exportação de lote** — Múltiplas ECDs em ZIP (até 10 por lote)
+- **Exportação multi-formato** — ZIP com PDF + XLSX + CSV para balanço, DRE e DFC em um clique
 - **5 abas de relatórios** — Balanço Patrimonial, DRE, DFC, Livro Diário e Notas Explicativas
 - **Comparativo entre exercícios** — Coluna de período anterior no Balanço, DRE e DFC
 - **Visão de publicação** — Balanço hierárquico J100/J150 conforme Lei 6.404/76
@@ -27,6 +28,7 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **Evolução multi-período** — Gráfico temporal com Ativo, Passivo, PL e Resultado através de múltiplos exercícios
 - **Fontes profissionais** — Inter (Google Fonts) nos PDFs exportados
 - **API REST v1** — Endpoints versionados com autenticação por API Key (X-API-Key)
+- **GraphQL API v2** — Schema completo com strawberry-graphql em  (14 queries: empresas, ECDs, balanço, DRE, DFC, diário, KPIs, notas, validações)
 - **Multi-ECD lado a lado** — Comparação de até 5 ECDs simultaneamente
 - **Watchdog** — Importação automática de ECDs por polling
 - **Layout customizável** — Configuração de colunas visíveis por tipo de relatório
@@ -92,7 +94,7 @@ sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 
 ```bash
 pytest tests/ -v
-# 107 testes — 100% passando
+# 134 testes — 100% passando
 ```
 
 ## Estrutura do Projeto
@@ -141,15 +143,17 @@ src/
 │           ├── diario.html
 │           └── notas.html       # (Fase 6)
 ├── watchdog.py         # Importação automática (Fase 7)
-├── api/                 # API REST v1 (Fase 7)
+├── api/                 # APIs (Fase 7-9)
 │   ├── __init__.py      # API Key auth
-│   └── routes.py        # 12 endpoints versionados
+│   ├── routes.py        # 12 endpoints REST v1
+│   └── graphql.py       # GraphQL API v2 — 14 queries (Fase 9)
 └── layouts/            # Layouts de registros
     └── ecd_v9.yml      # 30 registros ECD
 
 tests/
 ├── test_fase2.py       # Balanço, DRE, Diário, Export (17 testes)
 ├── test_fase7.py       # API v1, Multi-ECD, Watchdog, Layout (21 testes)
+├── test_fase9.py       # GraphQL, Multi-formato, Parser streaming (27 testes)
 ├── test_filters.py     # Filtros (13 testes)
 ├── test_parsers.py     # Parsers (16 testes)
 ├── test_reports.py     # Balancete, Razão, Formatação (17 testes)

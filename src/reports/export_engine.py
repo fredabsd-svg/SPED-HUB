@@ -243,3 +243,88 @@ class ExportEngine:
         except Exception as e:
             logger.error("Erro ao gerar XLSX: %s", e)
             raise
+    def export_xlsx_to_buffer(
+        self,
+        buffer,
+        ctx: Any,
+        linhas: list[dict],
+        colunas: list[str],
+        titulo: str = "",
+        white_label=None,
+    ):
+        """Exporta dados tabulares para XLSX em buffer (BytesIO)."""
+        from openpyxl import Workbook
+        from openpyxl.styles import (
+            Alignment, Border, Font, PatternFill, Side,
+        )
+        from openpyxl.utils import get_column_letter
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = titulo[:31] if titulo else "Relatorio"
+
+        cor_primaria = (
+            white_label.cor_primaria.replace("#", "")
+            if white_label
+            else "0B4F6C"
+        )
+
+        header_fill = PatternFill(start_color=cor_primaria, end_color=cor_primaria, fill_type="solid")
+        header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        zebra_fill = PatternFill(start_color="F5F5F7", end_color="F5F5F7", fill_type="solid")
+        thin_border = Border(
+            left=Side(style="thin", color="D4D4DA"),
+            right=Side(style="thin", color="D4D4DA"),
+            top=Side(style="thin", color="D4D4DA"),
+            bottom=Side(style="thin", color="D4D4DA"),
+        )
+        data_font = Font(name="Calibri", size=10)
+        moeda_format = '#.##0,00;(#.##0,00);"-"'
+
+        row = 1
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(colunas))
+        ws.cell(row=row, column=1, value=titulo).font = Font(name="Calibri", size=14, bold=True, color=cor_primaria)
+        row += 1
+
+        if ctx:
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(colunas))
+            ws.cell(row=row, column=1,
+                    value=f"{ctx.empresa_nome} — CNPJ: {ctx.empresa_cnpj} — Periodo: {ctx.periodo_ref}").font = Font(name="Calibri", size=9, color="6B6B85")
+            row += 1
+
+        row += 1
+
+        for col_idx, col_name in enumerate(colunas, 1):
+            cell = ws.cell(row=row, column=col_idx, value=col_name)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = thin_border
+        row += 1
+
+        for i, linha in enumerate(linhas):
+            for col_idx, col_name in enumerate(colunas, 1):
+                valor = linha.get(col_name, "")
+                cell = ws.cell(row=row, column=col_idx, value=valor)
+                cell.font = data_font
+                cell.border = thin_border
+                if isinstance(valor, (int, float)):
+                    cell.alignment = Alignment(horizontal="right")
+                    if col_name.lower() in ("saldo", "debito", "credito", "valor", "saldo_atual", "saldo_anterior", "debitos", "creditos", "saldo_inicial", "saldo_final"):
+                        cell.number_format = moeda_format
+                else:
+                    cell.alignment = Alignment(horizontal="left")
+            if i % 2 == 1:
+                for col_idx in range(1, len(colunas) + 1):
+                    ws.cell(row=row, column=col_idx).fill = zebra_fill
+            row += 1
+
+        for col_idx in range(1, len(colunas) + 1):
+            max_width = len(str(colunas[col_idx - 1])) + 4
+            for linha in linhas:
+                val = str(linha.get(colunas[col_idx - 1], ""))
+                max_width = max(max_width, len(val) + 2)
+            ws.column_dimensions[get_column_letter(col_idx)].width = min(max_width, 50)
+
+        wb.save(buffer)
+

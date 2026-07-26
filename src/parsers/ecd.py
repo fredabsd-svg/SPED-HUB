@@ -156,3 +156,39 @@ class ECDParser:
     def parse_todos(self, caminho: Path) -> list[dict]:
         """Parse completo retornando lista (para testes e arquivos pequenos)."""
         return list(self.parse(caminho))
+    def parse_em_lotes(self, caminho: Path, tamanho_lote: int = 1000):
+        """Parse streaming em lotes para arquivos grandes (>100MB).
+
+        Yields batches de registros para processamento incremental,
+        evitando estourar memória com arquivos muito grandes.
+
+        Args:
+            caminho: Caminho do arquivo ECD
+            tamanho_lote: Quantos registros por lote
+
+        Yields:
+            list[dict]: Lote de registros parseados
+        """
+        lote = []
+        for registro in self.parse(caminho):
+            lote.append(registro)
+            if len(lote) >= tamanho_lote:
+                yield lote
+                lote = []
+        if lote:
+            yield lote
+
+    def contar_registros(self, caminho: Path) -> dict[str, int]:
+        """Conta registros por tipo sem armazenar todos em memória.
+
+        Útil para estimar tamanho antes de processar arquivos grandes.
+
+        Returns:
+            dict com contagem por tipo de registro
+        """
+        contagem: dict[str, int] = {}
+        for registro in self.parse(caminho):
+            reg = registro['_reg']
+            contagem[reg] = contagem.get(reg, 0) + 1
+        return contagem
+

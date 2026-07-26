@@ -47,11 +47,13 @@ logger = logging.getLogger("sped-hub.api.v1")
 
 router = APIRouter(prefix="/api/v1", tags=["API v1"])
 
-DB_PATH = "sped_hub.db"
+def _get_db_path() -> str:
+    import os as _os
+    return _os.environ.get("SPED_HUB_DB", "sped_hub.db")
 
 
 def _get_session() -> Session:
-    engine = criar_engine(DB_PATH)
+    engine = criar_engine(_get_db_path())
     init_db(engine)
     return get_session(engine)
 
