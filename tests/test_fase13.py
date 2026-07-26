@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select, func
 
+from src.version import APP_VERSION
 from src.db.models import (
     ApiKey,
     AuditLog,
@@ -657,7 +658,7 @@ class TestE2EAPI:
         resp = client.get("/api/v1/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
-        assert resp.json()["version"] == "0.14.0"
+        assert resp.json()["version"] == APP_VERSION
 
         # Lista empresas (precisa de API Key)
         resp = client.get("/api/v1/empresas", headers={"X-API-Key": chave})

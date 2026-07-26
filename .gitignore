@@ -6,6 +6,15 @@
 # Logs
 *.log
 
+# Ambiente virtual
+.venv/
+venv/
+
+# Variáveis de ambiente (NUNCA versionar)
+.env
+.env.*
+!.env.example
+
 # Python
 __pycache__/
 *.pyc
@@ -14,10 +23,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-
-# Ambiente virtual
-.venv/
-venv/
 
 # IDE
 .vscode/

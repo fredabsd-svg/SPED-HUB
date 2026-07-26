@@ -1,145 +1,132 @@
 # SPED-HUB — Continuidade do Projeto
 
-**Data:** 2026-07-27
+**Última atualização:** 2026-07-27
 
-## Objetivo da Alteração Atual
+## Fase 17 — Fundação de Produção (em andamento)
 
-**Fase 15 — Redis Cache, Worker Queue, Email e Playwright E2E:**
-1. Redis Cache — `RedisCacheService` com fallback automático para memória, mesma interface do `CacheService`, invalidação por prefixo, estatísticas com backend reportado
-2. Worker Queue — `WorkerQueue` com multiprocessing, pool de workers configurável, retry com backoff exponencial, graceful shutdown, callbacks de conclusão/falha, `worker_runner.py` standalone
-3. Email Service — `EmailService` com modo SMTP e modo log, templates para alertas (job concluído/falha, relatório agendado), envio assíncrono, histórico e estatísticas
-4. Playwright E2E — testes de browser real (login, registro, upload, dashboard), screenshots automáticos, health check completo
-5. Bump v0.13.0 — 316 testes (100% passando)
+> Trilha aprovada: **fundação de produção primeiro**.  PostgreSQL, deploy,
+> integrações com terceiros e CI/CD de publicação são itens posteriores;
+> esta fase prepara o terreno sem assumir credenciais ou domínios externos.
 
-## Status Técnico
+### Etapa 1 — Configuração por ambiente ✅ (entregue — commit `1ad08ef`)
+
+- `src/settings.py` com `Settings` (dataclass `frozen`), `get_settings()`
+  cacheado por snapshot do ambiente, `with_overrides()` e
+  `reset_settings_cache()` (usado em testes).
+- Variáveis lidas: `DATABASE_URL`, `SPED_HUB_DB` (alias legado),
+  `SPED_HUB_SECRET_KEY`, `SPED_HUB_DEBUG`, `SPED_HUB_LOG_LEVEL`,
+  `SPED_HUB_ALLOWED_HOSTS`, `SPED_HUB_MAX_UPLOAD_MB`,
+  `SPED_HUB_ECD_CHUNK_ROWS`, `SPED_HUB_ECD_CHUNK_BYTES`,
+  `SPED_HUB_MONITORING_RETENTION_HOURS`, `SPED_HUB_METRICS_WINDOW_MINUTES`,
+  `SMTP_HOST/PORT/USER/PASSWORD/USE_TLS`, `EMAIL_FROM/ENABLED`,
+  `REDIS_URL`, `SPED_HUB_WEBHOOK_*`, `SPED_HUB_RATE_LIMIT_*`.
+- `src/db/models.py:criar_engine` aceita caminho SQLite legado **ou** URL
+  completa (`sqlite:///...`, `postgresql+psycopg://...`).  Os PRAGMAs
+  `journal_mode=WAL` e `foreign_keys=ON` são ativados só em SQLite de
+  arquivo (`:memory:` continua funcionando).
+- `.env.example` lista todas as variáveis com defaults e comentários;
+  `.gitignore` agora bloqueia `.env` (mas mantém `.env.example`).
+- `tests/test_settings.py` — 27 testes (defaults, override por env,
+  precedência `DATABASE_URL` > `SPED_HUB_DB`, PRAGMAs, inicialização
+  sem engine explícita, imutabilidade).
+- Ajustes compatíveis: testes das Fases 13/16 com `0.14.0` hardcoded
+  passaram a usar `APP_VERSION` (não quebra nas próximas fases).
+- **Total de testes:** 372 (100% passando, 30 s por bloco).
+- `README.md` — nova seção "Configuração" e tabela de variáveis.
+- Versão bumped para `0.15.0` (`src/version.py` e `pyproject.toml`).
+
+#### Não-objetivos desta etapa (vão para próximas)
+
+- Não troquei nenhum chamador de `criar_engine(db_path=...)` por
+  `criar_engine(url=...)` — a refatoração agregada fica para a etapa de
+  migração para PostgreSQL.
+- Não introduzi migrações com Alembic (SQLAlchemy `create_all` segue
+  sendo o entrypoint; `Base.metadata.create_all` continua idempotente).
+- Não troquei o SMTP por email com templates HTML ricos (somente os
+  defaults foram expostos via settings).
+
+### Etapas 2-6 — sequência acordada (planejadas)
+
+> Cada etapa terá um commit próprio, validação por bloco da suíte
+> (parsing / auth / relatórios / integrações / e2e) e atualização deste
+> `continuidade.MD`.  Nada é publicado (`git push`) sem autorização do
+> usuário; branches/PRs também dependem dessa autorização.
+
+| Etapa | Tema principal | Entregas previstas |
+|---|---|---|
+| 2 | Migração para PostgreSQL | `criar_engine` parametrizado por todos os serviços; testes multi-backend (Postgres opcional via `TEST_DATABASE_URL`); ajustes de tipos/text que não portam para Postgres (`Text`/`String(255)` revisados, datas como `Date`); `Repository` idempotente em ambos os backends. |
+| 3 | Migrações Alembic + `Base.metadata.create_all` como fallback | `alembic/` no repositório, autogeração revisada manualmente, `init_db` chama `alembic upgrade head` quando a URL for Postgres; policy de versionamento de schema em `docs/migrations.md`. |
+| 4 | Upload de ECDs >100MB | Parser em chunks com `ecd_import_chunk_rows`/`ecd_import_chunk_bytes` (já nas settings), `importar` retorna iterator/gerador, cancelamento por token, retomada a partir de offset; cobertura com ECD sintético. |
+| 5 | Hardening de produção | Validação de upload (MIME, magic number ECD), rate limit por IP além do de API Key, headers de segurança (CSP/HSTS) no `nginx.conf`, mensagens de erro sem vazar PII, logs estruturados (JSON opcional). |
+| 6 | CI/CD de deploy preparado | Workflow `release.yml` com build multi-arch + push GHCR; **NÃO** aciona deploy automático; `docs/deploy.md` com checklist manual de produção (DNS, SSL, Postgres, backup, observabilidade). |
+
+> Itens **externos** (deploy real em VPS/cloud, domínio, SSL, integrações
+> nativas com Domínio/Questor/Alterdata, ECDs reais de clientes) ficam
+> fora desta sequência: dependem de credenciais, contrato e plano
+> operacional que só o usuário pode autorizar.  Serão retomados quando a
+> documentação e as credenciais correspondentes chegarem.
+
+## Objetivo da Alteração Anterior (Fase 16 — referência)
+
+**Fase 16 — Observabilidade, Monitoramento Operacional e Hardening:**
+1. `src/monitoring.py` (`MetricsCollector` thread-safe + snapshot
+   operacional com janela móvel, banco, cache, e-mail, workers, processo
+   e top rotas; `build_operational_snapshot`, `normalize_path`).
+2. Endpoints `/monitoring`, `/api/monitoring/summary`,
+   `/api/monitoring/reset` e `/api/health/full` (já ampliado na Fase 15).
+3. Auto-promoção do primeiro usuário como `admin`, migração para bases
+   legadas e gating de páginas/rotas sensíveis.
+4. Isolamento por `escritorio_id` em queries,
+   uploads e jobs assíncronos.
+5. `tests/test_fase16.py` (13 testes) e
+   `tests/test_review_regressions.py` (16 testes) — 29 novos.
+6. Versão `0.14.0` em `src/version.py`.
+
+## Status Técnico Atualizado
 
 | Componente | Status |
 |---|---|
-| `pyproject.toml` | ✅ Atualizado (v0.13.0) |
-| `src/layouts/ecd_v9.yml` | ✅ 30 registros (Fase 1) |
-| `src/parsers/ecd.py` | ✅ Streaming + herança + parse_em_lotes + contar_registros (Fase 9) |
-| `src/parsers/efd.py` | ✅ Parser EFD-Contribuições (Fase 4) |
-| `src/parsers/ecf.py` | ✅ Parser ECF (Fase 4) |
-| `src/db/models.py` | ✅ 24 modelos + AsyncJob (Fase 14) |
-| `src/db/repository.py` | ✅ CRUD + consultas (Fase 1) |
-| `src/auth/__init__.py` | ✅ AuthService + MultiTenantMiddleware + TenantFilter + contextvars (Fase 13) |
-| `src/filters/engine.py` | ✅ 16 tipos de filtro (Fase 1) |
-| `src/reports/base.py` | ✅ Convenção de sinais (Fase 1) |
-| `src/reports/balancete.py` | ✅ Balancete F8 (Fase 8) |
-| `src/reports/razao.py` | ✅ Razão F11 (Fase 1) |
-| `src/reports/balanco.py` | ✅ +período anterior, +J100/J150 (Fase 5) |
-| `src/reports/dre.py` | ✅ +período anterior comparativo (Fase 5) |
-| `src/reports/dfc.py` | ✅ +período anterior comparativo (Fase 6) |
-| `src/reports/diario.py` | ✅ Livro Diário F12 (Fase 2) |
-| `src/reports/export_engine.py` | ✅ +base_url, +export_xlsx_to_buffer (Fase 9) |
-| `src/reports/templates/*` | ✅ +fontes Inter, +colunas período anterior (Fase 6) |
-| `src/validators/integridade.py` | ✅ 7 validações (Fase 1) |
-| `src/cli.py` | ✅ CLI completa (Fase 1-2) |
-| `src/ratelimit/__init__.py` | ✅ RateLimiter + RateLimitService + RateLimitInfo (Fase 13) |
-| `src/audit/__init__.py` | ✅ AuditService + logs + estatísticas + limpeza (Fase 13) |
-| `src/async_jobs/__init__.py` | ✅ AsyncJobService + JobInfo + polling + limpeza (Fase 14) |
-| `src/cache/__init__.py` | ✅ CacheService + TTL + @cached + stats (Fase 14) |
-| `src/cache/redis_cache.py` | ✅ RedisCacheService + fallback memória + stats com backend (Fase 15) |
-| `src/worker_queue.py` | ✅ WorkerQueue + multiprocessing + retry backoff + callbacks (Fase 15) |
-| `src/worker_runner.py` | ✅ Worker standalone com handler ECD (Fase 15) |
-| `src/email_service.py` | ✅ EmailService + SMTP/log + templates alerta + histórico (Fase 15) |
-| `src/dashboard/app.py` | ✅ FastAPI app — 58 rotas incluindo /api/email/*, /api/worker/status, /api/redis/cache/stats, /api/health/full (Fase 15) |
-| `src/dashboard/services.py` | ✅ +multi-ECD, +layout customizável (Fase 7) |
-| `src/dashboard/templates/*` | ✅ Auth, upload, partials, notas, +comparar, +layout, +webhooks, +api_keys, +auditoria (Fase 13) |
-| `src/api/__init__.py` | ✅ API Key auth + ApiKeyService + rate limiting integrado + auditoria (Fase 13) |
-| `src/api/routes.py` | ✅ 28 endpoints REST v1 + api-keys CRUD + rate-limit config + audit logs (Fase 13) |
-| `src/api/graphql.py` | ✅ GraphQL API v2 — 14 queries (Fase 9) |
-| `src/webhooks/__init__.py` | ✅ WebhookService + retry backoff + WebhookDelivery tracking (Fase 11) |
-| `src/watchdog.py` | ✅ Importação automática por polling (Fase 7) |
-| `scripts/cron-import.sh` | ✅ Script de agendamento cron (Fase 10) |
-| `Dockerfile` | ✅ Multi-stage + watchdog (Fase 7) |
-| `docker-compose.yml` | ✅ Produção com nginx + certbot + Redis + worker (Fase 15) |
-| `nginx.conf` | ✅ Proxy reverso + SSL hardening (Fase 7) |
-| `.github/workflows/ci.yml` | ✅ CI/CD pipeline (Fase 5) |
-| `tests/test_fase15.py` | ✅ 29 testes (Fase 15) |
-| `tests/test_e2e_playwright.py` | ✅ 10 testes E2E com screenshots (Fase 15) |
-| **Total** | **316 testes — 100% passando** |
+| `pyproject.toml` | ✅ v0.15.0 (Fase 17 etapa 1) |
+| `src/version.py` | ✅ `APP_VERSION = "0.15.0"` |
+| `src/settings.py` | ✅ Configuração centralizada por env (Fase 17 et1) |
+| `src/db/models.py` | ✅ 24 modelos + `criar_engine` configurável (Fase 17 et1) |
+| `.env.example` | ✅ Lista de variáveis com defaults comentados (Fase 17 et1) |
+| `.gitignore` | ✅ `.env` ignorado, `.env.example` versionado (Fase 17 et1) |
+| `README.md` | ✅ Seção "Configuração" + tabela de env vars (Fase 17 et1) |
+| `tests/test_settings.py` | ✅ 27 testes novos (Fase 17 et1) |
+| Demais componentes (Fases 1-16) | ✅ Estáveis |
+| **Total** | **372 testes — 100% passando** |
 
-## O que foi entregue na Fase 15
+## Próximos Passos (visão de longo prazo)
 
-### 1. Redis Cache
-- `RedisCacheService` — cache distribuído com Redis + fallback automático para memória
-- Mesma interface do `CacheService` (get, set, delete, invalidate_prefix, clear, stats)
-- Conexão com timeout de 2s, reconexão automática em caso de falha
-- Prefixo configurável para namespacing
-- Stats reportam backend ativo (`"redis"` ou `"memory"`)
-- Endpoint `GET /api/redis/cache/stats`
+1. ✅ Fundação de produção (em andamento — Fase 17)
+2. ⏳ Deploy real em VPS/cloud com domínio e SSL (externo, mediante autorização)
+3. ⏳ Integração nativa com sistemas de terceiros (Domínio, Questor, Alterdata — depende de contrato)
+4. ⏳ Suporte a ECDs reais de clientes (testes com arquivos >100MB — Etapa 4 da Fase 17)
+5. ⏳ Migração completa para PostgreSQL em produção (Etapas 2-3 da Fase 17)
+6. ⏳ CI/CD com deploy automático (Etapa 6 da Fase 17 — apenas preparação)
 
-### 2. Worker Queue
-- `WorkerQueue` — fila de processamento com multiprocessing
-- Pool de workers configurável via `WORKER_COUNT`
-- Retry com backoff exponencial (1s, 2s, 4s... até 3 tentativas)
-- Graceful shutdown com poison pills
-- Callbacks `on_complete` e `on_failure`
-- `worker_runner.py` — processo standalone com handler `ecd_import`
-- Endpoint `GET /api/worker/status`
+## Push pendente — ambiente sem credencial Git (2026-07-28)
 
-### 3. Email Service
-- `EmailService` — envio de emails com SMTP ou modo log
-- Configuração via env vars: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
-- Templates: `enviar_alerta_job_concluido`, `enviar_alerta_job_falhou`, `enviar_relatorio_agendado`
-- Envio assíncrono (thread separada) ou síncrono
-- Histórico e estatísticas de envio
-- Endpoints: `GET /api/email/stats`, `GET /api/email/historico`, `POST /api/email/test`
-
-### 4. Playwright E2E
-- Testes de browser real com Chromium do sistema
-- Fluxos: login, registro, upload, dashboard
-- Screenshots automáticos em `/workspace/outputs/`
-- Health check completo: `GET /api/health/full`
-
-### 5. Docker Compose atualizado
-- Serviço `redis` (Redis 7 Alpine) com healthcheck
-- Serviço `worker` dedicado para processamento assíncrono
-- Variáveis de ambiente para SMTP e Redis
-
-## Fase 16 — Observabilidade, Monitoramento Operacional e Hardening
-
-### 1. Painel de Monitoramento
-- `src/monitoring.py` — `MetricsCollector` thread-safe com janela móvel HTTP, agregação de banco (empresas, ECDs, jobs ativos, falhas), cache, e-mail, fila, processo (RSS, threads) e top rotas (p95, erros)
-- Página `/monitoring` com cards de saúde, latência, dados, serviços internos, status HTTP, auto-refresh de 15s e reset da janela HTTP
-- API `/api/monitoring/summary` com janela configurável (15 min, 1h, 6h, 24h)
-
-### 2. Autorização Administrativa
-- Primeiro usuário registrado é automaticamente promovido a administrador
-- Migração transparente para bancos legados promove o usuário mais antigo se não houver admin
-- Páginas restritas: `/monitoring`, `/api-keys`, `/auditoria`, `/webhooks` (gating por `usuario.admin`)
-- APIs restritas: `/api/audit/*`, `/api/cache/*`, `/api/email/*`, `/api/worker/*`, `/api/redis/*`, `/api/monitoring/*`, REST externa e GraphQL (admin-only)
-- API REST externa exige API key; sessão de usuário só vale se o usuário for administrador
-
-### 3. Isolamento por Escritório
-- `aplicar_escopo_empresas()` e `usuario_pode_acessar_ecd()` aplicam WHERE em `Empresa.escritorio_id`
-- Middleware de auth valida `ecd_id`/`ecd_ids` em query strings e devolve 404 sem vazar existência entre tenants
-- Upload síncrono/assíncrono herda `escritorio_id` do usuário autenticado
-- Jobs assíncronos guardam `usuario_id` em `parametros` e são filtrados por owner no `obter`/`listar`
-- `DashboardService.get_ecds_disponiveis`/`get_comparativo_empresas` aceitam usuário e aplicam o escopo
-
-### 4. Versão e Saúde
-- `src/version.py` com `APP_VERSION = "0.14.0"` consumido por `app.version`, footer e endpoint `/api/v1/health`
-- `/api/health/full` consolidado (database/cache/workers/version) preservado como sonda pública
-
-### 5. Testes adicionados (Fase 16)
-- `tests/test_fase16.py` (13 testes) — autorização, primeira promoção admin, isolamento, snapshot agregado, normalização de path, reset da janela
-- `tests/test_review_regressions.py` (16 testes) — uploads seguros, fila progressiva, webhooks SSRF/retry real, EFD/ECF sem materialização, timezone em API key, comparação de hashes bcrypt-safe
-
-## Próximos Passos (Fase 17+)
-
-1. Deploy real em VPS/cloud com domínio e SSL
-2. Integração nativa com sistemas de terceiros (Domínio, Questor, Alterdata)
-3. Suporte a ECDs reais de clientes (testes com arquivos >100MB)
-4. Dashboard de monitoramento (métricas, gráficos de uso)
-5. Migração completa para PostgreSQL (produção)
-6. CI/CD com deploy automático
+- Tentativa de push em 2026-07-28 falhou com `fatal: could not read
+  Username for 'https://github.com': No such device or address`.
+  O sandbox desta conversa não tem credencial Git configurada e
+  `git push` via bash exige autenticação em https. Pela política,
+  não se tenta contornar nem armazenar token em runtime; o push
+  deve ser feito localmente ou em nova conversa com `github_push`.
+- Commits locais prontos no `main` (à frente de `origin/main`):
+  - `1ad08ef` — Fase 17 Etapa 1: Settings + criar_engine multi-dialeto
+  - `a2f8607` — README + continuidade.MD
+  - (a ser criado) registro deste pendente de push
+- A Etapa 2 (PostgreSQL) e demais permanecem pausadas até o push
+  ser resolvido para preservar a ordem cronológica do repositório.
 
 ## Pendências
 
-- Deploy real em VPS/cloud (configuração de domínio + SSL)
-- Integração com sistemas de terceiros
-- Redis server não disponível no CI — fallback para memória funciona
-- Playwright E2E requer Chromium do sistema (não roda no CI padrão)
-- Rate limiting em memória não persiste entre restarts (aceitável para v1)
+- Postgres não roda no sandbox de testes (sem psycopg/psycopg2 pré-instalado).
+  Cobertura multi-backend fica para a Etapa 2; enquanto isso,
+  `criar_engine(url="postgresql+psycopg://...")` é exercitado apenas na
+  construção da `Engine`, não na conexão.
+- Playwright E2E requer Chromium do sistema (não roda em CI padrão).
+- Rate limiting em memória não persiste entre restarts (aceitável para v1).
+- Redis server não disponível no CI — fallback para memória funciona.

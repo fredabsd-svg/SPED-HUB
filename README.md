@@ -37,6 +37,7 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **Deploy produção** — nginx + SSL (Let's Encrypt) + docker-compose pronto
 - **Navegação entre múltiplas ECDs** importadas
 - **Design responsivo** com tema profissional
+- **Configuração por ambiente** — Toda a aplicação lê de `src/settings.py` (`DATABASE_URL`, SMTP, Redis, uploads, etc.)
 
 ### Docker
 - **Dockerfile** multi-stage (builder + runtime) otimizado
@@ -51,14 +52,56 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 
 ```bash
 pip install -e ".[dev]"
-
-> **Versão atual:** 0.14.0 — Observabilidade, monitoramento e hardening multi-tenant.
 ```
+
+> **Versão atual:** 0.15.0 — Configuração por ambiente e banco configurável (Fase 17, etapa 1).
 
 ### Docker
 ```bash
 docker compose up -d
 # Acesse http://localhost:8000
+```
+
+## Configuração
+
+A Fase 17 introduziu um ponto único de configuração em `src/settings.py`,
+lido por CLI, dashboard, API e workers.
+
+A maneira mais rápida é copiar o exemplo e ajustar:
+
+```bash
+cp .env.example .env
+# Edite .env com seus valores
+```
+
+Variáveis suportadas (todas opcionais — os *defaults* funcionam em
+desenvolvimento):
+
+| Variável | Função | Default |
+|---|---|---|
+| `DATABASE_URL` | URL SQLAlchemy (`sqlite:///./sped_hub.db`, `postgresql+psycopg://...`) | `sqlite:///./sped_hub.db` |
+| `SPED_HUB_DB` | Alias legado: caminho SQLite puro (sobrescrito por `DATABASE_URL`) | — |
+| `SPED_HUB_SECRET_KEY` | Chave usada para tokens, HMAC e sessões | `change-me-in-production` |
+| `SPED_HUB_LOG_LEVEL` | `DEBUG`/`INFO`/`WARNING`/`ERROR` | `INFO` |
+| `SPED_HUB_ALLOWED_HOSTS` | CSV de hosts confiáveis | `*` |
+| `SPED_HUB_MAX_UPLOAD_MB` | Tamanho máximo de upload (MB) | `200` |
+| `SPED_HUB_ECD_CHUNK_ROWS` | Linhas por lote na importação | `5000` |
+| `SPED_HUB_ECD_CHUNK_BYTES` | Bytes por leitura de arquivo | `8388608` (8 MB) |
+| `SPED_HUB_MONITORING_RETENTION_HOURS` | Retenção do snapshot operacional | `24` |
+| `SPED_HUB_METRICS_WINDOW_MINUTES` | Janela padrão de métricas | `60` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP transacional | — |
+| `EMAIL_FROM` / `EMAIL_ENABLED` | Remetente e habilitação de e-mail | `noreply@...` / `false` |
+| `REDIS_URL` | Cache/fila (opcional) | — |
+| `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` / `SPED_HUB_WEBHOOK_TIMEOUT` | Resiliência dos webhooks | `3` / `10` |
+| `SPED_HUB_RATE_LIMIT_DEFAULT` / `SPED_HUB_RATE_LIMIT_WINDOW` | Limite de taxa padrão | `100` / `60` |
+
+> **Não versione o `.env`.**  O arquivo já é ignorado pelo `.gitignore`.
+
+Para usar PostgreSQL:
+
+```bash
+# pip install psycopg[binary]   # se ainda não estiver instalado
+DATABASE_URL=postgresql+psycopg://user:pass@host:5432/sped_hub sped-hub-dashboard
 ```
 
 ## Uso
@@ -98,14 +141,18 @@ sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 
 ```bash
 pytest tests/ -v
-# 345 testes — 100% passando (Fases 1-16)
+# 372 testes — 100% passando (Fases 1-17 etapa 1)
 ```
+
+> Rodar a suíte completa leva ~2 min. Em CI, recomenda-se dividir por fase
+> ou usar `pytest -x --maxfail=3` durante o desenvolvimento.
 
 ## Estrutura do Projeto
 
 ```
 src/
 ├── cli.py              # CLI principal
+├── settings.py         # Configuração por ambiente (Fase 17)
 ├── auth/               # Autenticação (Fase 4)
 │   └── __init__.py     # AuthService, middleware, sessões
 ├── parsers/            # Parsers de arquivos SPED
@@ -113,7 +160,7 @@ src/
 │   ├── efd.py          # Parser EFD-Contribuições (Fase 4)
 │   └── ecf.py          # Parser ECF (Fase 4)
 ├── db/                 # Modelos e repositório
-│   ├── models.py       # 17 modelos SQLAlchemy (inclui auth)
+│   ├── models.py       # 17 modelos SQLAlchemy (inclui auth) + criar_engine configurável (Fase 17)
 │   └── repository.py   # CRUD + consultas
 ├── filters/            # Motor de filtros
 │   └── engine.py       # 16 tipos de filtro
@@ -159,6 +206,7 @@ src/
     └── ecd_v9.yml      # 30 registros ECD
 
 tests/
+├── test_settings.py    # Settings + engine configurável (Fase 17)
 ├── test_fase2.py       # Balanço, DRE, Diário, Export (17 testes)
 ├── test_fase7.py       # API v1, Multi-ECD, Watchdog, Layout (21 testes)
 ├── test_fase9.py       # GraphQL, Multi-formato, Parser streaming (27 testes)
