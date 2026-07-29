@@ -24,6 +24,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 18 | Front-end sem CDN | concluída | `tests/test_vendor_assets.py` | testes de navegador seguem opt-in (§3.5) |
 | 19 | Regras do projeto verificáveis | concluída | `tests/test_regras_projeto.py` | 18 dos 24 módulos ainda sem documento (§1.4, por adoção) |
 | 20 | Testes de navegador | concluída | `tests/test_e2e_playwright.py`, `tests/test_hierarquia_ciclica.py` | seguem opt-in sob o marcador `e2e` (ADR 0004) |
+| 21 | Validação de hierarquia cíclica | concluída | `tests/test_validators.py` | recusar o arquivo na importação segue como decisão de produto |
+| 22 | Identidade "Tinta & Latão" nos exportados | concluída | `tests/test_identidade_export.py`, `tests/test_cli.py` | dashboard web mantém a identidade própria |
 
 ## Em aberto — decisões de produto
 
@@ -32,7 +34,6 @@ Ver `docs/roadmap.md` para o que ainda não existe.
 
 | Item | Situação |
 |---|---|
-| `exportar balancete --formato pdf` gera XLSX, em caminho diferente do `--saida` | Não existe template PDF para o balancete. Corrigir exige criar o template ou recusar a combinação com erro explícito. Comportamento atual fixado em `tests/test_cli.py`. |
 | Retomada de importação a partir de offset | Exigiria commits parciais, o que viola a §6.1. Precisaria vir com estado explícito de "importação incompleta" que os relatórios respeitem. |
 | `SPED_HUB_SECRET_KEY` sem consumidor | Documentada como reservada (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. |
 | `SPED_HUB_DEBUG` sem consumidor | Documentada como reservada (§2.2). O campo é lido e coagido, mas nenhum componente muda de comportamento por causa dele. Remover exige decidir se o projeto quer um modo de diagnóstico. |

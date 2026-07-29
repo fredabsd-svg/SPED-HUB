@@ -295,8 +295,8 @@ def cmd_exportar(args):
     # White-label
     wl = WhiteLabel(
         escritorio_nome=args.escritorio or "SPED-HUB",
-        cor_primaria=args.cor or "#0B4F6C",
-        cor_primaria_clara=args.cor_clara or "#E8F3F7",
+        cor_primaria=args.cor or "#0C3A30",
+        cor_primaria_clara=args.cor_clara or "#F5F2EA",
         logo_path=args.logo,
     )
 
@@ -361,26 +361,21 @@ def _export_pdf(args, session, ecd, ctx, criterios, wl, export, output_path):
         )
 
     elif args.tipo == "balancete":
+        # Até a 0.16.x não existia template PDF: `--formato pdf` caía num
+        # XLSX gravado em OUTRO caminho, avisando só em log INFO.
         balancete = Balancete(session, ecd.id)
-        ctx_rel, linhas = balancete.gerar(criterios)
+        ctx_rel, linhas = balancete.gerar(criterios, nivel_max=criterios.nivel_ate)
         ctx.titulo = ctx_rel.titulo
         ctx.filtros_descricao = ctx_rel.filtros_descricao
-        # Balancete usa template genérico — renderiza como tabela
-        linhas_dict = balancete.to_dict(linhas)
-        colunas = [
-            "cod_cta",
-            "nome_cta",
-            "nivel",
-            "saldo_inicial",
-            "debitos",
-            "creditos",
-            "saldo_final",
-        ]
-        export.export_xlsx(
-            output_path.replace(".pdf", ".xlsx"), ctx, linhas_dict, colunas, ctx.titulo, wl
+        export.export_pdf(
+            "balancete.html",
+            output_path,
+            ctx,
+            wl,
+            linhas=linhas,
+            totais=balancete.totais(linhas),
+            conferencia=balancete.conferir(linhas),
         )
-        logger.info("Balancete exportado como XLSX (formato tabular)")
-        return
 
     logger.info("PDF exportado: %s", output_path)
 
@@ -673,8 +668,8 @@ def main():
     p_exp.add_argument("--db", default="sped_hub.db", help="Banco SQLite")
     # White-label
     p_exp.add_argument("--escritorio", help="Nome do escritório (white-label)")
-    p_exp.add_argument("--cor", help="Cor primária (hex, ex: #0B4F6C)")
-    p_exp.add_argument("--cor-clara", help="Cor primária clara (hex, ex: #E8F3F7)")
+    p_exp.add_argument("--cor", help="Cor primária (hex, ex: #0C3A30)")
+    p_exp.add_argument("--cor-clara", help="Cor primária clara (hex, ex: #F5F2EA)")
     p_exp.add_argument("--logo", help="Caminho da logo (PNG)")
 
     # validar

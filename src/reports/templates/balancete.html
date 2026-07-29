@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="kicker">Balancete de verificação</div>
+<h2>{{ ctx.empresa_nome or ctx.titulo }}</h2>
+
+<div class="info-box">
+  <div>
+    <dt>Período</dt>
+    <dd>{{ ctx.periodo_ref }}</dd>
+  </div>
+  <div>
+    <dt>Contas</dt>
+    <dd>{{ conferencia.total_contas }}</dd>
+  </div>
+  <div>
+    <dt>Conferência SI + D − C = SF</dt>
+    <dd>{{ conferencia.status }}</dd>
+  </div>
+  {% if ctx.filtros_descricao and ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  <div>
+    <dt>Filtros</dt>
+    <dd>{{ ctx.filtros_descricao }}</dd>
+  </div>
+  {% endif %}
+</div>
+
+{% if conferencia.contas_com_divergencia %}
+<div class="callout callout-error">
+  ⚠ {{ conferencia.contas_com_divergencia }} conta(s) com divergência entre o
+  saldo recomputado (SI + D − C) e o saldo final do I155 — soma das
+  divergências: {{ fmt_moeda(conferencia.soma_divergencias) }}. As linhas
+  divergentes estão marcadas na coluna Conf.
+</div>
+{% endif %}
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:14%">Código</th>
+      <th style="width:32%">Descrição</th>
+      <th class="right" style="width:13%">Saldo inicial</th>
+      <th class="right" style="width:12%">Débitos</th>
+      <th class="right" style="width:12%">Créditos</th>
+      <th class="right" style="width:13%">Saldo final</th>
+      <th class="center" style="width:4%">Conf.</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for linha in linhas %}
+    <tr class="{{ 'synthetic' if linha.ind_cta == 'S' else 'analytical' }}">
+      <td class="indent-{{ linha.nivel - 1 if linha.nivel > 0 else 0 }}">{{ linha.cod_cta }}</td>
+      <td>{{ linha.nome_cta }}</td>
+      <td class="right">{{ fmt_moeda(linha.saldo_inicial) }}</td>
+      <td class="right">{{ fmt_moeda(linha.debitos) }}</td>
+      <td class="right">{{ fmt_moeda(linha.creditos) }}</td>
+      <td class="right">{{ fmt_moeda(linha.saldo_final) }}</td>
+      <td class="center">{{ '⚠' if linha.tem_divergencia else '✓' }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="total-row">
+      <td colspan="2">TOTAIS</td>
+      <td class="right">{{ fmt_moeda(totais.saldo_inicial) }}</td>
+      <td class="right">{{ fmt_moeda(totais.debitos) }}</td>
+      <td class="right">{{ fmt_moeda(totais.creditos) }}</td>
+      <td class="right">{{ fmt_moeda(totais.saldo_final) }}</td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
+
+<p class="text-muted" style="margin-top: var(--space-2); font-size: var(--font-size-xs);">
+  Fonte: registros I050/I155 da ECD. Conferência linha a linha: saldo inicial
+  + débitos − créditos comparado ao saldo final declarado.
+</p>
+
+{% endblock %}

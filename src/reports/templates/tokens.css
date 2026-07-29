@@ -3,29 +3,39 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* ── Paleta Principal ── */
-  --color-primary-900: #062A3A;
-  --color-primary-800: #083D54;
-  --color-primary-700: #0B4F6C;
-  --color-primary-600: #0E6285;
-  --color-primary-500: #11759E;
-  --color-primary-400: #3D90B1;
-  --color-primary-300: #6AABC4;
-  --color-primary-200: #97C6D8;
-  --color-primary-100: #C3E0EB;
-  --color-primary-50:  #E8F3F7;
+  /* ── Paleta Principal — identidade "Tinta & Latão" ──
+     tinta  #0C3A30  títulos, filetes principais, cabeçalhos de tabela
+     apoio  #33705C  segunda voz, variações positivas
+     Os nomes --color-primary-* são a API dos templates e do white-label
+     (que sobrescreve o 700 e o 50); os valores é que mudaram. */
+  --color-primary-900: #06231D;
+  --color-primary-800: #092E26;
+  --color-primary-700: #0C3A30;
+  --color-primary-600: #1F5546;
+  --color-primary-500: #33705C;
+  --color-primary-400: #578C78;
+  --color-primary-300: #7EA995;
+  --color-primary-200: #A8C6B6;
+  --color-primary-100: #D2E2D8;
+  --color-primary-50:  #F5F2EA;
 
-  /* ── Neutros ── */
-  --color-neutral-900: #1A1A2E;
-  --color-neutral-800: #2D2D44;
-  --color-neutral-700: #40405A;
-  --color-neutral-600: #535370;
-  --color-neutral-500: #6B6B85;
-  --color-neutral-400: #8E8EA0;
-  --color-neutral-300: #B1B1BD;
-  --color-neutral-200: #D4D4DA;
-  --color-neutral-100: #E8E8EC;
-  --color-neutral-50:  #F5F5F7;
+  /* ── Latão — destaque: kickers, filetes, linha de TOTAL ── */
+  --color-accent-700: #8A6A24;
+  --color-accent-500: #A9812F;
+  --color-accent-300: #C9A75B;
+  --color-accent-50:  #F7F1E2;
+
+  /* ── Neutros — corpo #26241E sobre apoios quentes ── */
+  --color-neutral-900: #1B1915;
+  --color-neutral-800: #26241E;
+  --color-neutral-700: #3D3930;
+  --color-neutral-600: #544E42;
+  --color-neutral-500: #6B6459;
+  --color-neutral-400: #8C8578;
+  --color-neutral-300: #ADA698;
+  --color-neutral-200: #E2DCCB;
+  --color-neutral-100: #EDE9DD;
+  --color-neutral-50:  #F5F2EA;
 
   /* ── Semânticas ── */
   --color-success: #1B8553;
@@ -37,8 +47,9 @@
   --color-info: #2B6CB0;
   --color-info-light: #EBF2FA;
 
-  /* ── Tipografia ── */
-  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* ── Tipografia — Source Serif 4 (títulos) sobre Source Sans 3 (corpo) ── */
+  --font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --font-size-xs: 0.6875rem;    /* 11px */
   --font-size-sm: 0.75rem;      /* 12px */

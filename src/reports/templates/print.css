@@ -3,21 +3,64 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Font Faces — Inter (Google Fonts / rsms)
+   Font Faces — "Tinta & Latão": Source Serif 4 + Source Sans 3 (OFL)
+   TTFs estáticos versionados em fonts/ — ver fonts/README.md
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @font-face {
-  font-family: 'Inter';
-  src: url('fonts/InterVariable.ttf') format('truetype');
-  font-weight: 100 900;
+  font-family: 'Source Sans 3';
+  src: url('fonts/SourceSans3-Regular.ttf') format('truetype');
+  font-weight: 400;
   font-style: normal;
 }
 
 @font-face {
-  font-family: 'Inter';
-  src: url('fonts/InterVariable-Italic.ttf') format('truetype');
-  font-weight: 100 900;
+  font-family: 'Source Sans 3';
+  src: url('fonts/SourceSans3-It.ttf') format('truetype');
+  font-weight: 400;
   font-style: italic;
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  src: url('fonts/SourceSans3-Semibold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Source Sans 3';
+  src: url('fonts/SourceSans3-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Source Serif 4';
+  src: url('fonts/SourceSerif4-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Source Serif 4';
+  src: url('fonts/SourceSerif4-It.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'Source Serif 4';
+  src: url('fonts/SourceSerif4-Semibold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Source Serif 4';
+  src: url('fonts/SourceSerif4-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
 }
 
 @import "tokens.css";
@@ -67,11 +110,22 @@ body {
   print-color-adjust: exact;
 }
 
-/* ── Typography ── */
-h1 { font-size: var(--font-size-3xl); font-weight: var(--font-weight-bold); color: var(--color-primary-700); }
-h2 { font-size: var(--font-size-2xl); font-weight: var(--font-weight-semibold); color: var(--color-neutral-800); }
-h3 { font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); color: var(--color-neutral-700); }
+/* ── Typography — títulos em Source Serif 4, corpo em Source Sans 3 ── */
+h1 { font-family: var(--font-serif); font-size: var(--font-size-3xl); font-weight: var(--font-weight-semibold); color: var(--color-primary-700); }
+h2 { font-family: var(--font-serif); font-size: var(--font-size-2xl); font-weight: var(--font-weight-semibold); color: var(--color-primary-700); }
+h3 { font-family: var(--font-serif); font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); color: var(--color-primary-700);
+     padding-bottom: var(--space-1); border-bottom: 1.5px solid var(--color-accent-500); }
 h4 { font-size: var(--font-size-lg); font-weight: var(--font-weight-medium); color: var(--color-neutral-600); }
+
+/* Kicker — sobretítulo em latão, caixa alta, marca da identidade */
+.kicker {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-accent-500);
+  margin-bottom: var(--space-1);
+}
 
 /* ── Page Header ── */
 .page-header {
@@ -180,9 +234,9 @@ tbody tr:nth-child(even) {
 }
 
 tbody tr.total-row {
-  border-top: 2px solid var(--color-neutral-800);
+  border-top: 2px solid var(--color-accent-500);
   font-weight: var(--font-weight-bold);
-  background: var(--color-primary-50);
+  background: var(--color-accent-50);
 }
 
 tbody tr.total-row td {
@@ -217,8 +271,8 @@ tbody tr.total-row td {
 }
 
 .dre-total td {
-  border-top: 2px solid var(--color-neutral-800);
-  border-bottom: 2px solid var(--color-neutral-800);
+  border-top: 2px solid var(--color-accent-500);
+  border-bottom: 2px solid var(--color-accent-500);
   font-weight: var(--font-weight-bold);
   font-size: var(--font-size-md);
 }

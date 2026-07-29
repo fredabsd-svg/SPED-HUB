@@ -26,7 +26,7 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **Visão de publicação** — Balanço hierárquico J100/J150 conforme Lei 6.404/76
 - **Notas explicativas automáticas** — Contexto operacional, práticas contábeis, capital social, imobilizado, eventos subsequentes
 - **Evolução multi-período** — Gráfico temporal com Ativo, Passivo, PL e Resultado através de múltiplos exercícios
-- **Fontes profissionais** — Inter (Google Fonts) nos PDFs exportados
+- **Identidade "Tinta & Latão"** nos PDFs exportados — Source Serif 4 + Source Sans 3 (OFL), embutidas
 - **API REST v1** — Endpoints versionados com autenticação por API Key (X-API-Key)
 - **GraphQL API v2** — Schema completo com strawberry-graphql em  (14 queries: empresas, ECDs, balanço, DRE, DFC, diário, KPIs, notas, validações)
 - **Multi-ECD lado a lado** — Comparação de até 5 ECDs simultaneamente
@@ -255,9 +255,9 @@ src/
 │   ├── dre.py          # DRE (+período anterior)
 │   ├── dfc.py          # DFC (+período anterior — Fase 6)
 │   ├── diario.py       # Livro Diário
-│   ├── export_engine.py # Export PDF/XLSX (+fontes Inter)
+│   ├── export_engine.py # Export PDF/XLSX (identidade Tinta & Latão)
 │   └── templates/      # Templates HTML para PDF
-│       └── fonts/      # Inter Variable (Fase 5)
+│       └── fonts/      # Source Serif 4 + Source Sans 3 (OFL)
 ├── validators/         # Validações
 │   └── integridade.py  # 7 validações
 ├── dashboard/          # Dashboard Web

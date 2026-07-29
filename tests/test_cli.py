@@ -163,16 +163,13 @@ class TestExportar:
         assert saida.exists()
         assert saida.read_bytes().startswith(b"%PDF"), "arquivo não é um PDF válido"
 
-    def test_balancete_pdf_gera_xlsx_em_outro_caminho(self, db_com_ecd, tmp_path):
-        """Comportamento atual, fixado aqui porque surpreende.
+    def test_balancete_pdf_sai_no_caminho_pedido(self, db_com_ecd, tmp_path):
+        """`--formato pdf` gera PDF de verdade, no caminho passado em `--saida`.
 
-        Não existe template PDF para o balancete, então `--formato pdf` cai
-        num XLSX — e gravado em `<saida>.xlsx`, não no caminho passado em
-        `--saida`.  O único aviso é uma linha de log em nível INFO: quem
-        automatiza a exportação recebe sucesso e não encontra o arquivo.
-
-        O teste documenta o que acontece hoje; corrigir exige decidir entre
-        criar o template ou recusar a combinação com erro explícito.
+        Até a 0.16.x não existia template PDF para o balancete: o comando
+        caía num XLSX gravado em `<saida>.xlsx`, avisando só em log INFO —
+        quem automatizava recebia sucesso e não encontrava o arquivo. O
+        template `balancete.html` fechou essa decisão de produto.
         """
         pedido = tmp_path / "balancete.pdf"
         executar(
@@ -185,10 +182,12 @@ class TestExportar:
             "--db",
             db_com_ecd,
         )
-        assert not pedido.exists(), "se um PDF passou a ser gerado, atualize este teste"
-        substituto = tmp_path / "balancete.xlsx"
-        assert substituto.exists()
-        assert substituto.read_bytes().startswith(b"PK")
+        assert pedido.exists(), "o PDF não saiu no caminho pedido em --saida"
+        assert pedido.read_bytes().startswith(b"%PDF"), "arquivo não é um PDF válido"
+        antigo_substituto = tmp_path / "balancete.xlsx"
+        assert (
+            not antigo_substituto.exists()
+        ), "o fallback antigo voltou: XLSX gravado em caminho diferente do pedido"
 
     @pytest.mark.parametrize("relatorio", ["balancete", "balanco", "dre", "diario"])
     def test_xlsx(self, db_com_ecd, tmp_path, relatorio):
