@@ -10,8 +10,9 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
+from src.settings import get_settings
+
 _CHUNK_SIZE = 1024 * 1024
-_DEFAULT_MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -38,21 +39,19 @@ def safe_original_name(filename: str | None) -> str:
 
 def upload_directory() -> Path:
     """Retorna o diretório configurado para arquivos temporários de upload."""
-    path = Path(os.environ.get("SPED_HUB_UPLOAD_DIR", "/workspace/uploads"))
+    path = Path(get_settings().upload_dir)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def max_upload_bytes() -> int:
-    """Limite configurável de upload; valores inválidos usam o padrão seguro."""
-    raw = os.environ.get("SPED_HUB_MAX_UPLOAD_BYTES")
-    if raw is None:
-        return _DEFAULT_MAX_UPLOAD_BYTES
-    try:
-        value = int(raw)
-    except ValueError:
-        return _DEFAULT_MAX_UPLOAD_BYTES
-    return value if value > 0 else _DEFAULT_MAX_UPLOAD_BYTES
+    """Limite configurável de upload; valores inválidos usam o padrão seguro.
+
+    Deriva de ``SPED_HUB_MAX_UPLOAD_MB`` (documentado) com
+    ``SPED_HUB_MAX_UPLOAD_BYTES`` como override legado.  Antes só o segundo
+    era lido, então o limite documentado não tinha efeito nenhum.
+    """
+    return get_settings().max_upload_bytes
 
 
 async def save_upload(

@@ -52,6 +52,7 @@ from src.reports.balanco import BalancoPatrimonial
 from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
+from src.settings import database_reference
 from src.validators.integridade import ValidadorIntegridade
 from src.version import APP_VERSION
 from src.webhooks import EVENTOS_DISPONIVEIS, WebhookService
@@ -62,9 +63,8 @@ router = APIRouter(prefix="/api/v1", tags=["API v1"])
 
 
 def _get_db_path() -> str:
-    import os as _os
 
-    return _os.environ.get("SPED_HUB_DB", "sped_hub.db")
+    return database_reference()
 
 
 def _get_session() -> Session:

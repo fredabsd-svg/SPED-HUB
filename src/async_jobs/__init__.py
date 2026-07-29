@@ -25,6 +25,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import AsyncJob, criar_engine, get_session, init_db
+from src.settings import database_reference
 
 logger = logging.getLogger("sped-hub.async_jobs")
 
@@ -282,9 +283,7 @@ def init_async_job_service(db_path: str = "sped_hub.db") -> AsyncJobService:
 def get_async_job_service(db_path: str | None = None) -> AsyncJobService:
     global _async_job_service
     if db_path is None:
-        import os
-
-        db_path = os.environ.get("SPED_HUB_DB", "sped_hub.db")
+        db_path = database_reference()
     if _async_job_service is None or _async_job_service.db_path != db_path:
         return init_async_job_service(db_path)
     return _async_job_service

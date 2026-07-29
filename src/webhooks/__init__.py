@@ -19,7 +19,6 @@ import hmac
 import ipaddress
 import json
 import logging
-import os
 import socket
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
@@ -35,6 +34,7 @@ from src.db.models import (
     get_session,
     init_db,
 )
+from src.settings import get_settings
 
 logger = logging.getLogger("sped-hub.webhooks")
 
@@ -52,7 +52,7 @@ BACKOFF_MAX = 60
 def validate_webhook_url(url: str, *, resolve: bool = False) -> str:
     """Valida URL e bloqueia alvos locais/privados para reduzir risco de SSRF."""
     parsed = urlsplit(url.strip())
-    allow_http = os.environ.get("SPED_HUB_WEBHOOK_ALLOW_HTTP", "false").lower() == "true"
+    allow_http = get_settings().webhook_allow_http
     allowed_schemes = {"https", "http"} if allow_http else {"https"}
     if parsed.scheme.lower() not in allowed_schemes:
         expected = "HTTPS" if not allow_http else "HTTP ou HTTPS"

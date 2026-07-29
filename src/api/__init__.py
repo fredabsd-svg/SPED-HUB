@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from src.audit import get_audit_service
 from src.db.models import ApiKey, criar_engine, get_session, init_db
 from src.ratelimit import get_limiter
+from src.settings import database_reference
 
 logger = logging.getLogger("sped-hub.api")
 
@@ -135,11 +136,9 @@ async def validar_requisicao_api(request: Request, db_path: str):
 
 async def requer_api_key(request: Request):
     """Dependência HTTP sem parâmetros de caminho controláveis pelo cliente."""
-    import os
-
     return await validar_requisicao_api(
         request,
-        os.environ.get("SPED_HUB_DB", "sped_hub.db"),
+        database_reference(),
     )
 
 

@@ -40,7 +40,6 @@ API REST v1 (autenticação por X-API-Key):
 import datetime
 import io
 import logging
-import os
 import sys
 import time
 from pathlib import Path
@@ -77,6 +76,7 @@ from src.reports.base import fmt_data, fmt_moeda
 from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
+from src.settings import database_reference, get_settings
 from src.uploads import save_upload
 from src.version import APP_VERSION
 
@@ -100,23 +100,26 @@ jinja_env = Environment(
     autoescape=select_autoescape(["html"]),
 )
 
-# Banco configurado (resolvido antes de inicializar serviços globais)
-_configured_db = os.environ.get("SPED_HUB_DB", "sped_hub.db")
-DB_PATH = Path(_configured_db)
-if _configured_db != ":memory:" and not DB_PATH.is_absolute():
-    DB_PATH = Path.cwd() / DB_PATH
+# Banco configurado (resolvido antes de inicializar serviços globais).
+# Vem de settings, então DATABASE_URL vale aqui — antes só SPED_HUB_DB era
+# lido e a URL documentada era silenciosamente ignorada pelo dashboard.
+DB_REFERENCE = database_reference()
 
 # Inicializa auth e banco
-init_auth(str(DB_PATH))
-init_audit_service(str(DB_PATH))
-init_limiter(str(DB_PATH))
-engine = criar_engine(str(DB_PATH))
+init_auth(DB_REFERENCE)
+init_audit_service(DB_REFERENCE)
+init_limiter(DB_REFERENCE)
+engine = criar_engine(DB_REFERENCE)
 init_db(engine)
 
 
+def _db_reference() -> str:
+    """Banco corrente — relido a cada uso porque os testes o trocam em runtime."""
+    return database_reference()
+
+
 def _get_engine():
-    db = os.environ.get("SPED_HUB_DB", str(DB_PATH))
-    return criar_engine(db)
+    return criar_engine(_db_reference())
 
 
 _PUBLIC_API_PATHS = {
@@ -418,7 +421,7 @@ async def api_upload(request: Request, file: UploadFile = File(...)):
             nome_arquivo=saved.original_name,
             escritorio_id=request.state.usuario.escritorio_id,
         )
-        AuditService(os.environ.get("SPED_HUB_DB", str(DB_PATH))).registrar(
+        AuditService(_db_reference()).registrar(
             acao="ecd.upload",
             recurso=f"ECD #{result.ecd_id} ({result.empresa})",
             detalhes=result.to_dict(),
@@ -743,7 +746,7 @@ async def api_upload_async(request: Request, file: UploadFile = File(...)):
 
     saved = await save_upload(file, (".txt", ".ecd"))
     escritorio_id = request.state.usuario.escritorio_id
-    db_path = os.environ.get("SPED_HUB_DB", str(DB_PATH))
+    db_path = _db_reference()
     init_async_job_service(db_path)
     job_service = get_async_job_service()
     job = job_service.criar(
@@ -794,7 +797,7 @@ async def api_job_status(request: Request, job_id: int):
     """Consulta status de um job assíncrono."""
     from src.async_jobs import get_async_job_service
 
-    svc = get_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
+    svc = get_async_job_service(_db_reference())
     usuario = request.state.usuario
     info = svc.obter(job_id, usuario_id=usuario.id, admin=usuario.admin)
     if info is None:
@@ -818,7 +821,7 @@ async def api_jobs_list(request: Request, status: str | None = Query(None)):
     """Lista jobs assíncronos."""
     from src.async_jobs import get_async_job_service
 
-    svc = get_async_job_service(os.environ.get("SPED_HUB_DB", str(DB_PATH)))
+    svc = get_async_job_service(_db_reference())
     usuario = request.state.usuario
     jobs = svc.listar(status=status, usuario_id=usuario.id, admin=usuario.admin)
     return {
@@ -905,7 +908,7 @@ async def api_export_pdf(
         pdf_bytes = WHTML(string=html).write_pdf()
 
         # Registra auditoria
-        svc_audit = AuditService(str(DB_PATH))
+        svc_audit = AuditService(_db_reference())
         svc_audit.registrar(
             acao="relatorio.export",
             recurso=f"PDF: {tipo} ECD #{ecd_id}",
@@ -998,7 +1001,7 @@ async def api_export_xlsx(
             return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
 
         # Registra auditoria
-        svc_audit = AuditService(str(DB_PATH))
+        svc_audit = AuditService(_db_reference())
         svc_audit.registrar(
             acao="relatorio.export",
             recurso=f"XLSX: {tipo} ECD #{ecd_id}",
@@ -1525,7 +1528,7 @@ async def api_monitoring_summary(
         return _monitoring_forbidden(api=True)
     return build_operational_snapshot(
         metrics_collector,
-        db_path=os.environ.get("SPED_HUB_DB", str(DB_PATH)),
+        db_path=_db_reference(),
         minutes=minutes,
     )
 
@@ -1613,9 +1616,8 @@ async def api_redis_cache_stats(request: Request):
     usuario = await get_usuario_atual(request)
     if not usuario:
         return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
-    import os
 
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    redis_url = get_settings().redis_url_or_local
     cache = RedisCacheService(redis_url=redis_url, prefix="api:")
     stats = cache.stats()
     return stats
@@ -1624,7 +1626,6 @@ async def api_redis_cache_stats(request: Request):
 @app.get("/api/health/full")
 async def api_health_full():
     """Health check completo — verifica DB, cache, workers."""
-    import os
 
     status = {"database": "ok", "cache": "unknown", "workers": "unknown"}
 
@@ -1639,7 +1640,7 @@ async def api_health_full():
 
     # Cache
     try:
-        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        redis_url = get_settings().redis_url_or_local
         cache = RedisCacheService(redis_url=redis_url, prefix="health:")
         cache.set("health", "ok", ttl=10)
         if cache.get("health") == "ok":
@@ -1668,9 +1669,10 @@ def main():
     """Inicia o dashboard usando configuração de ambiente."""
     import uvicorn
 
-    host = os.environ.get("SPED_HUB_HOST", "127.0.0.1")
-    port = int(os.environ.get("SPED_HUB_PORT", "8000"))
-    reload_enabled = os.environ.get("SPED_HUB_RELOAD", "false").lower() == "true"
+    cfg = get_settings()
+    host = cfg.host
+    port = cfg.port
+    reload_enabled = cfg.reload
     uvicorn.run("src.dashboard.app:app", host=host, port=port, reload=reload_enabled)
 
 

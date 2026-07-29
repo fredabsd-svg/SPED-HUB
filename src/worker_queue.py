@@ -19,7 +19,6 @@ Uso:
 
 import datetime
 import logging
-import os
 import signal
 import time
 import uuid
@@ -28,6 +27,8 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from multiprocessing import Process, Queue, Value
 from queue import Empty
+
+from src.settings import database_reference
 
 logger = logging.getLogger("sped-hub.worker_queue")
 
@@ -120,7 +121,7 @@ class WorkerQueue:
     ):
         self._num_workers = num_workers
         self._max_queue_size = max_queue_size
-        self._db_path = db_path or os.environ.get("SPED_HUB_DB", "sped_hub.db")
+        self._db_path = db_path or database_reference()
 
         # Comunicação entre processos
         self._task_queue: Queue | None = None

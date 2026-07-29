@@ -10,7 +10,6 @@ Uso:
 """
 
 import logging
-import os
 import signal
 import sys
 import time
@@ -19,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.cache.redis_cache import RedisCacheService
+from src.settings import get_settings
 from src.worker_queue import init_worker_queue
 
 logging.basicConfig(
@@ -28,9 +28,10 @@ logging.basicConfig(
 logger = logging.getLogger("sped-hub.worker_runner")
 
 # Config
-DB_PATH = os.environ.get("SPED_HUB_DB", "sped_hub.db")
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-WORKER_COUNT = int(os.environ.get("WORKER_COUNT", "4"))
+_settings = get_settings()
+DB_PATH = _settings.database_url
+REDIS_URL = _settings.redis_url_or_local
+WORKER_COUNT = _settings.worker_count
 
 
 def handler_ecd_import(payload: dict, update_progress):
@@ -42,7 +43,7 @@ def handler_ecd_import(payload: dict, update_progress):
     if raw_path:
         filepath = Path(raw_path).resolve()
     else:
-        upload_dir = Path(os.environ.get("SPED_HUB_UPLOAD_DIR", "/workspace/uploads")).resolve()
+        upload_dir = Path(get_settings().upload_dir).resolve()
         filename = Path(str(payload.get("arquivo", ""))).name
         filepath = (upload_dir / filename).resolve()
         if upload_dir not in filepath.parents:

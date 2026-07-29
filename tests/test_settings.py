@@ -8,10 +8,12 @@ import pytest
 
 from src.db.models import _normalizar_database_url, criar_engine, get_session, init_db
 from src.settings import (
+    database_reference,
     get_settings,
     reset_settings_cache,
     with_overrides,
 )
+from src.version import APP_VERSION
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +61,7 @@ class TestSettingsDefaults:
         assert cfg.max_upload_mb == 200
         assert cfg.monitoring_retention_hours == 24
         assert cfg.rate_limit_default == 100
-        assert cfg.app_version == "0.15.0"
+        assert cfg.app_version == APP_VERSION
 
     def test_helpers_reconhecem_sqlite_e_postgres(self):
         cfg = with_overrides(database_url="sqlite:///./foo.db")
@@ -273,3 +275,127 @@ class TestSettingsImports:
         assert hasattr(mod, "get_settings")
         assert hasattr(mod, "with_overrides")
         assert hasattr(mod, "reset_settings_cache")
+
+
+class TestCoercaoBooleana:
+    """Todo campo booleano precisa de coerção, não só ``debug``.
+
+    Sem ela, ``SPED_HUB_DB_ECHO=false`` virava a *string* ``"false"`` — que é
+    verdadeira em Python.  Como esse campo alimenta o ``echo`` do SQLAlchemy,
+    desligar explicitamente o echo o ligava, despejando todo SQL no log.
+    """
+
+    @pytest.mark.parametrize(
+        "env_key,campo",
+        [
+            ("SPED_HUB_DEBUG", "debug"),
+            ("SPED_HUB_DB_ECHO", "database_echo"),
+            ("SMTP_USE_TLS", "smtp_use_tls"),
+            ("EMAIL_ENABLED", "email_enabled"),
+            ("SPED_HUB_WEBHOOK_ALLOW_HTTP", "webhook_allow_http"),
+            ("SPED_HUB_RELOAD", "reload"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "valor,esperado",
+        [("false", False), ("0", False), ("no", False), ("true", True), ("1", True)],
+    )
+    def test_valores_viram_bool_de_verdade(self, monkeypatch, env_key, campo, valor, esperado):
+        monkeypatch.setenv(env_key, valor)
+        cfg = get_settings()
+        assert getattr(cfg, campo) is esperado
+
+
+class TestCaminhoSqlite:
+    """Conversão caminho → URL, em especial o caso absoluto."""
+
+    def test_caminho_absoluto_permanece_absoluto(self, monkeypatch):
+        # `lstrip("./")` comia a barra inicial e devolvia um caminho relativo,
+        # apontando para um banco diferente do pedido.
+        monkeypatch.setenv("SPED_HUB_DB", "/tmp/sped_hub_abs.db")
+        assert get_settings().database_url == "sqlite:////tmp/sped_hub_abs.db"
+
+    def test_caminho_relativo(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_DB", "rel.db")
+        assert get_settings().database_url == "sqlite:///./rel.db"
+
+    def test_memory_e_url_pronta(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_DB", ":memory:")
+        assert get_settings().database_url == "sqlite:///:memory:"
+        monkeypatch.setenv("SPED_HUB_DB", "postgresql+psycopg://u@h/db")
+        assert get_settings().database_url == "postgresql+psycopg://u@h/db"
+
+    def test_engine_abre_o_arquivo_pedido(self, tmp_path, monkeypatch):
+        alvo = tmp_path / "destino.db"
+        monkeypatch.setenv("SPED_HUB_DB", str(alvo))
+        engine = criar_engine()
+        try:
+            init_db(engine)
+            with engine.connect() as conn:
+                conn.exec_driver_sql("SELECT 1")
+        finally:
+            engine.dispose()
+        assert alvo.exists()
+
+
+class TestAliasesLegados:
+    """SMTP_PASS/SMTP_FROM continuam válidos; o nome documentado vence."""
+
+    def test_alias_legado_preenche(self, monkeypatch):
+        monkeypatch.setenv("SMTP_PASS", "senha-legada")
+        monkeypatch.setenv("SMTP_FROM", "legado@example.com")
+        cfg = get_settings()
+        assert cfg.smtp_password == "senha-legada"
+        assert cfg.email_from == "legado@example.com"
+
+    def test_nome_documentado_tem_precedencia(self, monkeypatch):
+        monkeypatch.setenv("SMTP_PASS", "legada")
+        monkeypatch.setenv("SMTP_PASSWORD", "oficial")
+        monkeypatch.setenv("SMTP_FROM", "legado@example.com")
+        monkeypatch.setenv("EMAIL_FROM", "oficial@example.com")
+        cfg = get_settings()
+        assert cfg.smtp_password == "oficial"
+        assert cfg.email_from == "oficial@example.com"
+
+
+class TestLimiteDeUpload:
+    def test_default_deriva_de_mb(self):
+        assert get_settings().max_upload_bytes == 200 * 1024 * 1024
+
+    def test_mb_configuravel(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_MB", "50")
+        assert get_settings().max_upload_bytes == 50 * 1024 * 1024
+
+    def test_override_legado_em_bytes_vence(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_MB", "50")
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_BYTES", "4")
+        assert get_settings().max_upload_bytes == 4
+
+    def test_override_invalido_cai_no_mb(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_BYTES", "-1")
+        assert get_settings().max_upload_bytes == 200 * 1024 * 1024
+
+
+class TestDatabaseReferenceNosServicos:
+    """DATABASE_URL precisa chegar em todos os serviços, não só em criar_engine.
+
+    Antes, dashboard, API REST e GraphQL liam ``SPED_HUB_DB`` direto do
+    ambiente: quem configurasse ``DATABASE_URL`` (inclusive o exemplo de
+    PostgreSQL do README) subia silenciosamente em SQLite.
+    """
+
+    def test_database_reference_segue_database_url(self, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/referencia.db")
+        assert database_reference() == "sqlite:////tmp/referencia.db"
+
+    def test_api_rest_e_graphql_usam_a_mesma_referencia(self, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/referencia.db")
+        from src.api.graphql import _get_db_path as graphql_db
+        from src.api.routes import _get_db_path as rest_db
+
+        assert rest_db() == "sqlite:////tmp/referencia.db"
+        assert graphql_db() == "sqlite:////tmp/referencia.db"
+
+    def test_sped_hub_db_continua_funcionando(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_DB", "/tmp/legado.db")
+        assert database_reference() == "sqlite:////tmp/legado.db"

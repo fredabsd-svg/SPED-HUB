@@ -19,7 +19,6 @@ Configuração via variáveis de ambiente:
 
 import datetime
 import logging
-import os
 import smtplib
 import threading
 from dataclasses import dataclass, field
@@ -27,6 +26,8 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
+
+from src.settings import get_settings
 
 logger = logging.getLogger("sped-hub.email")
 
@@ -53,23 +54,28 @@ class EmailService:
     - "smtp": envia via SMTP real
     - "log": apenas loga (default para desenvolvimento)
 
-    Configuração:
+    Configuração (via ``src.settings``, não lida direto do ambiente):
         SMTP_HOST: servidor SMTP (default: localhost)
         SMTP_PORT: porta (default: 587)
         SMTP_USER: usuário
-        SMTP_PASS: senha
-        SMTP_FROM: remetente (default: sped-hub@localhost)
+        SMTP_PASSWORD: senha (alias legado: ``SMTP_PASS``)
+        EMAIL_FROM: remetente (alias legado: ``SMTP_FROM``)
         SMTP_USE_TLS: usar TLS (default: true)
     """
 
     def __init__(self, modo: str = "auto"):
         self._modo = modo
-        self._host = os.environ.get("SMTP_HOST", "localhost")
-        self._port = int(os.environ.get("SMTP_PORT", "587"))
-        self._user = os.environ.get("SMTP_USER", "")
-        self._password = os.environ.get("SMTP_PASS", "")
-        self._from = os.environ.get("SMTP_FROM", "sped-hub@localhost")
-        self._use_tls = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
+        # Antes isto lia SMTP_PASS/SMTP_FROM direto do ambiente, enquanto o
+        # README e o .env.example documentavam SMTP_PASSWORD/EMAIL_FROM — quem
+        # seguia a documentação ficava sem senha e sem remetente.  Agora ambos
+        # os nomes funcionam, com o documentado tendo precedência.
+        cfg = get_settings()
+        self._host = cfg.smtp_host or "localhost"
+        self._port = cfg.smtp_port
+        self._user = cfg.smtp_user or ""
+        self._password = cfg.smtp_password or ""
+        self._from = cfg.email_from
+        self._use_tls = cfg.smtp_use_tls
 
         # Histórico
         self._sent: list[EmailMessage] = []
