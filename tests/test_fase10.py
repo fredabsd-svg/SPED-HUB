@@ -542,8 +542,9 @@ class TestTemplatesFase10:
             Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "comparar.html"
         )
         content = template.read_text()
-        assert "chart.js" in content.lower()
-        assert "alpinejs" in content.lower()
+        # Servidos de /static/vendor/ desde a Fase 18, não mais de CDN.
+        assert "/static/vendor/chart-" in content
+        assert "/static/vendor/alpine-" in content
 
     def test_layout_template_tem_toggle(self):
         template = Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "layout.html"

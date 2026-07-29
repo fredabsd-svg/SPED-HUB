@@ -413,13 +413,14 @@ class TestTemplatesFase11:
             Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "webhooks.html"
         )
         content = template.read_text()
-        assert "chart.js" in content.lower()
-        assert "alpinejs" in content.lower()
+        # Servidos de /static/vendor/ desde a Fase 18, não mais de CDN.
+        assert "/static/vendor/chart-" in content
+        assert "/static/vendor/alpine-" in content
 
     def test_layout_template_tem_sortablejs(self):
         template = Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "layout.html"
         content = template.read_text()
-        assert "sortablejs" in content.lower()
+        assert "/static/vendor/sortable-" in content
         assert "Sortable(" in content
         assert "drag-handle" in content
 
