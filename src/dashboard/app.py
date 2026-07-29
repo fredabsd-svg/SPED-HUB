@@ -761,6 +761,11 @@ async def api_upload_async(request: Request, file: UploadFile = File(...)):
 
     import threading
 
+    from src.ecd_importer import CancelToken, ECDImportCancelled
+
+    cancel_token = CancelToken()
+    job_service.registrar_token(job.id, cancel_token)
+
     def process_upload():
         session = get_session(obter_engine(db_path))
         try:
@@ -769,15 +774,20 @@ async def api_upload_async(request: Request, file: UploadFile = File(...)):
                 hash_arquivo=saved.sha256,
                 nome_arquivo=saved.original_name,
                 escritorio_id=escritorio_id,
+                cancel_token=cancel_token,
                 progress=lambda pct, msg: job_service.atualizar_progresso(
                     job.id, pct, msg, persistir=False
                 ),
             )
             job_service.concluir(job.id, result.to_dict())
+        except ECDImportCancelled as cancelado:
+            # Não é falha: o usuário pediu.  Nada foi persistido.
+            job_service.marcar_cancelado(job.id, str(cancelado))
         except Exception as exc:
             logger.exception("Erro no job assíncrono #%d", job.id)
             job_service.falhar(job.id, str(exc))
         finally:
+            job_service.esquecer_token(job.id)
             session.close()
             saved.path.unlink(missing_ok=True)
 
@@ -814,6 +824,25 @@ async def api_job_status(request: Request, job_id: int):
         "criado_em": info.criado_em,
         "concluido_em": info.concluido_em,
     }
+
+
+@app.post("/api/jobs/{job_id}/cancelar")
+async def api_job_cancelar(request: Request, job_id: int):
+    """Cancela um job em andamento.  Nada do que foi lido é persistido."""
+    from src.async_jobs import get_async_job_service
+
+    usuario = request.state.usuario
+    svc = get_async_job_service(_db_reference())
+    info = svc.obter(job_id, usuario_id=usuario.id, admin=usuario.admin)
+    if info is None:
+        return JSONResponse({"status": "erro", "mensagem": "Job não encontrado"}, status_code=404)
+
+    if not svc.cancelar(job_id, motivo=f"cancelado por {usuario.email}"):
+        return JSONResponse(
+            {"status": "erro", "mensagem": "Job não está em execução neste processo"},
+            status_code=409,
+        )
+    return JSONResponse({"status": "ok", "mensagem": "Cancelamento solicitado", "job_id": job_id})
 
 
 @app.get("/api/jobs")

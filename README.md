@@ -150,6 +150,22 @@ sped-hub migrar aplicar    # leva o banco até a revisão mais recente
 sped-hub migrar adotar     # adota um banco que já tem o schema
 ```
 
+### ECDs grandes
+
+A importação percorre o arquivo uma vez e mantém em memória apenas o lote
+corrente — o consumo é função de `SPED_HUB_ECD_CHUNK_ROWS`, não do tamanho
+do arquivo (medido: +38 MB tanto para 2 MB quanto para 8,6 MB de ECD).
+
+Uploads assíncronos podem ser cancelados:
+
+```bash
+curl -X POST http://localhost:8000/api/jobs/42/cancelar
+```
+
+O cancelamento reverte a transação inteira: uma escrituração pela metade
+não fica no banco.  O balanço não fecharia e não haveria como saber que
+faltam lançamentos.
+
 ## Uso
 
 ### CLI

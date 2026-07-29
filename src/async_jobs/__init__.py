@@ -35,6 +35,7 @@ class JobStatus(StrEnum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -58,6 +59,9 @@ class AsyncJobService:
     def __init__(self, db_path: str = "sped_hub.db"):
         self.db_path = db_path
         self._live_progress: dict[int, tuple[float, str]] = {}
+        # Tokens dos jobs em execução neste processo, para que outra
+        # requisição consiga pedir o cancelamento.
+        self._cancel_tokens: dict[int, object] = {}
         self._live_lock = threading.Lock()
 
     def _get_session(self) -> Session:
@@ -128,6 +132,51 @@ class AsyncJobService:
                 with self._live_lock:
                     self._live_progress.pop(job_id, None)
                 logger.info("Job #%d concluído", job_id)
+        finally:
+            session.close()
+
+    # ── Cancelamento (Fase 17, Etapa 4) ───────────────────────────────────
+    #
+    # O token vive no processo que está importando; o pedido de cancelamento
+    # chega por outra requisição HTTP.  O registro abaixo é o que liga os dois.
+
+    def registrar_token(self, job_id: int, token) -> None:
+        """Associa o token de cancelamento de um job em execução."""
+        with self._live_lock:
+            self._cancel_tokens[job_id] = token
+
+    def esquecer_token(self, job_id: int) -> None:
+        with self._live_lock:
+            self._cancel_tokens.pop(job_id, None)
+
+    def cancelar(self, job_id: int, motivo: str | None = None) -> bool:
+        """Sinaliza o cancelamento.  ``False`` se o job não estiver rodando.
+
+        Não marca o job como cancelado aqui: quem importa é que sabe quando
+        de fato parou, e é lá que o estado final é gravado.
+        """
+        with self._live_lock:
+            token = self._cancel_tokens.get(job_id)
+        if token is None:
+            return False
+        token.cancelar(motivo)
+        logger.info("Cancelamento solicitado para o job #%d", job_id)
+        return True
+
+    def marcar_cancelado(self, job_id: int, mensagem: str) -> None:
+        """Estado final de um job interrompido — nada foi persistido."""
+        session = self._get_session()
+        try:
+            job = session.get(AsyncJob, job_id)
+            if job:
+                job.status = JobStatus.CANCELLED.value
+                job.mensagem = mensagem[:200]
+                job.concluido_em = datetime.datetime.now(datetime.UTC)
+                session.commit()
+                with self._live_lock:
+                    self._live_progress.pop(job_id, None)
+                    self._cancel_tokens.pop(job_id, None)
+                logger.info("Job #%d cancelado", job_id)
         finally:
             session.close()
 
