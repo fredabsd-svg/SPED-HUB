@@ -85,10 +85,14 @@ jobs:
           TEST_DATABASE_URL: postgresql+psycopg://sped:sped@localhost:5432/sped_hub_test
         run: pytest tests/test_multibackend.py tests/test_migrations.py -v --tb=short
 
+  # Roda em PR também.  Enquanto este job era `if: github.ref ==
+  # 'refs/heads/main'`, o build da imagem só era exercitado DEPOIS do merge:
+  # não havia como um PR ser barrado por quebrar o Dockerfile, só como o main
+  # ficar vermelho depois do fato.  Foi exatamente assim que a renomeação do
+  # pacote gdk-pixbuf no Debian trixie entrou.
   docker:
     runs-on: ubuntu-latest
     needs: [test, postgres]
-    if: github.ref == 'refs/heads/main'
 
     steps:
       - uses: actions/checkout@v4
