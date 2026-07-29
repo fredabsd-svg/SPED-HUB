@@ -8,6 +8,19 @@ interno da implementação.
 
 ## [Não publicado]
 
+### Corrigido
+- **O dashboard travava o servidor inteiro** quando a ECD importada tinha
+  hierarquia de plano de contas em ciclo (uma conta que é a própria
+  sintética, ou A→B→A). Como o servidor atende num único fluxo, ele parava
+  de responder para todos os usuários do escritório, e só voltava com
+  reinício manual. A hierarquia vem do arquivo do cliente.
+- Depois de importar uma escrituração, o usuário via o JSON cru da resposta
+  na tela em vez da mensagem de sucesso.
+
+### Alterado
+- Os testes de navegador voltaram a passar (10 de 10) e a suíte caiu de
+  2 min para 14 s. Continuam fora da execução padrão do `pytest`.
+
 ### Adicionado
 - `REGRAS-DO-PROJETO.md`: as regras de trabalho do repositório. Cada regra
   diz quem a cobra — o pipeline ou a revisão de PR — e cita o defeito real

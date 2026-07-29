@@ -5,6 +5,7 @@ Fornece dados agregados para KPIs, gráficos e visualizações interativas.
 Fase 6: +evolução multi-período, +notas explicativas automáticas.
 """
 
+import logging
 from dataclasses import dataclass, field
 
 from sqlalchemy import func, select
@@ -22,6 +23,8 @@ from src.reports.balanco import BalancoPatrimonial
 from src.reports.base import saldo_por_natureza, valor_sinalizado
 from src.reports.dfc import DFC
 from src.reports.dre import DRE
+
+logger = logging.getLogger("sped-hub.dashboard.services")
 
 
 @dataclass
@@ -497,7 +500,26 @@ class DashboardService:
             else:
                 cod = linha.cod_cta
                 pc = plano.get(cod)
+                # A subida pela hierarquia precisa de trava de ciclo.  Sem
+                # ela, um plano de contas em que uma conta é sua própria
+                # sintética (ou A→B→A) faz este laço rodar para sempre — e
+                # como o uvicorn atende num único event loop, o dashboard
+                # inteiro para de responder para TODOS os usuários, não só
+                # para quem importou.  A hierarquia vem do arquivo do
+                # cliente: é entrada não confiável, e o validador de
+                # integridade só confere que a conta sintética existe, não
+                # que o caminho até a raiz é acíclico.
+                vistos: set[str] = set()
                 while pc and pc.nivel > 2 and pc.cod_cta_sup:
+                    if pc.cod_cta in vistos:
+                        logger.warning(
+                            "Plano de contas com ciclo na hierarquia: a conta %s volta "
+                            "a si mesma subindo por COD_CTA_SUP. Agrupando no ponto em "
+                            "que o ciclo foi detectado.",
+                            pc.cod_cta,
+                        )
+                        break
+                    vistos.add(pc.cod_cta)
                     pc = plano.get(pc.cod_cta_sup)
                 if pc:
                     nome = pc.nome_cta[:30]
