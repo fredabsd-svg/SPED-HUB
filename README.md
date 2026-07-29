@@ -45,8 +45,11 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - Volume persistente para banco de dados
 
 ### CI/CD
-- **GitHub Actions** — lint (ruff), format (black), test (pytest) em Python 3.11/3.12
-- Build da imagem Docker na branch main
+- **CI** — lint (ruff), format (black), testes (pytest) em Python 3.11/3.12
+- **Job PostgreSQL** — suítes de portabilidade e migração contra Postgres 16 real
+- **Release** — build multi-arch (amd64 + arm64) e push para GHCR ao criar uma
+  tag `vX.Y.Z`, com verificação de que a tag bate com `src/version.py`.
+  **Não faz deploy**: o checklist manual está em [`docs/deploy.md`](docs/deploy.md)
 
 ## Instalação
 
@@ -54,8 +57,10 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 pip install -e ".[dev]"
 ```
 
-> **Versão atual:** 0.15.1 — configuração por ambiente efetivamente ligada
-> a toda a aplicação e CI verde (Fase 17, etapa 1 concluída).
+> **Versão atual:** 0.16.0 — Fase 17 (Fundação de Produção) concluída:
+> configuração por ambiente ligada a toda a aplicação, PostgreSQL validado
+> de ponta a ponta, migrações Alembic, importação de ECDs grandes 2x mais
+> rápida com cancelamento, hardening e CI/CD de release preparado.
 
 ### Docker
 ```bash

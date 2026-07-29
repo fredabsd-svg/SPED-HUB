@@ -1,0 +1,112 @@
+name: Release
+
+# Publica a imagem no GHCR quando uma tag `vX.Y.Z` é criada.
+#
+# NÃO faz deploy.  A publicação da imagem e a colocação dela em produção são
+# decisões separadas de propósito: subir para produção depende de janela,
+# backup do banco e migração de schema, e nada disso pode acontecer porque
+# alguém criou uma tag.  O passo a passo manual está em docs/deploy.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a publicar (ex.: v0.16.0)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # A tag não pode divergir de src/version.py: a imagem publicada como
+  # v0.16.0 precisa relatar 0.16.0 no /api/health e nos PDFs exportados.
+  verificar-versao:
+    runs-on: ubuntu-latest
+    outputs:
+      versao: ${{ steps.checar.outputs.versao }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - id: checar
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSAO_TAG="${TAG#v}"
+          VERSAO_CODIGO="$(python -c 'from src.version import APP_VERSION; print(APP_VERSION)')"
+          echo "tag=$VERSAO_TAG codigo=$VERSAO_CODIGO"
+          if [ "$VERSAO_TAG" != "$VERSAO_CODIGO" ]; then
+            echo "::error::Tag $TAG não corresponde a APP_VERSION=$VERSAO_CODIGO em src/version.py"
+            exit 1
+          fi
+          echo "versao=$VERSAO_TAG" >> "$GITHUB_OUTPUT"
+
+  # Não publica imagem que não passa nos testes.
+  testes:
+    uses: ./.github/workflows/ci.yml
+
+  publicar:
+    runs-on: ubuntu-latest
+    needs: [verificar-versao, testes]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # QEMU é o que permite construir arm64 num runner amd64.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Autenticar no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Calcular tags e labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=SPED-HUB
+            org.opencontainers.image.description=Plataforma de conformidade fiscal para escritórios contábeis
+            org.opencontainers.image.version=${{ needs.verificar-versao.outputs.versao }}
+
+      - name: Construir e publicar (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Resumo
+        run: |
+          {
+            echo "### Imagem publicada"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "**Nenhum deploy foi feito.**  Siga \`docs/deploy.md\` para"
+            echo "colocar esta versão em produção — o checklist cobre backup,"
+            echo "migração de schema e rollback."
+          } >> "$GITHUB_STEP_SUMMARY"

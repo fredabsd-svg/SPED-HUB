@@ -178,3 +178,103 @@ class TestMigracaoNoCompose:
         assert "database_reference" in (REPO_ROOT / "alembic" / "env.py").read_text(
             encoding="utf-8"
         )
+
+
+class TestWorkflowDeRelease:
+    """`release.yml` publica a imagem e para aí — deploy é decisão separada."""
+
+    @pytest.fixture
+    def release(self) -> dict:
+        return yaml.safe_load(
+            (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text("utf-8")
+        )
+
+    def test_dispara_por_tag_e_manualmente(self, release):
+        gatilhos = release[True] if True in release else release["on"]
+        assert "push" in gatilhos and gatilhos["push"]["tags"] == ["v*"]
+        assert "workflow_dispatch" in gatilhos
+
+    def test_nao_contem_passo_de_deploy(self, release):
+        """A garantia central: publicar imagem não pode colocar em produção.
+
+        Deploy depende de janela, backup e migração de schema — nada disso
+        pode acontecer porque alguém criou uma tag.
+        """
+        bruto = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text("utf-8").lower()
+        proibidos = [
+            "ssh",
+            "scp",
+            "rsync",
+            "kubectl",
+            "helm",
+            "docker compose up",
+            "docker stack deploy",
+            "appleboy/ssh-action",
+            "terraform apply",
+        ]
+        encontrados = [p for p in proibidos if p in bruto]
+        assert not encontrados, f"release.yml executa deploy: {encontrados}"
+
+    def test_publica_multi_arquitetura(self, release):
+        passos = release["jobs"]["publicar"]["steps"]
+        build = next(p for p in passos if "build-push-action" in str(p.get("uses", "")))
+        plataformas = build["with"]["platforms"]
+        assert "linux/amd64" in plataformas and "linux/arm64" in plataformas
+
+    def test_so_publica_depois_dos_testes(self, release):
+        assert set(release["jobs"]["publicar"]["needs"]) == {"verificar-versao", "testes"}
+        assert release["jobs"]["testes"]["uses"].endswith("ci.yml")
+
+    def test_ci_pode_ser_chamado_por_outro_workflow(self):
+        ci = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8"))
+        gatilhos = ci[True] if True in ci else ci["on"]
+        assert "workflow_call" in gatilhos, "release.yml não conseguiria reaproveitar a suíte"
+
+    def test_permissoes_minimas(self, release):
+        """Só o necessário para publicar no GHCR."""
+        assert release["permissions"] == {"contents": "read", "packages": "write"}
+
+    def test_confere_tag_contra_a_versao_do_codigo(self, release):
+        """Imagem publicada como v0.16.0 tem de relatar 0.16.0 em /health."""
+        passos = release["jobs"]["verificar-versao"]["steps"]
+        script = " ".join(str(p.get("run", "")) for p in passos)
+        assert "APP_VERSION" in script and "exit 1" in script
+
+
+class TestDocumentacaoDeDeploy:
+    @pytest.fixture
+    def deploy(self) -> str:
+        return (REPO_ROOT / "docs" / "deploy.md").read_text("utf-8")
+
+    @pytest.mark.parametrize(
+        "assunto", ["DNS", "SSL", "PostgreSQL", "Backup", "Rollback", "Observabilidade"]
+    )
+    def test_checklist_cobre_o_assunto(self, deploy, assunto):
+        assert assunto.lower() in deploy.lower(), f"checklist não menciona {assunto}"
+
+    def test_backup_vem_antes_da_migracao(self, deploy):
+        """Migração aplicada não volta sozinha — por isso a ordem importa."""
+        atualizar = deploy[deploy.index("## 7. Atualizar versão") :]
+        assert atualizar.index("BACKUP") < atualizar.index("migrate")
+
+    def test_comandos_citados_existem_de_fato(self, deploy, compose):
+        assert "docker compose run --rm migrate" in deploy
+        assert "migrate" in compose["services"]
+        assert "migrar adotar" in deploy
+
+    def test_caminho_do_certificado_confere_com_o_nginx(self, deploy):
+        nginx = NGINX.read_text("utf-8")
+        caminho = re.search(r"ssl_certificate\s+(\S+)/fullchain\.pem", nginx).group(1)
+        assert caminho in deploy, f"o checklist não menciona {caminho}, usado pelo nginx"
+
+    def test_nao_cita_servico_inexistente_no_compose(self, deploy, compose):
+        """Comando de checklist que aponta para serviço que não existe falha na hora errada."""
+        import re as _re
+
+        servicos = set(compose["services"])
+        citados = set(_re.findall(r"docker compose (?:exec|run) (?:--rm |-T )*(\w+)", deploy))
+        # `run --rm` pode ser seguido de flags; filtra o que claramente é serviço.
+        desconhecidos = {s for s in citados if s not in servicos and s not in {"rm", "T"}}
+        assert (
+            not desconhecidos
+        ), f"docs/deploy.md usa serviços inexistentes: {sorted(desconhecidos)}"
