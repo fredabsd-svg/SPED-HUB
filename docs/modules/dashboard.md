@@ -61,6 +61,14 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   fallback que impede a senha de ir para a URL se o script não carregar.
 - **Assets vendorizados, nunca CDN**: sem acesso externo a aplicação
   degradava em silêncio e cada página carregava versão diferente.
+- **Identidade "Tinta & Latão"**, a mesma dos relatórios exportados: paleta
+  em `--primary`/`--accent`, títulos em Source Serif 4, corpo em Source
+  Sans 3. As fontes em `static/fonts/` são **cópias** das dos relatórios —
+  o nginx serve `/static/` direto do disco — e
+  `tests/test_identidade_dashboard.py` falha se as cópias divergirem. As
+  quatro páginas que não herdam o `base.html` declaram as fontes por conta
+  própria; cor de dado (gráficos) segue a identidade, badge de estado
+  (sucesso/erro) mantém o verde/vermelho semântico.
 - **`get_composicao_ativo` tem trava de ciclo** ao subir a hierarquia do
   plano de contas. A hierarquia vem do arquivo do cliente; um ciclo A→B→A
   fazia o laço rodar para sempre e o dashboard inteiro parava para todos os

@@ -8,9 +8,24 @@
     <script src="/static/vendor/alpine-3.14.1.min.js" defer></script>
     <script src="/static/vendor/htmx-1.9.12.min.js"></script>
     <style>
+        @font-face {
+            font-family: 'Source Serif 4';
+            src: url('/static/fonts/SourceSerif4-Semibold.ttf') format('truetype');
+            font-weight: 600; font-style: normal; font-display: swap;
+        }
+        @font-face {
+            font-family: 'Source Sans 3';
+            src: url('/static/fonts/SourceSans3-Regular.ttf') format('truetype');
+            font-weight: 400; font-style: normal; font-display: swap;
+        }
+        @font-face {
+            font-family: 'Source Sans 3';
+            src: url('/static/fonts/SourceSans3-Semibold.ttf') format('truetype');
+            font-weight: 600; font-style: normal; font-display: swap;
+        }
         :root {
-            --primary: #0B4F6C;
-            --primary-light: #E8F3F7;
+            --primary: #0C3A30;
+            --primary-light: #F5F2EA;
             --bg: #F8F9FB;
             --card: #FFFFFF;
             --text: #1A1A2E;
@@ -21,8 +36,9 @@
             --danger: #EF4444;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        h1, h2, h3 { font-family: 'Source Serif 4', Georgia, serif; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
@@ -378,7 +394,7 @@
                     if (!this.dados) return;
 
                     const labels = this.dados.ecds.map(e => e.empresa.substring(0, 15));
-                    const colors = ['#0B4F6C', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+                    const colors = ['#0C3A30', '#33705C', '#A9812F', '#C1292E', '#C9A75B'];
 
                     // Balanço
                     const ctxB = document.getElementById('chartBalanco');
