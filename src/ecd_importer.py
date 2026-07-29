@@ -30,12 +30,48 @@ from src.db.models import (
     SaldoResultado,
 )
 from src.parsers.ecd import ECDParser
+from src.settings import get_settings
 
 ProgressCallback = Callable[[float, str], None]
 
 
 class ECDImportError(ValueError):
     """Erro de validação ou consistência durante uma importação ECD."""
+
+
+class ECDImportCancelled(ECDImportError):
+    """A importação foi cancelada antes de terminar.
+
+    Nada é persistido: a transação inteira é revertida.  Uma escrituração pela
+    metade é pior que nenhuma — o balanço não fecharia e ninguém teria como
+    saber que faltam lançamentos.
+    """
+
+    def __init__(self, registros_lidos: int):
+        self.registros_lidos = registros_lidos
+        super().__init__(f"Importação cancelada após {registros_lidos} registros")
+
+
+class CancelToken:
+    """Sinal de cancelamento compartilhado entre quem pede e quem importa.
+
+    Thread-safe por construção: só há uma transição possível (não cancelado →
+    cancelado) e ela é feita por atribuição de bool.
+    """
+
+    __slots__ = ("_cancelado", "motivo")
+
+    def __init__(self) -> None:
+        self._cancelado = False
+        self.motivo: str | None = None
+
+    def cancelar(self, motivo: str | None = None) -> None:
+        self.motivo = motivo
+        self._cancelado = True
+
+    @property
+    def cancelado(self) -> bool:
+        return self._cancelado
 
 
 class DuplicateECDImportError(ECDImportError):
@@ -65,8 +101,14 @@ class ECDImportResult:
         return asdict(self)
 
 
-def hash_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
-    """Calcula SHA-256 em memória constante."""
+def hash_file(path: Path, chunk_size: int | None = None) -> str:
+    """Calcula SHA-256 em memória constante.
+
+    O tamanho do bloco vem de ``SPED_HUB_ECD_CHUNK_BYTES`` — outra variável
+    que existia nas settings desde a etapa 1 sem nenhum consumidor.
+    """
+    if chunk_size is None:
+        chunk_size = get_settings().ecd_import_chunk_bytes
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         while chunk := stream.read(chunk_size):
@@ -120,11 +162,16 @@ class ECDImportService:
         nome_arquivo: str | None = None,
         escritorio_id: int | None = None,
         progress: ProgressCallback | None = None,
-        flush_interval: int = 1000,
+        flush_interval: int | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> ECDImportResult:
         path = Path(path)
         if not path.is_file():
             raise ECDImportError(f"Arquivo não encontrado: {path}")
+        # `SPED_HUB_ECD_CHUNK_ROWS` existia nas settings desde a etapa 1 sem
+        # nenhum consumidor; o intervalo era um 1000 fixo no código.
+        if flush_interval is None:
+            flush_interval = get_settings().ecd_import_chunk_rows
         if flush_interval < 1:
             raise ValueError("flush_interval deve ser >= 1")
 
@@ -140,8 +187,8 @@ class ECDImportService:
         ecd: ECD | None = None
         dt_ini: datetime.date | None = None
         dt_fin: datetime.date | None = None
-        conta_ids: dict[str, int] = {}
-        current_lancamento: tuple[tuple[str, datetime.date], int] | None = None
+        contas_pendentes: dict[str, PlanoConta] = {}
+        current_lancamento: tuple[tuple[str, datetime.date], Lancamento] | None = None
         counts: dict[str, int] = {}
         since_flush = 0
         last_progress = 2.0
@@ -225,6 +272,9 @@ class ECDImportService:
                 record_type = record["_reg"]
                 counts[record_type] = counts.get(record_type, 0) + 1
 
+                if cancel_token is not None and cancel_token.cancelado:
+                    raise ECDImportCancelled(sum(counts.values()))
+
                 offset = int(record.get("_offset_bytes", 0))
                 pct = min(90.0, 5.0 + (offset / file_size) * 85.0)
                 if pct - last_progress >= 1.0:
@@ -270,27 +320,29 @@ class ECDImportService:
                             else None
                         ),
                     )
+                    # Sem `flush()` aqui: o objeto é guardado e o id só é
+                    # necessário no flush do lote.  Um plano de contas real
+                    # tem milhares de I050 — um round-trip por conta pesa.
                     self.session.add(account)
-                    self.session.flush()
-                    conta_ids[account.cod_cta] = account.id
+                    contas_pendentes[account.cod_cta] = account
                 elif record_type in {"I051", "I052"}:
-                    account_id = conta_ids.get(record.get("COD_CTA") or "")
-                    if account_id is None:
+                    # Anexa pelo relacionamento: o SQLAlchemy resolve a FK na
+                    # hora do flush, sem precisar do id agora.
+                    account = contas_pendentes.get(record.get("COD_CTA") or "")
+                    if account is None:
                         raise ECDImportError(
                             f"{record_type} sem I050 pai na linha {record.get('_linha')}"
                         )
                     if record_type == "I051":
-                        self.session.add(
+                        account.contas_referenciais.append(
                             ContaReferencial(
-                                plano_conta_id=account_id,
                                 cod_ccus=record.get("COD_CCUS") or None,
                                 cod_cta_ref=record.get("COD_CTA_REF") or "",
                             )
                         )
                     else:
-                        self.session.add(
+                        account.aglutinacoes.append(
                             Aglutinacao(
-                                plano_conta_id=account_id,
                                 cod_ccus=record.get("COD_CCUS") or None,
                                 cod_agl=record.get("COD_AGL") or "",
                             )
@@ -342,18 +394,34 @@ class ECDImportService:
                         ind_lcto=record.get("IND_LCTO") or "N",
                         num_arq=_optional_int(record.get("NUM_ARQ")),
                     )
+                    # Este `flush()` era o gargalo: um round-trip por
+                    # lançamento.  Num arquivo com 80 mil lançamentos eram 80
+                    # mil flushes, ~76% do tempo total de importação.
                     self.session.add(launch)
-                    self.session.flush()
-                    current_lancamento = ((launch.num_lcto, launch_date), launch.id)
+                    current_lancamento = ((launch.num_lcto, launch_date), launch)
                 elif record_type == "I250":
                     launch_key = (
                         record.get("NUM_LCTO") or "",
                         _date(record.get("DT_LCTO"), start_date),
                     )
-                    launch_id = None
+                    partida = Partida(
+                        cod_cta=record.get("COD_CTA") or "",
+                        cod_ccus=record.get("COD_CCUS") or None,
+                        vl_dc=record.get("VL_DC") or 0.0,
+                        ind_dc=record.get("IND_DC") or "D",
+                        num_arq=_optional_int(record.get("NUM_ARQ")),
+                        cod_hist_pad=record.get("COD_HIST_PAD") or None,
+                        hist=record.get("HIST") or None,
+                        cod_part=record.get("COD_PART") or None,
+                    )
+                    # Caso normal: os I250 vêm logo após o seu I200, e basta
+                    # anexar pelo relacionamento — a FK é resolvida no flush.
                     if current_lancamento and current_lancamento[0] == launch_key:
-                        launch_id = current_lancamento[1]
-                    if launch_id is None:
+                        current_lancamento[1].partidas.append(partida)
+                    else:
+                        # Fora de ordem (ou lançamento já persistido em lote
+                        # anterior): aí sim é preciso buscar o id.
+                        self.session.flush()
                         launch_id = self.session.execute(
                             select(Lancamento.id).where(
                                 Lancamento.ecd_id == current_ecd.id,
@@ -361,21 +429,12 @@ class ECDImportService:
                                 Lancamento.dt_lcto == launch_key[1],
                             )
                         ).scalar_one_or_none()
-                    if launch_id is None:
-                        raise ECDImportError(f"I250 sem I200 pai na linha {record.get('_linha')}")
-                    self.session.add(
-                        Partida(
-                            lancamento_id=launch_id,
-                            cod_cta=record.get("COD_CTA") or "",
-                            cod_ccus=record.get("COD_CCUS") or None,
-                            vl_dc=record.get("VL_DC") or 0.0,
-                            ind_dc=record.get("IND_DC") or "D",
-                            num_arq=_optional_int(record.get("NUM_ARQ")),
-                            cod_hist_pad=record.get("COD_HIST_PAD") or None,
-                            hist=record.get("HIST") or None,
-                            cod_part=record.get("COD_PART") or None,
-                        )
-                    )
+                        if launch_id is None:
+                            raise ECDImportError(
+                                f"I250 sem I200 pai na linha {record.get('_linha')}"
+                            )
+                        partida.lancamento_id = launch_id
+                        self.session.add(partida)
                 elif record_type == "I355":
                     self.session.add(
                         SaldoResultado(

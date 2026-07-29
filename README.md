@@ -45,8 +45,11 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - Volume persistente para banco de dados
 
 ### CI/CD
-- **GitHub Actions** — lint (ruff), format (black), test (pytest) em Python 3.11/3.12
-- Build da imagem Docker na branch main
+- **CI** — lint (ruff), format (black), testes (pytest) em Python 3.11/3.12
+- **Job PostgreSQL** — suítes de portabilidade e migração contra Postgres 16 real
+- **Release** — build multi-arch (amd64 + arm64) e push para GHCR ao criar uma
+  tag `vX.Y.Z`, com verificação de que a tag bate com `src/version.py`.
+  **Não faz deploy**: o checklist manual está em [`docs/deploy.md`](docs/deploy.md)
 
 ## Instalação
 
@@ -54,8 +57,10 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 pip install -e ".[dev]"
 ```
 
-> **Versão atual:** 0.15.1 — configuração por ambiente efetivamente ligada
-> a toda a aplicação e CI verde (Fase 17, etapa 1 concluída).
+> **Versão atual:** 0.16.0 — Fase 17 (Fundação de Produção) concluída:
+> configuração por ambiente ligada a toda a aplicação, PostgreSQL validado
+> de ponta a ponta, migrações Alembic, importação de ECDs grandes 2x mais
+> rápida com cancelamento, hardening e CI/CD de release preparado.
 
 ### Docker
 ```bash
@@ -100,7 +105,11 @@ desenvolvimento):
 | `REDIS_URL` | Cache/fila (opcional) | `redis://localhost:6379/0` quando acionado |
 | `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` / `SPED_HUB_WEBHOOK_TIMEOUT` | Resiliência dos webhooks | `3` / `10` |
 | `SPED_HUB_WEBHOOK_ALLOW_HTTP` | Aceita destino `http://` (só em dev) | `false` |
-| `SPED_HUB_RATE_LIMIT_DEFAULT` / `SPED_HUB_RATE_LIMIT_WINDOW` | Limite de taxa padrão | `100` / `60` |
+| `SPED_HUB_RATE_LIMIT_DEFAULT` / `SPED_HUB_RATE_LIMIT_WINDOW` | Limite por API Key | `100` / `60` |
+| `SPED_HUB_RATE_LIMIT_IP` / `SPED_HUB_RATE_LIMIT_IP_WINDOW` | Limite por IP na API | `300` / `60` |
+| `SPED_HUB_RATE_LIMIT_LOGIN` / `SPED_HUB_RATE_LIMIT_LOGIN_WINDOW` | Limite por IP em login/registro | `10` / `60` |
+| `SPED_HUB_TRUST_PROXY` | Ler IP de `X-Forwarded-For` (só com proxy confiável) | `false` |
+| `SPED_HUB_LOG_JSON` | Uma linha JSON por evento de log | `false` |
 
 Aliases legados ainda aceitos, para não quebrar deploys existentes:
 `SMTP_PASS` → `SMTP_PASSWORD` e `SMTP_FROM` → `EMAIL_FROM`.  Quando os dois
@@ -112,12 +121,59 @@ estiverem definidos, o nome documentado vence.
 
 > **Não versione o `.env`.**  O arquivo já é ignorado pelo `.gitignore`.
 
-Para usar PostgreSQL:
+### PostgreSQL
 
 ```bash
-# pip install psycopg[binary]   # se ainda não estiver instalado
+pip install -e ".[postgres]"
 DATABASE_URL=postgresql+psycopg://user:pass@host:5432/sped_hub sped-hub-dashboard
 ```
+
+O schema completo (24 tabelas) e toda a camada de relatórios foram
+exercitados contra um PostgreSQL 16 real.  Duas divergências entre os
+backends precisaram de correção e estão cobertas por teste — ambas eram
+silenciosas em SQLite:
+
+| Divergência | Efeito ao migrar |
+|---|---|
+| `LIKE` é case-insensitive no SQLite e case-sensitive no Postgres | A busca por histórico devolvia resultados em um banco e nada no outro.  Uniformizado com `ilike`. |
+| `String(n)` é ignorado pelo SQLite e imposto pelo Postgres | Um `User-Agent` acima de 512 caracteres — que qualquer cliente pode enviar — derrubava o login.  Campos de telemetria passaram a ser truncados no limite da coluna. |
+
+Para rodar a suíte contra os dois backends:
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/sped_hub_test pytest tests/test_multibackend.py
+```
+
+Sem a variável, os casos de Postgres pulam.
+
+### Migrações de schema
+
+Em PostgreSQL o schema é versionado por migração (Alembic); em SQLite
+continua nascendo de `create_all`.  A política completa, incluindo como
+adotar um banco criado antes da Etapa 3, está em
+[`docs/migrations.md`](docs/migrations.md).
+
+```bash
+sped-hub migrar status     # onde o banco está vs. o que existe de migração
+sped-hub migrar aplicar    # leva o banco até a revisão mais recente
+sped-hub migrar adotar     # adota um banco que já tem o schema
+```
+
+### ECDs grandes
+
+A importação percorre o arquivo uma vez e mantém em memória apenas o lote
+corrente — o consumo é função de `SPED_HUB_ECD_CHUNK_ROWS`, não do tamanho
+do arquivo (medido: +38 MB tanto para 2 MB quanto para 8,6 MB de ECD).
+
+Uploads assíncronos podem ser cancelados:
+
+```bash
+curl -X POST http://localhost:8000/api/jobs/42/cancelar
+```
+
+O cancelamento reverte a transação inteira: uma escrituração pela metade
+não fica no banco.  O balanço não fecharia e não haveria como saber que
+faltam lançamentos.
 
 ## Uso
 
@@ -155,9 +211,20 @@ sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 ## Testes
 
 ```bash
-pytest tests/ -v
-# 371 passando + 1 skip (engine Postgres, exige psycopg instalado)
-# Os E2E de Playwright pulam sozinhos quando não há Chromium no sistema.
+pytest                 # suíte normal
+pytest -m e2e          # só os testes de navegador (ver abaixo)
+pytest -m ""           # tudo
+```
+
+Os testes de navegador (Playwright) ficam **fora da execução padrão**.  Além
+do Chromium, eles dependem do `cdn.jsdelivr.net` — de onde a aplicação
+carrega htmx, Alpine e Chart.js — estar acessível.  Sem o CDN os formulários
+não funcionam e a falha não diz nada sobre o código.
+
+```bash
+# Com PostgreSQL (opcional)
+TEST_DATABASE_URL=postgresql+psycopg://user:senha@host:5432/sped_hub_test \
+  pytest tests/test_multibackend.py tests/test_migrations.py
 ```
 
 > Rodar a suíte completa leva ~2 min. Em CI, recomenda-se dividir por fase

@@ -21,6 +21,7 @@ from src.db.models import (
     get_session,
     init_db_once,
     obter_engine,
+    truncar_para_coluna,
 )
 
 logger = logging.getLogger("sped-hub.auth")
@@ -244,8 +245,11 @@ class AuthService:
                 token=token,
                 criado_em=agora,
                 expira_em=agora + datetime.timedelta(hours=SESSAO_DURACAO_HORAS),
-                ip=ip,
-                user_agent=user_agent,
+                # Vêm direto da requisição e não têm tamanho garantido: em
+                # Postgres, um User-Agent acima do limite da coluna aborta o
+                # login inteiro.
+                ip=truncar_para_coluna(Sessao, "ip", ip),
+                user_agent=truncar_para_coluna(Sessao, "user_agent", user_agent),
             )
             session.add(sessao)
 

@@ -160,7 +160,7 @@ class TestWorkerQueue:
             assert status["status"] in ("queued", "running", "completed")
 
             # Aguarda processamento
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -185,7 +185,7 @@ class TestWorkerQueue:
         try:
             task_id = q.enqueue("inexistente", {})
 
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -218,7 +218,7 @@ class TestWorkerQueue:
         try:
             task_id = q.enqueue("retry_test", {})
 
-            deadline = time.time() + 15
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -247,7 +247,7 @@ class TestWorkerQueue:
         try:
             task_id = q.enqueue("fail_test", {})
 
-            deadline = time.time() + 15
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -274,7 +274,7 @@ class TestWorkerQueue:
             ids = [q.enqueue("test", {}) for _ in range(3)]
 
             # Aguarda todas concluírem
-            deadline = time.time() + 10
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 all_done = all(q.status(tid)["status"] in ("completed", "failed") for tid in ids)
@@ -306,7 +306,7 @@ class TestWorkerQueue:
         try:
             task_id = q.enqueue("progress_test", {})
 
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -396,6 +396,7 @@ class TestEmailService:
             job_tipo="ecd_import",
             job_id=42,
             resultado={"contas": 100},
+            async_mode=False,
         )
         assert msg.status == "enviado"
         assert "concluído" in msg.assunto.lower()
@@ -408,6 +409,7 @@ class TestEmailService:
             job_tipo="ecd_import",
             job_id=99,
             erro="Arquivo corrompido",
+            async_mode=False,
         )
         assert msg.status == "enviado"
         assert "falhou" in msg.assunto.lower()
@@ -419,6 +421,7 @@ class TestEmailService:
             para="cliente@exemplo.com",
             empresa="Empresa Teste",
             periodo="01/2024 a 12/2024",
+            async_mode=False,
         )
         assert msg.status == "enviado"
         assert "Empresa Teste" in msg.corpo
@@ -474,11 +477,16 @@ class TestIntegracaoFase15:
         alertas = []
 
         def on_complete(task):
+            # Síncrono: logo abaixo o teste confere `email_svc.historico()`.
+            # Com o envio assíncrono, `alertas` é preenchido na hora e o
+            # histórico só depois — a assertiva do histórico corria contra a
+            # thread de envio e perdia sob carga.
             email_svc.enviar_alerta_job_concluido(
                 para="admin@exemplo.com",
                 job_tipo=task.tipo,
                 job_id=0,
                 resultado=task.resultado,
+                async_mode=False,
             )
             alertas.append("enviado")
 
@@ -490,14 +498,19 @@ class TestIntegracaoFase15:
         try:
             q.enqueue("test", {})
 
-            deadline = time.time() + 5
+            deadline = time.time() + 60
             while time.time() < deadline:
                 q.process_results()
                 if alertas:
                     break
-                time.sleep(0.1)
+                time.sleep(0.05)
 
-            assert len(alertas) == 1
+            # A mensagem precisa distinguir "worker não subiu" de "callback não
+            # disparou": em runner de CI de 2 núcleos, spawnar o processo e
+            # reimportar a aplicação leva bem mais que numa máquina ociosa.
+            assert len(alertas) == 1, (
+                f"nenhum alerta em 60s — workers vivos: " f"{[w.is_alive() for w in q._workers]}"
+            )
             hist = email_svc.historico()
             assert len(hist) >= 1
         finally:
@@ -531,7 +544,7 @@ class TestIntegracaoFase15:
         try:
             # Primeira chamada — processa (from_cache=False)
             id1 = q.enqueue("cache_test", {"id": "abc"})
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(id1)
@@ -544,7 +557,7 @@ class TestIntegracaoFase15:
 
             # Segunda chamada no mesmo worker — usa cache
             id2 = q.enqueue("cache_test", {"id": "abc"})
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(id2)

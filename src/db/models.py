@@ -838,6 +838,29 @@ def init_db_once(engine: Engine) -> None:
     init_db(engine)
 
 
+def truncar_para_coluna(modelo: type, campo: str, valor: str | None) -> str | None:
+    """Corta ``valor`` no limite declarado da coluna ``modelo.campo``.
+
+    O SQLite ignora o tamanho de ``String(n)`` e grava o que vier; o
+    PostgreSQL rejeita com erro.  Sem isto, um cabeçalho ``User-Agent`` acima
+    de 512 caracteres — que qualquer cliente pode enviar — faz o login
+    funcionar em SQLite e falhar em Postgres.
+
+    Aplica-se a campos de telemetria (IP, user-agent, recurso auditado), onde
+    registrar uma versão truncada é melhor que perder o evento inteiro.  Campos
+    de negócio não devem passar por aqui: para eles, o erro é a resposta certa.
+
+    O limite vem da metadata do SQLAlchemy, e não de uma constante repetida,
+    para não divergir do schema quando a coluna mudar.
+    """
+    if valor is None:
+        return None
+    limite = getattr(modelo.__table__.c[campo].type, "length", None)
+    if limite is None or len(valor) <= limite:
+        return valor
+    return valor[:limite]
+
+
 def get_session(engine: Engine | None = None) -> Session:
     """Retorna uma nova sessão.
 

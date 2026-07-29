@@ -67,10 +67,11 @@ from src.db.models import ECD, Empresa, criar_engine, get_session, init_db, obte
 from src.ecd_importer import ECDImportError, ECDImportService
 from src.email_service import get_email_service
 from src.filters.engine import FilterCriteria
+from src.logging_config import configurar_logging
 from src.monitoring import build_operational_snapshot, metrics_collector
 from src.parsers.ecf import ECFParser
 from src.parsers.efd import EFDParser
-from src.ratelimit import init_limiter
+from src.ratelimit import get_ip_limiter, init_limiter, ip_do_request
 from src.reports.balanco import BalancoPatrimonial
 from src.reports.base import fmt_data, fmt_moeda
 from src.reports.dfc import DFC
@@ -80,7 +81,6 @@ from src.settings import database_reference, get_settings
 from src.uploads import save_upload
 from src.version import APP_VERSION
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
@@ -99,6 +99,8 @@ jinja_env = Environment(
     loader=FileSystemLoader(str(TEMPLATES_DIR)),
     autoescape=select_autoescape(["html"]),
 )
+
+configurar_logging()
 
 # Banco configurado (resolvido antes de inicializar serviços globais).
 # Vem de settings, então DATABASE_URL vale aqui — antes só SPED_HUB_DB era
@@ -145,6 +147,63 @@ async def collect_request_metrics(request: Request, call_next):
             status_code,
             (time.perf_counter() - started) * 1000,
         )
+
+
+_ROTAS_DE_AUTENTICACAO = {"/api/login", "/api/register"}
+
+
+@app.middleware("http")
+async def rate_limit_por_ip(request: Request, call_next):
+    """Limite por endereço de origem, complementar ao limite por API Key.
+
+    O limitador por API Key não protege `/api/login` nem `/api/register`:
+    são públicos por definição e não têm chave.  Sem limite por IP, varrer
+    senhas não custa nada ao atacante.  Por isso o escopo de autenticação
+    tem cota própria e bem mais apertada que a do restante da API.
+    """
+    caminho = request.url.path.rstrip("/") or "/"
+    if not caminho.startswith("/api/"):
+        return await call_next(request)
+
+    cfg = get_settings()
+    if caminho in _ROTAS_DE_AUTENTICACAO:
+        escopo, limite, janela = (
+            "login",
+            cfg.rate_limit_login_default,
+            cfg.rate_limit_login_window_seconds,
+        )
+    else:
+        escopo, limite, janela = (
+            "api",
+            cfg.rate_limit_ip_default,
+            cfg.rate_limit_ip_window_seconds,
+        )
+
+    origem = ip_do_request(request)
+    permitido, info = get_ip_limiter().verificar(origem, escopo, limite, janela)
+    if not permitido:
+        # A resposta não distingue "usuário existe" de "usuário não existe"
+        # nem ecoa o que foi tentado — só o limite.
+        return JSONResponse(
+            {
+                "status": "erro",
+                "mensagem": f"Muitas requisições. Tente novamente em {info.reset_em}s.",
+            },
+            status_code=429,
+            headers={
+                "Retry-After": str(info.reset_em),
+                "X-RateLimit-Limit": str(info.limite),
+                "X-RateLimit-Remaining": "0",
+            },
+        )
+
+    resposta = await call_next(request)
+    # `setdefault`, não atribuição: o limitador por API Key roda mais adentro e
+    # já pode ter anunciado a cota específica daquela chave.  Sobrescrever com
+    # a cota por IP faria o cliente ver o número errado e planejar em cima dele.
+    resposta.headers.setdefault("X-RateLimit-Limit", str(info.limite))
+    resposta.headers.setdefault("X-RateLimit-Remaining", str(info.restantes))
+    return resposta
 
 
 @app.middleware("http")
@@ -761,6 +820,11 @@ async def api_upload_async(request: Request, file: UploadFile = File(...)):
 
     import threading
 
+    from src.ecd_importer import CancelToken, ECDImportCancelled
+
+    cancel_token = CancelToken()
+    job_service.registrar_token(job.id, cancel_token)
+
     def process_upload():
         session = get_session(obter_engine(db_path))
         try:
@@ -769,15 +833,20 @@ async def api_upload_async(request: Request, file: UploadFile = File(...)):
                 hash_arquivo=saved.sha256,
                 nome_arquivo=saved.original_name,
                 escritorio_id=escritorio_id,
+                cancel_token=cancel_token,
                 progress=lambda pct, msg: job_service.atualizar_progresso(
                     job.id, pct, msg, persistir=False
                 ),
             )
             job_service.concluir(job.id, result.to_dict())
+        except ECDImportCancelled as cancelado:
+            # Não é falha: o usuário pediu.  Nada foi persistido.
+            job_service.marcar_cancelado(job.id, str(cancelado))
         except Exception as exc:
             logger.exception("Erro no job assíncrono #%d", job.id)
             job_service.falhar(job.id, str(exc))
         finally:
+            job_service.esquecer_token(job.id)
             session.close()
             saved.path.unlink(missing_ok=True)
 
@@ -814,6 +883,25 @@ async def api_job_status(request: Request, job_id: int):
         "criado_em": info.criado_em,
         "concluido_em": info.concluido_em,
     }
+
+
+@app.post("/api/jobs/{job_id}/cancelar")
+async def api_job_cancelar(request: Request, job_id: int):
+    """Cancela um job em andamento.  Nada do que foi lido é persistido."""
+    from src.async_jobs import get_async_job_service
+
+    usuario = request.state.usuario
+    svc = get_async_job_service(_db_reference())
+    info = svc.obter(job_id, usuario_id=usuario.id, admin=usuario.admin)
+    if info is None:
+        return JSONResponse({"status": "erro", "mensagem": "Job não encontrado"}, status_code=404)
+
+    if not svc.cancelar(job_id, motivo=f"cancelado por {usuario.email}"):
+        return JSONResponse(
+            {"status": "erro", "mensagem": "Job não está em execução neste processo"},
+            status_code=409,
+        )
+    return JSONResponse({"status": "ok", "mensagem": "Cancelamento solicitado", "job_id": job_id})
 
 
 @app.get("/api/jobs")

@@ -7,6 +7,7 @@
         <div class="card-header" style="text-align:center;font-size:1.1rem;">🔐 Acessar SPED-HUB</div>
         <div class="card-body">
             <form id="login-form"
+                  method="post" action="/api/login"
                   hx-post="/api/login"
                   hx-target="#login-result"
                   hx-swap="innerHTML">

@@ -330,8 +330,45 @@
     </main>
 
     <footer class="footer">
-        SPED-HUB v{{ app_version|default("0.14.0") }} — Plataforma de Conformidade Fiscal
+        SPED-HUB v{{ app_version }} — Plataforma de Conformidade Fiscal
     </footer>
+
+    <script>
+        // Login e registro respondem {"status":"ok","redirect":"/..."} — o
+        // que a API já declarava, mas nada consumia: o HTMX injetava o JSON
+        // cru na página e o usuário ficava parado olhando para ele.
+        //
+        // Só age quando a resposta é JSON com `redirect`; respostas HTML
+        // (relatórios, KPIs, parciais) seguem o swap normal do HTMX.
+        document.body.addEventListener("htmx:beforeSwap", function (evento) {
+            var xhr = evento.detail.xhr;
+            if (!xhr || (xhr.getResponseHeader("Content-Type") || "").indexOf("json") === -1) {
+                return;
+            }
+            var corpo;
+            try {
+                corpo = JSON.parse(xhr.responseText);
+            } catch (erro) {
+                return;
+            }
+            if (corpo && corpo.status === "ok" && corpo.redirect) {
+                evento.detail.shouldSwap = false;
+                window.location.href = corpo.redirect;
+                return;
+            }
+            if (corpo && corpo.status === "erro" && corpo.mensagem) {
+                // Erro de credencial vira mensagem legível em vez de JSON.
+                evento.detail.serverResponse =
+                    '<div class="alert alert-error">' +
+                    corpo.mensagem.replace(/[&<>"']/g, function (c) {
+                        return { "&": "&amp;", "<": "&lt;", ">": "&gt;",
+                                 '"': "&quot;", "'": "&#39;" }[c];
+                    }) +
+                    "</div>";
+                evento.detail.isError = false;
+            }
+        });
+    </script>
 
     {% block scripts %}{% endblock %}
 </body>

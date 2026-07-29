@@ -199,7 +199,12 @@ class EmailService:
         logger.info("Email enviado para %s: %s", msg.para, msg.assunto)
 
     def enviar_alerta_job_concluido(
-        self, para: str, job_tipo: str, job_id: int, resultado: dict | None = None
+        self,
+        para: str,
+        job_tipo: str,
+        job_id: int,
+        resultado: dict | None = None,
+        async_mode: bool = True,
     ):
         """Envia alerta de job concluído."""
         corpo = f"""
@@ -218,9 +223,12 @@ SPED-HUB — Plataforma de Conformidade Fiscal
             para=para,
             assunto=f"[SPED-HUB] Job #{job_id} concluído — {job_tipo}",
             corpo=corpo,
+            async_mode=async_mode,
         )
 
-    def enviar_alerta_job_falhou(self, para: str, job_tipo: str, job_id: int, erro: str):
+    def enviar_alerta_job_falhou(
+        self, para: str, job_tipo: str, job_id: int, erro: str, async_mode: bool = True
+    ):
         """Envia alerta de job com falha."""
         corpo = f"""
 Job falhou!
@@ -238,6 +246,7 @@ SPED-HUB — Plataforma de Conformidade Fiscal
             para=para,
             assunto=f"[SPED-HUB] ⚠️ Job #{job_id} falhou — {job_tipo}",
             corpo=corpo,
+            async_mode=async_mode,
         )
 
     def enviar_relatorio_agendado(
@@ -246,6 +255,7 @@ SPED-HUB — Plataforma de Conformidade Fiscal
         empresa: str,
         periodo: str,
         anexo_pdf: bytes | None = None,
+        async_mode: bool = True,
     ):
         """Envia relatório agendado com anexo PDF opcional."""
         corpo = f"""
@@ -269,6 +279,7 @@ SPED-HUB — Plataforma de Conformidade Fiscal
             assunto=f"[SPED-HUB] Relatório — {empresa} — {periodo}",
             corpo=corpo,
             anexos=anexos,
+            async_mode=async_mode,
         )
 
     def historico(self, limite: int = 20) -> list[dict]:

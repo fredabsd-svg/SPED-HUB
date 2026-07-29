@@ -104,6 +104,9 @@ class Settings:
     app_version: str = APP_VERSION
     default_db_path: str = "sped_hub.db"
     log_level: str = "INFO"
+    # Uma linha JSON por evento, para coletor de logs.  PII é
+    # mascarada nos dois formatos (ver src/logging_config.py).
+    log_json: bool = False
     allowed_hosts: tuple[str, ...] = field(default_factory=lambda: ("*",))
 
     # Servidor (uvicorn)
@@ -150,6 +153,14 @@ class Settings:
     # Rate limiting
     rate_limit_default: int = 100
     rate_limit_window_seconds: int = 60
+    # Por IP — protege o que não tem API Key (login, registro).
+    rate_limit_ip_default: int = 300
+    rate_limit_ip_window_seconds: int = 60
+    rate_limit_login_default: int = 10
+    rate_limit_login_window_seconds: int = 60
+    # Só ligue com um proxy reverso confiável à frente: sem ele, o cliente
+    # escreve o próprio X-Forwarded-For e escapa do limite por IP.
+    trust_proxy: bool = False
 
     # Documentação
     extra_docs_path: Path | None = None
@@ -209,6 +220,7 @@ _ENV_TO_FIELD: Mapping[str, str] = {
     "DATABASE_URL": "database_url",
     "SPED_HUB_DB_ECHO": "database_echo",
     "SPED_HUB_LOG_LEVEL": "log_level",
+    "SPED_HUB_LOG_JSON": "log_json",
     "SPED_HUB_HOST": "host",
     "SPED_HUB_PORT": "port",
     "SPED_HUB_RELOAD": "reload",
@@ -234,6 +246,11 @@ _ENV_TO_FIELD: Mapping[str, str] = {
     "SPED_HUB_WEBHOOK_ALLOW_HTTP": "webhook_allow_http",
     "SPED_HUB_RATE_LIMIT_DEFAULT": "rate_limit_default",
     "SPED_HUB_RATE_LIMIT_WINDOW": "rate_limit_window_seconds",
+    "SPED_HUB_RATE_LIMIT_IP": "rate_limit_ip_default",
+    "SPED_HUB_RATE_LIMIT_IP_WINDOW": "rate_limit_ip_window_seconds",
+    "SPED_HUB_RATE_LIMIT_LOGIN": "rate_limit_login_default",
+    "SPED_HUB_RATE_LIMIT_LOGIN_WINDOW": "rate_limit_login_window_seconds",
+    "SPED_HUB_TRUST_PROXY": "trust_proxy",
 }
 
 # Nomes antigos ainda aceitos, para não quebrar deploys existentes (o
@@ -256,6 +273,10 @@ _INT_FIELDS = {
     "webhook_timeout_seconds",
     "rate_limit_default",
     "rate_limit_window_seconds",
+    "rate_limit_ip_default",
+    "rate_limit_ip_window_seconds",
+    "rate_limit_login_default",
+    "rate_limit_login_window_seconds",
     "worker_count",
     "port",
 }
@@ -270,6 +291,8 @@ _BOOL_FIELDS = {
     "email_enabled",
     "webhook_allow_http",
     "reload",
+    "trust_proxy",
+    "log_json",
 }
 
 

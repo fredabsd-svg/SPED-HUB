@@ -494,7 +494,7 @@ class TestUploadAsync:
         # Poll até concluir (timeout 10s)
         import time
 
-        deadline = time.time() + 10
+        deadline = time.time() + 30
         while time.time() < deadline:
             resp = client.get(f"/api/jobs/{job_id}")
             assert resp.status_code == 200

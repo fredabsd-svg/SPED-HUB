@@ -272,7 +272,11 @@ class FilterEngine:
         # Histórico
         if criterios.hist_texto:
             busca = f"%{criterios.hist_texto}%"
-            stmt = stmt.where(Partida.hist.like(busca))
+            # `ilike`, não `like`: o LIKE do SQLite é case-insensitive para
+            # ASCII e o do Postgres não é.  Com `like`, buscar "recebi"
+            # devolvia resultados em SQLite e nenhum em Postgres — o filtro
+            # simplesmente parava de funcionar ao migrar de banco.
+            stmt = stmt.where(Partida.hist.ilike(busca))
         if criterios.cod_hist_pad:
             stmt = stmt.where(Partida.cod_hist_pad.in_(criterios.cod_hist_pad))
         if criterios.sem_historico:

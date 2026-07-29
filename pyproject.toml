@@ -1,6 +1,6 @@
 [project]
 name = "sped-hub"
-version = "0.15.1"
+version = "0.16.0"
 description = "Plataforma multiempresa de conformidade fiscal para escritórios contábeis"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,6 +10,7 @@ keywords = ["sped", "ecd", "efd", "ecf", "contabilidade", "fiscal", "nf-e"]
 
 dependencies = [
     "sqlalchemy>=2.0",
+    "alembic>=1.13",
     "fastapi>=0.110",
     "jinja2>=3.1",
     "openpyxl>=3.1",
@@ -25,6 +26,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Driver PostgreSQL — opcional: só quem aponta DATABASE_URL para Postgres
+# precisa dele.  `pip install -e ".[postgres]"`
+postgres = ["psycopg[binary]>=3.1"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -47,6 +51,17 @@ sped-hub-watchdog = "src.watchdog:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Os testes de navegador ficam fora da execução padrão: além do Chromium,
+# eles dependem do cdn.jsdelivr.net (de onde a aplicação carrega htmx,
+# Alpine e Chart.js) estar acessível.  Sem o CDN os formulários não
+# funcionam e a falha não diz nada sobre o código.
+#   pytest              → suíte normal
+#   pytest -m e2e       → só os de navegador
+#   pytest -m ""        → tudo
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: fluxo completo em navegador real (requer Chromium e acesso ao CDN)",
+]
 
 [tool.ruff]
 line-length = 100

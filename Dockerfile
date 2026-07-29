@@ -15,7 +15,8 @@ COPY pyproject.toml ./
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root --only main 2>/dev/null || \
     pip install --no-cache-dir \
-        "sqlalchemy>=2.0" "fastapi>=0.110" "jinja2>=3.1" "openpyxl>=3.1" \
+        "sqlalchemy>=2.0" "alembic>=1.13" "fastapi>=0.110" "jinja2>=3.1" \
+        "openpyxl>=3.1" \
         "weasyprint>=60" "pyyaml>=6.0" "python-dateutil>=2.8" "unidecode>=1.3" \
         "python-multipart>=0.0.9" "uvicorn>=0.30" "strawberry-graphql>=0.200" \
         "redis>=5.0" "playwright>=1.40"
