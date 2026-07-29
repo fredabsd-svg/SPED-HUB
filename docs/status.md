@@ -36,7 +36,7 @@ Ver `docs/roadmap.md` para o que ainda não existe.
 | Retomada de importação a partir de offset | Exigiria commits parciais, o que viola a §6.1. Precisaria vir com estado explícito de "importação incompleta" que os relatórios respeitem. |
 | `SPED_HUB_SECRET_KEY` sem consumidor | Documentada como reservada (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. |
 | `SPED_HUB_DEBUG` sem consumidor | Documentada como reservada (§2.2). O campo é lido e coagido, mas nenhum componente muda de comportamento por causa dele. Remover exige decidir se o projeto quer um modo de diagnóstico. |
-| Ciclo na hierarquia do plano de contas | O dashboard agora para de subir e registra aviso, em vez de travar. A ECD segue importada com a hierarquia inválida, e `validators/integridade.py` ainda não detecta o ciclo — quem recebe o arquivo não é avisado no momento da validação. |
+| Ciclo na hierarquia do plano de contas | Detectado: o dashboard se protege (PR #7) e a validação (h) acusa o ciclo como erro, com o caminho completo. A importação continua aceitando o arquivo — recusar na entrada é decisão de produto pendente. |
 
 ## Passivo de documentação de módulo (§1.4)
 
@@ -44,12 +44,11 @@ A regra vale por adoção: módulo novo ou alterado exige o documento. A lista
 abaixo diminui a cada PR que toca nesses módulos.
 
 **Documentados:** `settings`, `db`, `ecd_importer`, `uploads`, `ratelimit`,
-`logging_config`.
+`logging_config`, `validators`.
 
 **Pendentes:** `api`, `async_jobs`, `audit`, `auth`, `cache`, `cli`,
 `dashboard`, `email_service`, `filters`, `monitoring`, `parsers`, `reports`,
-`validators`, `version`, `watchdog`, `webhooks`, `worker_queue`,
-`worker_runner`.
+`version`, `watchdog`, `webhooks`, `worker_queue`, `worker_runner`.
 
 `src/layouts/` não entra na conta: é diretório de dados (YAML de layout de
 ECD), sem código e sem `__init__.py`.

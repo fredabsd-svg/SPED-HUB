@@ -183,3 +183,115 @@ class TestValidadorIntegridade:
         validador = ValidadorIntegridade(session, session._ecd_id)
         inconsistencias = validador._validar_dre_vs_i355()
         assert isinstance(inconsistencias, list)
+
+
+class TestHierarquiaCiclica:
+    """(h) — a validação que faltava quando o defeito do PR #7 foi encontrado.
+
+    Uma ECD com ciclo na hierarquia travava o dashboard para todos os
+    usuários. O travamento foi corrigido lá; esta validação é o que avisa
+    quem recebe o arquivo de que a escrituração veio inválida — antes dela,
+    o ciclo entrava no banco em silêncio.
+    """
+
+    @pytest.fixture
+    def sessao_vazia(self):
+        engine = criar_engine(":memory:")
+        init_db(engine)
+        s = get_session(engine)
+        repo = Repository(s)
+        empresa = repo.upsert_empresa({"cnpj": "00999999000199", "nome": "CICLO SA"})
+        ecd = repo.criar_ecd(
+            empresa.id,
+            {
+                "leiaute": "009",
+                "dt_ini": datetime.date(2024, 1, 1),
+                "dt_fin": datetime.date(2024, 12, 31),
+            },
+        )
+        s._ecd_id = ecd.id
+        s._repo = repo
+        return s
+
+    def _plano(self, sessao, arestas):
+        """arestas: lista de (cod_cta, cod_cta_sup, nivel)."""
+        sessao._repo.inserir_plano_contas(
+            sessao._ecd_id,
+            [
+                {
+                    "cod_cta": cod,
+                    "cod_cta_sup": sup,
+                    "nome_cta": f"CONTA {cod}",
+                    "cod_nat": "01",
+                    "ind_cta": "A",
+                    "nivel": nivel,
+                }
+                for cod, sup, nivel in arestas
+            ],
+        )
+        sessao._repo.commit()
+
+    def test_conta_que_e_a_propria_sintetica(self, sessao_vazia):
+        """O caso real: foi esta forma que derrubou o dashboard."""
+        self._plano(sessao_vazia, [("1", "1", 3)])
+        achados = ValidadorIntegridade(
+            sessao_vazia, sessao_vazia._ecd_id
+        )._validar_hierarquia_ciclica()
+        assert len(achados) == 1
+        assert achados[0].tipo == "hierarquia_ciclica"
+        assert achados[0].severidade == "erro", (
+            "ciclo precisa ser erro: diferente das divergências de centavos, "
+            "hierarquia cíclica não tem leitura correta possível"
+        )
+        assert achados[0].detalhes["ciclo"] == ["1"]
+
+    def test_ciclo_mutuo_reportado_uma_unica_vez(self, sessao_vazia):
+        """A→B→A é UM ciclo, não dois — reportar dobrado vira ruído."""
+        self._plano(sessao_vazia, [("1", "2", 3), ("2", "1", 3)])
+        achados = ValidadorIntegridade(
+            sessao_vazia, sessao_vazia._ecd_id
+        )._validar_hierarquia_ciclica()
+        assert len(achados) == 1
+        assert sorted(achados[0].detalhes["ciclo"]) == ["1", "2"]
+
+    def test_conta_fora_do_ciclo_nao_e_acusada(self, sessao_vazia):
+        """D→A→B→A: o defeito está em A e B; D só aponta para dentro dele."""
+        self._plano(sessao_vazia, [("D", "A", 4), ("A", "B", 3), ("B", "A", 3)])
+        achados = ValidadorIntegridade(
+            sessao_vazia, sessao_vazia._ecd_id
+        )._validar_hierarquia_ciclica()
+        assert len(achados) == 1
+        assert "D" not in achados[0].detalhes["ciclo"]
+
+    def test_hierarquia_valida_nao_gera_falso_positivo(self, sessao_vazia):
+        """Árvore correta de 3 níveis: nada a reportar."""
+        self._plano(
+            sessao_vazia,
+            [("1", None, 1), ("1.1", "1", 2), ("1.1.01", "1.1", 3), ("1.1.02", "1.1", 3)],
+        )
+        achados = ValidadorIntegridade(
+            sessao_vazia, sessao_vazia._ecd_id
+        )._validar_hierarquia_ciclica()
+        assert achados == []
+
+    def test_orfa_nao_e_ciclo(self, sessao_vazia):
+        """Sintética inexistente é a validação (f), não esta."""
+        self._plano(sessao_vazia, [("1", "999", 3)])
+        achados = ValidadorIntegridade(
+            sessao_vazia, sessao_vazia._ecd_id
+        )._validar_hierarquia_ciclica()
+        assert achados == []
+
+    def test_entra_no_validar_todas(self, sessao_vazia):
+        """Validação que existe mas ninguém chama é promessa vazia (§1.1)."""
+        self._plano(sessao_vazia, [("1", "1", 3)])
+        todas = ValidadorIntegridade(sessao_vazia, sessao_vazia._ecd_id).validar_todas()
+        tipos = {i.tipo for i in todas}
+        assert "hierarquia_ciclica" in tipos
+
+    def test_dois_ciclos_independentes(self, sessao_vazia):
+        self._plano(sessao_vazia, [("1", "1", 3), ("5", "6", 3), ("6", "5", 3)])
+        achados = ValidadorIntegridade(
+            sessao_vazia, sessao_vazia._ecd_id
+        )._validar_hierarquia_ciclica()
+        assert len(achados) == 2
