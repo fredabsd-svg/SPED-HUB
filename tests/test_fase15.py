@@ -477,11 +477,16 @@ class TestIntegracaoFase15:
         alertas = []
 
         def on_complete(task):
+            # Síncrono: logo abaixo o teste confere `email_svc.historico()`.
+            # Com o envio assíncrono, `alertas` é preenchido na hora e o
+            # histórico só depois — a assertiva do histórico corria contra a
+            # thread de envio e perdia sob carga.
             email_svc.enviar_alerta_job_concluido(
                 para="admin@exemplo.com",
                 job_tipo=task.tipo,
                 job_id=0,
                 resultado=task.resultado,
+                async_mode=False,
             )
             alertas.append("enviado")
 
