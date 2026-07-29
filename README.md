@@ -211,9 +211,20 @@ sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 ## Testes
 
 ```bash
-pytest tests/ -v
-# 371 passando + 1 skip (engine Postgres, exige psycopg instalado)
-# Os E2E de Playwright pulam sozinhos quando não há Chromium no sistema.
+pytest                 # suíte normal
+pytest -m e2e          # só os testes de navegador (ver abaixo)
+pytest -m ""           # tudo
+```
+
+Os testes de navegador (Playwright) ficam **fora da execução padrão**.  Além
+do Chromium, eles dependem do `cdn.jsdelivr.net` — de onde a aplicação
+carrega htmx, Alpine e Chart.js — estar acessível.  Sem o CDN os formulários
+não funcionam e a falha não diz nada sobre o código.
+
+```bash
+# Com PostgreSQL (opcional)
+TEST_DATABASE_URL=postgresql+psycopg://user:senha@host:5432/sped_hub_test \
+  pytest tests/test_multibackend.py tests/test_migrations.py
 ```
 
 > Rodar a suíte completa leva ~2 min. Em CI, recomenda-se dividir por fase

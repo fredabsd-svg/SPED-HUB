@@ -51,6 +51,11 @@ def _chromium_executable() -> str | None:
 CHROMIUM = _chromium_executable()
 
 pytestmark = [
+    # Tier separado: precisa de navegador real E de acesso ao cdn.jsdelivr.net,
+    # de onde a aplicação carrega htmx/Alpine/Chart.js.  Sem o CDN os
+    # formulários não funcionam e os testes falham por um motivo que não é
+    # defeito do código.  Rode com `pytest -m e2e`.
+    pytest.mark.e2e,
     pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright não instalado"),
     pytest.mark.skipif(CHROMIUM is None, reason="Chromium não encontrado no sistema"),
 ]
@@ -270,7 +275,7 @@ class TestE2EUpload:
             assert page.url == f"{live_server}/upload"
 
             # Upload do arquivo
-            file_input = page.locator("input[type='file']")
+            file_input = page.locator("#file-ecd")
             file_input.set_input_files(ecd_file)
 
             # Clica no botão de upload

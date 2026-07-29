@@ -51,6 +51,17 @@ sped-hub-watchdog = "src.watchdog:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Os testes de navegador ficam fora da execução padrão: além do Chromium,
+# eles dependem do cdn.jsdelivr.net (de onde a aplicação carrega htmx,
+# Alpine e Chart.js) estar acessível.  Sem o CDN os formulários não
+# funcionam e a falha não diz nada sobre o código.
+#   pytest              → suíte normal
+#   pytest -m e2e       → só os de navegador
+#   pytest -m ""        → tudo
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: fluxo completo em navegador real (requer Chromium e acesso ao CDN)",
+]
 
 [tool.ruff]
 line-length = 100

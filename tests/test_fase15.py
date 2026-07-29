@@ -493,14 +493,19 @@ class TestIntegracaoFase15:
         try:
             q.enqueue("test", {})
 
-            deadline = time.time() + 30
+            deadline = time.time() + 60
             while time.time() < deadline:
                 q.process_results()
                 if alertas:
                     break
-                time.sleep(0.1)
+                time.sleep(0.05)
 
-            assert len(alertas) == 1
+            # A mensagem precisa distinguir "worker não subiu" de "callback não
+            # disparou": em runner de CI de 2 núcleos, spawnar o processo e
+            # reimportar a aplicação leva bem mais que numa máquina ociosa.
+            assert len(alertas) == 1, (
+                f"nenhum alerta em 60s — workers vivos: " f"{[w.is_alive() for w in q._workers]}"
+            )
             hist = email_svc.historico()
             assert len(hist) >= 1
         finally:
