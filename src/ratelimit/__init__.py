@@ -26,8 +26,7 @@ import datetime
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -38,12 +37,13 @@ logger = logging.getLogger("sped-hub.ratelimit")
 
 # Defaults globais
 DEFAULT_LIMITE = 100  # requisições por janela
-DEFAULT_JANELA = 60   # segundos
+DEFAULT_JANELA = 60  # segundos
 
 
 @dataclass
 class RateLimitInfo:
     """Informações de rate limit para uma API Key."""
+
     limite: int = DEFAULT_LIMITE
     janela: int = DEFAULT_JANELA
     requisicoes_restantes: int = DEFAULT_LIMITE
@@ -166,20 +166,25 @@ class RateLimiter:
             estado = self._counters.get(api_key_id)
             if estado is None:
                 return RateLimitInfo(
-                    limite=limite, janela=janela,
-                    requisicoes_restantes=limite, reset_em=int(janela),
+                    limite=limite,
+                    janela=janela,
+                    requisicoes_restantes=limite,
+                    reset_em=int(janela),
                 )
 
             elapsed = agora - estado["window_start"]
             if elapsed >= janela:
                 return RateLimitInfo(
-                    limite=limite, janela=janela,
-                    requisicoes_restantes=limite, reset_em=int(janela),
+                    limite=limite,
+                    janela=janela,
+                    requisicoes_restantes=limite,
+                    reset_em=int(janela),
                 )
 
             restante = max(0, limite - estado["count"])
             return RateLimitInfo(
-                limite=limite, janela=janela,
+                limite=limite,
+                janela=janela,
                 requisicoes_restantes=restante,
                 reset_em=int(janela - elapsed),
                 limite_excedido=restante == 0,
@@ -313,9 +318,11 @@ class RateLimitService:
         """Lista todas as configurações de rate limit."""
         session = self._get_session()
         try:
-            configs = session.execute(
-                select(RateLimitConfig).order_by(RateLimitConfig.api_key_id)
-            ).scalars().all()
+            configs = (
+                session.execute(select(RateLimitConfig).order_by(RateLimitConfig.api_key_id))
+                .scalars()
+                .all()
+            )
 
             return [
                 {

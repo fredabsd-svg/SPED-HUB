@@ -7,24 +7,44 @@ Rastreia hierarquia pai-filho (I050→I051/I052, I200→I250, I150→I155, I350�
 """
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 # Blocos de registros que nos interessam para a Fase 1
-REGISTROS_INTERESSE = frozenset({
-    "0000", "I001", "I010", "I015", "I030",
-    "I050", "I051", "I052",
-    "I075", "I100",
-    "I150", "I155",
-    "I200", "I250",
-    "I350", "I355",
-    "I990", "J001", "J005", "J100", "J150", "J210", "J990",
-    "9001", "9900", "9999",
-})
+REGISTROS_INTERESSE = frozenset(
+    {
+        "0000",
+        "I001",
+        "I010",
+        "I015",
+        "I030",
+        "I050",
+        "I051",
+        "I052",
+        "I075",
+        "I100",
+        "I150",
+        "I155",
+        "I200",
+        "I250",
+        "I350",
+        "I355",
+        "I990",
+        "J001",
+        "J005",
+        "J100",
+        "J150",
+        "J210",
+        "J990",
+        "9001",
+        "9900",
+        "9999",
+    }
+)
 
 # Mapa de pais: registro filho → registro pai
 PAI_DE = {
@@ -195,4 +215,3 @@ class ECDParser:
             reg = registro["_reg"]
             contagem[reg] = contagem.get(reg, 0) + 1
         return contagem
-

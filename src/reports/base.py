@@ -8,8 +8,6 @@ Fornece a infraestrutura comum para todos os relatórios:
 
 import datetime
 from dataclasses import dataclass, field
-from typing import Any
-
 
 # ── Convenção de Sinais ────────────────────────────────────────────────────
 

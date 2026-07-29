@@ -7,41 +7,39 @@ Schema completo com strawberry-graphql:
 Integração: app.include_router no dashboard/app.py ou standalone com uvicorn.
 """
 
-import datetime
 import logging
-from typing import Optional
 
 import strawberry
+from fastapi import Depends
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 from strawberry.fastapi import GraphQLRouter
 from strawberry.types import Info
-from fastapi import Depends
-from sqlalchemy import desc, func, select
-from sqlalchemy.orm import Session
 
+from src.api import requer_api_key
+from src.dashboard.services import DashboardService
 from src.db.models import (
     ECD,
     Empresa,
     Lancamento,
     Partida,
     PlanoConta,
-    SaldoPeriodico,
-    SaldoResultado,
     criar_engine,
     get_session,
     init_db,
 )
-from src.dashboard.services import DashboardService
 from src.reports.balanco import BalancoPatrimonial
 from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
 from src.validators.integridade import ValidadorIntegridade
-from src.api import requer_api_key
 
 logger = logging.getLogger("sped-hub.graphql")
 
+
 def _get_db_path() -> str:
     import os as _os
+
     return _os.environ.get("SPED_HUB_DB", "sped_hub.db")
 
 
@@ -59,17 +57,17 @@ class EmpresaType:
     id: int
     cnpj: str
     nome: str
-    uf: Optional[str] = None
-    ie: Optional[str] = None
-    cod_mun: Optional[str] = None
-    im: Optional[str] = None
-    ind_sit_esp: Optional[int] = None
-    ind_nire: Optional[int] = None
-    ind_fin_esc: Optional[int] = None
-    ind_grande_por: Optional[int] = None
-    tip_ecd: Optional[str] = None
-    ident_mf: Optional[str] = None
-    ind_esc_cons: Optional[str] = None
+    uf: str | None = None
+    ie: str | None = None
+    cod_mun: str | None = None
+    im: str | None = None
+    ind_sit_esp: int | None = None
+    ind_nire: int | None = None
+    ind_fin_esc: int | None = None
+    ind_grande_por: int | None = None
+    tip_ecd: str | None = None
+    ident_mf: str | None = None
+    ind_esc_cons: str | None = None
 
 
 @strawberry.type
@@ -80,11 +78,11 @@ class ECDType:
     leiaute: str
     dt_ini: str
     dt_fin: str
-    ind_esc: Optional[str] = None
-    cod_ver_lc: Optional[str] = None
-    nome_arquivo: Optional[str] = None
-    hash_arquivo: Optional[str] = None
-    importado_em: Optional[str] = None
+    ind_esc: str | None = None
+    cod_ver_lc: str | None = None
+    nome_arquivo: str | None = None
+    hash_arquivo: str | None = None
+    importado_em: str | None = None
     n_contas: int = 0
     n_lancamentos: int = 0
     n_partidas: int = 0
@@ -274,9 +272,11 @@ class Query:
         try:
             total = session.execute(select(func.count(Empresa.id))).scalar() or 0
             offset = (pagina - 1) * limite
-            empresas = session.execute(
-                select(Empresa).order_by(Empresa.nome).offset(offset).limit(limite)
-            ).scalars().all()
+            empresas = (
+                session.execute(select(Empresa).order_by(Empresa.nome).offset(offset).limit(limite))
+                .scalars()
+                .all()
+            )
 
             return EmpresasPage(
                 dados=[
@@ -309,7 +309,7 @@ class Query:
             session.close()
 
     @strawberry.field
-    def empresa(self, info: Info, id: int) -> Optional[EmpresaType]:
+    def empresa(self, info: Info, id: int) -> EmpresaType | None:
         session = _get_session()
         try:
             e = session.get(Empresa, id)
@@ -338,7 +338,7 @@ class Query:
     def ecds(
         self,
         info: Info,
-        empresa_id: Optional[int] = None,
+        empresa_id: int | None = None,
         pagina: int = 1,
         limite: int = 20,
     ) -> ECDsPage:
@@ -357,34 +357,45 @@ class Query:
 
             dados = []
             for ecd, nome in ecds:
-                n_contas = session.execute(
-                    select(func.count(PlanoConta.id)).where(PlanoConta.ecd_id == ecd.id)
-                ).scalar() or 0
-                n_lancs = session.execute(
-                    select(func.count(Lancamento.id)).where(Lancamento.ecd_id == ecd.id)
-                ).scalar() or 0
-                n_partidas = session.execute(
-                    select(func.count(Partida.id))
-                    .join(Lancamento)
-                    .where(Lancamento.ecd_id == ecd.id)
-                ).scalar() or 0
+                n_contas = (
+                    session.execute(
+                        select(func.count(PlanoConta.id)).where(PlanoConta.ecd_id == ecd.id)
+                    ).scalar()
+                    or 0
+                )
+                n_lancs = (
+                    session.execute(
+                        select(func.count(Lancamento.id)).where(Lancamento.ecd_id == ecd.id)
+                    ).scalar()
+                    or 0
+                )
+                n_partidas = (
+                    session.execute(
+                        select(func.count(Partida.id))
+                        .join(Lancamento)
+                        .where(Lancamento.ecd_id == ecd.id)
+                    ).scalar()
+                    or 0
+                )
 
-                dados.append(ECDType(
-                    id=ecd.id,
-                    empresa_id=ecd.empresa_id,
-                    empresa_nome=nome,
-                    leiaute=ecd.leiaute,
-                    dt_ini=ecd.dt_ini.isoformat() if ecd.dt_ini else "",
-                    dt_fin=ecd.dt_fin.isoformat() if ecd.dt_fin else "",
-                    ind_esc=ecd.ind_esc,
-                    cod_ver_lc=ecd.cod_ver_lc,
-                    nome_arquivo=ecd.nome_arquivo,
-                    hash_arquivo=ecd.hash_arquivo,
-                    importado_em=ecd.importado_em.isoformat() if ecd.importado_em else "",
-                    n_contas=n_contas,
-                    n_lancamentos=n_lancs,
-                    n_partidas=n_partidas,
-                ))
+                dados.append(
+                    ECDType(
+                        id=ecd.id,
+                        empresa_id=ecd.empresa_id,
+                        empresa_nome=nome,
+                        leiaute=ecd.leiaute,
+                        dt_ini=ecd.dt_ini.isoformat() if ecd.dt_ini else "",
+                        dt_fin=ecd.dt_fin.isoformat() if ecd.dt_fin else "",
+                        ind_esc=ecd.ind_esc,
+                        cod_ver_lc=ecd.cod_ver_lc,
+                        nome_arquivo=ecd.nome_arquivo,
+                        hash_arquivo=ecd.hash_arquivo,
+                        importado_em=ecd.importado_em.isoformat() if ecd.importado_em else "",
+                        n_contas=n_contas,
+                        n_lancamentos=n_lancs,
+                        n_partidas=n_partidas,
+                    )
+                )
 
             return ECDsPage(
                 dados=dados,
@@ -399,24 +410,31 @@ class Query:
             session.close()
 
     @strawberry.field
-    def ecd(self, info: Info, id: int) -> Optional[ECDType]:
+    def ecd(self, info: Info, id: int) -> ECDType | None:
         session = _get_session()
         try:
             ecd = session.get(ECD, id)
             if not ecd:
                 return None
             empresa = session.get(Empresa, ecd.empresa_id)
-            n_contas = session.execute(
-                select(func.count(PlanoConta.id)).where(PlanoConta.ecd_id == id)
-            ).scalar() or 0
-            n_lancs = session.execute(
-                select(func.count(Lancamento.id)).where(Lancamento.ecd_id == id)
-            ).scalar() or 0
-            n_partidas = session.execute(
-                select(func.count(Partida.id))
-                .join(Lancamento)
-                .where(Lancamento.ecd_id == id)
-            ).scalar() or 0
+            n_contas = (
+                session.execute(
+                    select(func.count(PlanoConta.id)).where(PlanoConta.ecd_id == id)
+                ).scalar()
+                or 0
+            )
+            n_lancs = (
+                session.execute(
+                    select(func.count(Lancamento.id)).where(Lancamento.ecd_id == id)
+                ).scalar()
+                or 0
+            )
+            n_partidas = (
+                session.execute(
+                    select(func.count(Partida.id)).join(Lancamento).where(Lancamento.ecd_id == id)
+                ).scalar()
+                or 0
+            )
 
             return ECDType(
                 id=ecd.id,
@@ -438,7 +456,7 @@ class Query:
             session.close()
 
     @strawberry.field
-    def balanco(self, info: Info, ecd_id: int, visao: str = "hierarquica") -> Optional[BalancoType]:
+    def balanco(self, info: Info, ecd_id: int, visao: str = "hierarquica") -> BalancoType | None:
         session = _get_session()
         try:
             balanco = BalancoPatrimonial(session, ecd_id)
@@ -451,24 +469,33 @@ class Query:
                 titulo=ctx.titulo,
                 ativo=[
                     LinhaBalancoType(
-                        cod_cta=l.cod_cta, nome_cta=l.nome_cta, nivel=l.nivel,
-                        saldo_atual=l.saldo_atual, saldo_anterior=l.saldo_anterior,
+                        cod_cta=ln.cod_cta,
+                        nome_cta=ln.nome_cta,
+                        nivel=ln.nivel,
+                        saldo_atual=ln.saldo_atual,
+                        saldo_anterior=ln.saldo_anterior,
                     )
-                    for l in grupos["ativo"]
+                    for ln in grupos["ativo"]
                 ],
                 passivo=[
                     LinhaBalancoType(
-                        cod_cta=l.cod_cta, nome_cta=l.nome_cta, nivel=l.nivel,
-                        saldo_atual=l.saldo_atual, saldo_anterior=l.saldo_anterior,
+                        cod_cta=ln.cod_cta,
+                        nome_cta=ln.nome_cta,
+                        nivel=ln.nivel,
+                        saldo_atual=ln.saldo_atual,
+                        saldo_anterior=ln.saldo_anterior,
                     )
-                    for l in grupos["passivo"]
+                    for ln in grupos["passivo"]
                 ],
                 patrimonio_liquido=[
                     LinhaBalancoType(
-                        cod_cta=l.cod_cta, nome_cta=l.nome_cta, nivel=l.nivel,
-                        saldo_atual=l.saldo_atual, saldo_anterior=l.saldo_anterior,
+                        cod_cta=ln.cod_cta,
+                        nome_cta=ln.nome_cta,
+                        nivel=ln.nivel,
+                        saldo_atual=ln.saldo_atual,
+                        saldo_anterior=ln.saldo_anterior,
                     )
-                    for l in grupos["pl"]
+                    for ln in grupos["pl"]
                 ],
                 total_ativo=totais["ativo"],
                 total_passivo=totais["passivo"],
@@ -481,7 +508,7 @@ class Query:
             session.close()
 
     @strawberry.field
-    def dre(self, info: Info, ecd_id: int) -> Optional[DREType]:
+    def dre(self, info: Info, ecd_id: int) -> DREType | None:
         session = _get_session()
         try:
             dre = DRE(session, ecd_id)
@@ -491,10 +518,12 @@ class Query:
                 titulo=ctx.titulo,
                 linhas=[
                     LinhaDREType(
-                        tipo=l.tipo, descricao=l.descricao,
-                        valor_atual=l.valor_atual, valor_anterior=l.valor_anterior,
+                        tipo=ln.tipo,
+                        descricao=ln.descricao,
+                        valor_atual=ln.valor_atual,
+                        valor_anterior=ln.valor_anterior,
                     )
-                    for l in linhas
+                    for ln in linhas
                 ],
                 resultado_liquido=totais.get("resultado_liquido", 0.0),
                 receita_bruta=totais.get("receita_bruta", 0.0),
@@ -504,7 +533,7 @@ class Query:
             session.close()
 
     @strawberry.field
-    def dfc(self, info: Info, ecd_id: int) -> Optional[DFCType]:
+    def dfc(self, info: Info, ecd_id: int) -> DFCType | None:
         session = _get_session()
         try:
             dfc = DFC(session, ecd_id)
@@ -514,10 +543,12 @@ class Query:
                 titulo=ctx.titulo,
                 linhas=[
                     LinhaDFCType(
-                        tipo=l.tipo, descricao=l.descricao,
-                        valor=l.valor, valor_anterior=l.valor_anterior,
+                        tipo=ln.tipo,
+                        descricao=ln.descricao,
+                        valor=ln.valor,
+                        valor_anterior=ln.valor_anterior,
                     )
-                    for l in linhas
+                    for ln in linhas
                 ],
                 variacao_caixa=totais.get("variacao_caixa", 0.0),
                 operacional=totais.get("operacional", 0.0),
@@ -530,7 +561,7 @@ class Query:
     @strawberry.field
     def diario(
         self, info: Info, ecd_id: int, pagina: int = 1, limite: int = 50
-    ) -> Optional[DiarioType]:
+    ) -> DiarioType | None:
         session = _get_session()
         try:
             diario = LivroDiario(session, ecd_id)
@@ -547,9 +578,9 @@ class Query:
                 titulo=ctx.titulo,
                 lancamentos=[
                     LancamentoDiarioType(
-                        num_lcto=l.num_lcto,
-                        data=str(l.data),
-                        ind_lcto=l.ind_lcto if hasattr(l, "ind_lcto") else "",
+                        num_lcto=ln.num_lcto,
+                        data=str(ln.data),
+                        ind_lcto=ln.ind_lcto if hasattr(ln, "ind_lcto") else "",
                         partidas=[
                             PartidaDiarioType(
                                 cod_cta=p.cod_cta,
@@ -557,12 +588,12 @@ class Query:
                                 debito=p.debito if hasattr(p, "debito") else 0.0,
                                 credito=p.credito if hasattr(p, "credito") else 0.0,
                             )
-                            for p in (l.partidas if hasattr(l, "partidas") else [])
+                            for p in (ln.partidas if hasattr(ln, "partidas") else [])
                         ],
-                        total_debito=l.total_debito if hasattr(l, "total_debito") else 0.0,
-                        total_credito=l.total_credito if hasattr(l, "total_credito") else 0.0,
+                        total_debito=ln.total_debito if hasattr(ln, "total_debito") else 0.0,
+                        total_credito=ln.total_credito if hasattr(ln, "total_credito") else 0.0,
                     )
-                    for l in pagina_lancs
+                    for ln in pagina_lancs
                 ],
                 total_lancamentos=total,
                 total_debitos=totais["total_debitos"],
@@ -572,7 +603,7 @@ class Query:
             session.close()
 
     @strawberry.field
-    def kpis(self, info: Info, ecd_id: int) -> Optional[KPIsType]:
+    def kpis(self, info: Info, ecd_id: int) -> KPIsType | None:
         session = _get_session()
         try:
             svc = DashboardService(session, ecd_id)
@@ -591,8 +622,11 @@ class Query:
                 num_contas=data.num_contas,
                 kpis=[
                     KPICardType(
-                        titulo=k.titulo, valor=k.valor, formato=k.formato,
-                        tendencia=k.tendencia, descricao=k.descricao,
+                        titulo=k.titulo,
+                        valor=k.valor,
+                        formato=k.formato,
+                        tendencia=k.tendencia,
+                        descricao=k.descricao,
                     )
                     for k in data.kpis
                 ],
@@ -608,8 +642,11 @@ class Query:
             notas = svc.get_notas_explicativas()
             return [
                 NotaType(
-                    numero=n["numero"], titulo=n["titulo"],
-                    texto=n["texto"], valor=n["valor"], tipo=n["tipo"],
+                    numero=n["numero"],
+                    titulo=n["titulo"],
+                    texto=n["texto"],
+                    valor=n["valor"],
+                    tipo=n["tipo"],
                 )
                 for n in notas
             ]
@@ -630,7 +667,9 @@ class Query:
                 alertas=relatorio["alertas"],
                 detalhes=[
                     InconsistenciaType(
-                        tipo=d["tipo"], severidade=d["severidade"], descricao=d["descricao"],
+                        tipo=d["tipo"],
+                        severidade=d["severidade"],
+                        descricao=d["descricao"],
                     )
                     for d in relatorio["detalhes"]
                 ],
@@ -639,7 +678,7 @@ class Query:
             session.close()
 
     @strawberry.field
-    def evolucao_multi(self, info: Info, ecd_id: int) -> Optional[EvolucaoMultiType]:
+    def evolucao_multi(self, info: Info, ecd_id: int) -> EvolucaoMultiType | None:
         session = _get_session()
         try:
             svc = DashboardService(session, ecd_id)

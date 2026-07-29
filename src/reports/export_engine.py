@@ -4,17 +4,14 @@ Renderiza templates Jinja2 com contexto e gera arquivos profissionais.
 Suporta white-label (logo, cor primária, nome do escritório).
 """
 
-import base64
-import datetime
-import io
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from src.reports.base import fmt_moeda, fmt_data, fmt_data_hora
+from src.reports.base import fmt_data, fmt_data_hora, fmt_moeda
 
 logger = logging.getLogger("sped-hub.export")
 
@@ -43,9 +40,7 @@ class ExportEngine:
 
     def __init__(self, templates_dir: str | None = None):
         if templates_dir is None:
-            templates_dir = str(
-                Path(__file__).resolve().parent / "templates"
-            )
+            templates_dir = str(Path(__file__).resolve().parent / "templates")
         self.env = Environment(
             loader=FileSystemLoader(templates_dir),
             autoescape=select_autoescape(["html"]),
@@ -128,10 +123,8 @@ class ExportEngine:
                 Alignment,
                 Border,
                 Font,
-                NamedStyle,
                 PatternFill,
                 Side,
-                numbers,
             )
             from openpyxl.utils import get_column_letter
 
@@ -140,24 +133,13 @@ class ExportEngine:
             ws.title = titulo[:31] if titulo else "Relatório"
 
             # ── Estilos ──
-            cor_primaria = (
-                white_label.cor_primaria.replace("#", "")
-                if white_label
-                else "0B4F6C"
-            )
+            cor_primaria = white_label.cor_primaria.replace("#", "") if white_label else "0B4F6C"
 
             header_fill = PatternFill(
                 start_color=cor_primaria, end_color=cor_primaria, fill_type="solid"
             )
-            header_font = Font(
-                name="Calibri", size=10, bold=True, color="FFFFFF"
-            )
-            zebra_fill = PatternFill(
-                start_color="F5F5F7", end_color="F5F5F7", fill_type="solid"
-            )
-            total_fill = PatternFill(
-                start_color="E8F3F7", end_color="E8F3F7", fill_type="solid"
-            )
+            header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+            zebra_fill = PatternFill(start_color="F5F5F7", end_color="F5F5F7", fill_type="solid")
             thin_border = Border(
                 left=Side(style="thin", color="D4D4DA"),
                 right=Side(style="thin", color="D4D4DA"),
@@ -165,7 +147,6 @@ class ExportEngine:
                 bottom=Side(style="thin", color="D4D4DA"),
             )
             data_font = Font(name="Calibri", size=10)
-            bold_font = Font(name="Calibri", size=10, bold=True)
             moeda_format = '#.##0,00;(#.##0,00);"-"'
 
             # ── Cabeçalho do relatório ──
@@ -179,7 +160,8 @@ class ExportEngine:
             if ctx:
                 ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(colunas))
                 ws.cell(
-                    row=row, column=1,
+                    row=row,
+                    column=1,
                     value=f"{ctx.empresa_nome} — CNPJ: {ctx.empresa_cnpj} — Período: {ctx.periodo_ref}",
                 ).font = Font(name="Calibri", size=9, color="6B6B85")
                 row += 1
@@ -207,9 +189,16 @@ class ExportEngine:
                     if isinstance(valor, (int, float)):
                         cell.alignment = Alignment(horizontal="right")
                         if col_name.lower() in (
-                            "saldo", "débito", "crédito", "valor",
-                            "saldo_atual", "saldo_anterior", "debitos", "creditos",
-                            "saldo_inicial", "saldo_final",
+                            "saldo",
+                            "débito",
+                            "crédito",
+                            "valor",
+                            "saldo_atual",
+                            "saldo_anterior",
+                            "debitos",
+                            "creditos",
+                            "saldo_inicial",
+                            "saldo_final",
                         ):
                             cell.number_format = moeda_format
                     else:
@@ -243,6 +232,7 @@ class ExportEngine:
         except Exception as e:
             logger.error("Erro ao gerar XLSX: %s", e)
             raise
+
     def export_xlsx_to_buffer(
         self,
         buffer,
@@ -255,7 +245,11 @@ class ExportEngine:
         """Exporta dados tabulares para XLSX em buffer (BytesIO)."""
         from openpyxl import Workbook
         from openpyxl.styles import (
-            Alignment, Border, Font, PatternFill, Side,
+            Alignment,
+            Border,
+            Font,
+            PatternFill,
+            Side,
         )
         from openpyxl.utils import get_column_letter
 
@@ -263,13 +257,11 @@ class ExportEngine:
         ws = wb.active
         ws.title = titulo[:31] if titulo else "Relatorio"
 
-        cor_primaria = (
-            white_label.cor_primaria.replace("#", "")
-            if white_label
-            else "0B4F6C"
-        )
+        cor_primaria = white_label.cor_primaria.replace("#", "") if white_label else "0B4F6C"
 
-        header_fill = PatternFill(start_color=cor_primaria, end_color=cor_primaria, fill_type="solid")
+        header_fill = PatternFill(
+            start_color=cor_primaria, end_color=cor_primaria, fill_type="solid"
+        )
         header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
         zebra_fill = PatternFill(start_color="F5F5F7", end_color="F5F5F7", fill_type="solid")
         thin_border = Border(
@@ -283,13 +275,18 @@ class ExportEngine:
 
         row = 1
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(colunas))
-        ws.cell(row=row, column=1, value=titulo).font = Font(name="Calibri", size=14, bold=True, color=cor_primaria)
+        ws.cell(row=row, column=1, value=titulo).font = Font(
+            name="Calibri", size=14, bold=True, color=cor_primaria
+        )
         row += 1
 
         if ctx:
             ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(colunas))
-            ws.cell(row=row, column=1,
-                    value=f"{ctx.empresa_nome} — CNPJ: {ctx.empresa_cnpj} — Periodo: {ctx.periodo_ref}").font = Font(name="Calibri", size=9, color="6B6B85")
+            ws.cell(
+                row=row,
+                column=1,
+                value=f"{ctx.empresa_nome} — CNPJ: {ctx.empresa_cnpj} — Periodo: {ctx.periodo_ref}",
+            ).font = Font(name="Calibri", size=9, color="6B6B85")
             row += 1
 
         row += 1
@@ -310,7 +307,18 @@ class ExportEngine:
                 cell.border = thin_border
                 if isinstance(valor, (int, float)):
                     cell.alignment = Alignment(horizontal="right")
-                    if col_name.lower() in ("saldo", "debito", "credito", "valor", "saldo_atual", "saldo_anterior", "debitos", "creditos", "saldo_inicial", "saldo_final"):
+                    if col_name.lower() in (
+                        "saldo",
+                        "debito",
+                        "credito",
+                        "valor",
+                        "saldo_atual",
+                        "saldo_anterior",
+                        "debitos",
+                        "creditos",
+                        "saldo_inicial",
+                        "saldo_final",
+                    ):
                         cell.number_format = moeda_format
                 else:
                     cell.alignment = Alignment(horizontal="left")
@@ -327,4 +335,3 @@ class ExportEngine:
             ws.column_dimensions[get_column_letter(col_idx)].width = min(max_width, 50)
 
         wb.save(buffer)
-

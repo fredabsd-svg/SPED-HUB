@@ -178,6 +178,7 @@ class TestApiKeyExpiryRegression:
         assert exc.value.status_code == 403
         assert "expirada" in exc.value.detail.lower()
 
+
 class TestRuntimeServicesRegression:
     def test_cached_prefix_can_be_invalidated(self, monkeypatch):
         import src.cache as cache_module
@@ -290,6 +291,7 @@ class TestRuntimeServicesRegression:
             assert queue.status(task_id)["status"] == "completed"
         finally:
             queue.shutdown()
+
 
 class TestWebhookSecurityRegression:
     def test_webhook_rejects_local_and_private_targets(self, db_path: str):
@@ -418,4 +420,3 @@ class TestStreamingImportRegression:
             )
             summary = parser.extrair_resumo(path)
             assert summary["total_registros"] == 2
-

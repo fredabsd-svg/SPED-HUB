@@ -18,9 +18,8 @@ import datetime
 import json
 import logging
 import threading
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable
+from dataclasses import dataclass
+from enum import StrEnum
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -30,7 +29,7 @@ from src.db.models import AsyncJob, criar_engine, get_session, init_db
 logger = logging.getLogger("sped-hub.async_jobs")
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -40,6 +39,7 @@ class JobStatus(str, Enum):
 @dataclass
 class JobInfo:
     """Resumo de um job para resposta da API."""
+
     id: int
     status: str
     progresso: float
@@ -195,13 +195,13 @@ class AsyncJobService:
         """Lista jobs com filtro opcional, incluindo progresso em memória."""
         session = self._get_session()
         try:
-            jobs = session.execute(
-                select(AsyncJob).order_by(desc(AsyncJob.criado_em)).limit(limite)
-            ).scalars().all()
+            jobs = (
+                session.execute(select(AsyncJob).order_by(desc(AsyncJob.criado_em)).limit(limite))
+                .scalars()
+                .all()
+            )
             infos = [
-                self._to_info(job)
-                for job in jobs
-                if self._pode_acessar(job, usuario_id, admin)
+                self._to_info(job) for job in jobs if self._pode_acessar(job, usuario_id, admin)
             ]
         finally:
             session.close()
@@ -224,14 +224,18 @@ class AsyncJobService:
         session = self._get_session()
         try:
             corte = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=horas)
-            result = session.execute(
-                select(func.count(AsyncJob.id)).where(
-                    AsyncJob.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value]),
-                    AsyncJob.concluido_em < corte,
-                )
-            ).scalar() or 0
+            result = (
+                session.execute(
+                    select(func.count(AsyncJob.id)).where(
+                        AsyncJob.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value]),
+                        AsyncJob.concluido_em < corte,
+                    )
+                ).scalar()
+                or 0
+            )
 
             from sqlalchemy import delete as _delete
+
             session.execute(
                 _delete(AsyncJob).where(
                     AsyncJob.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value]),

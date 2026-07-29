@@ -6,14 +6,12 @@ A partir dos saldos periódicos (I155), gera balancete com:
 - Conferência automática contra I155 (SI + D − C = SF)
 """
 
-import datetime
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import PlanoConta, SaldoPeriodico
+from src.db.models import PlanoConta
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
@@ -75,9 +73,7 @@ class Balancete:
         # Agrupa por conta (soma todos os períodos)
         from collections import defaultdict
 
-        por_conta: dict[str, dict] = defaultdict(
-            lambda: {"si": 0.0, "d": 0.0, "c": 0.0, "sf": 0.0}
-        )
+        por_conta: dict[str, dict] = defaultdict(lambda: {"si": 0.0, "d": 0.0, "c": 0.0, "sf": 0.0})
 
         for s in saldos:
             acc = por_conta[s.cod_cta]
@@ -144,24 +140,24 @@ class Balancete:
         """Converte linhas para dicionários (exportação)."""
         return [
             {
-                "cod_cta": l.cod_cta,
-                "nome_cta": l.nome_cta,
-                "nivel": l.nivel,
-                "cod_nat": l.cod_nat,
-                "ind_cta": l.ind_cta,
-                "saldo_inicial": fmt_moeda(saldo_por_natureza(l.saldo_inicial, l.cod_nat)),
-                "debitos": fmt_moeda(l.debitos),
-                "creditos": fmt_moeda(l.creditos),
-                "saldo_final": fmt_moeda(saldo_por_natureza(l.saldo_final, l.cod_nat)),
-                "divergencia": fmt_moeda(l.divergencia) if l.tem_divergencia else "–",
+                "cod_cta": ln.cod_cta,
+                "nome_cta": ln.nome_cta,
+                "nivel": ln.nivel,
+                "cod_nat": ln.cod_nat,
+                "ind_cta": ln.ind_cta,
+                "saldo_inicial": fmt_moeda(saldo_por_natureza(ln.saldo_inicial, ln.cod_nat)),
+                "debitos": fmt_moeda(ln.debitos),
+                "creditos": fmt_moeda(ln.creditos),
+                "saldo_final": fmt_moeda(saldo_por_natureza(ln.saldo_final, ln.cod_nat)),
+                "divergencia": fmt_moeda(ln.divergencia) if ln.tem_divergencia else "–",
             }
-            for l in linhas
+            for ln in linhas
         ]
 
     def conferir(self, linhas: list[LinhaBalancete]) -> dict:
         """Conferência contra I155: SI + D − C = SF."""
-        total_divergencias = sum(1 for l in linhas if l.tem_divergencia)
-        soma_divergencias = sum(abs(l.divergencia) for l in linhas if l.tem_divergencia)
+        total_divergencias = sum(1 for ln in linhas if ln.tem_divergencia)
+        soma_divergencias = sum(abs(ln.divergencia) for ln in linhas if ln.tem_divergencia)
 
         return {
             "total_contas": len(linhas),

@@ -13,7 +13,7 @@ Validações:
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
@@ -218,7 +218,7 @@ class ValidadorIntegridade:
             )
         ).all()
 
-        for partida, lancamento in resultados:
+        for partida, _lancamento in resultados:
             pc = plano.get(partida.cod_cta)
             if pc and pc.cod_nat == "04":
                 movimento_resultado += valor_sinalizado(partida.vl_dc, partida.ind_dc)
@@ -345,7 +345,7 @@ class ValidadorIntegridade:
         ).all()
 
         sinteticas_com_lancamento = set()
-        for partida, lancamento in resultados:
+        for partida, _lancamento in resultados:
             pc = plano.get(partida.cod_cta)
             if pc and pc.ind_cta == "S":
                 sinteticas_com_lancamento.add(partida.cod_cta)

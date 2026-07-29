@@ -27,7 +27,6 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger("sped-hub.email")
 
@@ -146,7 +145,7 @@ class EmailService:
             with self._history_lock:
                 self._sent.append(msg)
                 if len(self._sent) > self._max_history:
-                    del self._sent[:-self._max_history]
+                    del self._sent[: -self._max_history]
 
     def _log_send(self, msg: EmailMessage):
         """Modo log: apenas registra o email."""
@@ -215,9 +214,7 @@ SPED-HUB — Plataforma de Conformidade Fiscal
             corpo=corpo,
         )
 
-    def enviar_alerta_job_falhou(
-        self, para: str, job_tipo: str, job_id: int, erro: str
-    ):
+    def enviar_alerta_job_falhou(self, para: str, job_tipo: str, job_id: int, erro: str):
         """Envia alerta de job com falha."""
         corpo = f"""
 Job falhou!

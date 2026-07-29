@@ -5,11 +5,9 @@ Visões salvas em filter_views.
 """
 
 import datetime
-import json
 from dataclasses import dataclass, field
-from typing import Any
 
-from sqlalchemy import and_, or_, select, func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
@@ -147,10 +145,7 @@ class FilterEngine:
             from unidecode import unidecode
 
             busca = unidecode(criterios.nome_cta.lower())
-            contas = {
-                c for c in contas
-                if busca in unidecode(plano[c].nome_cta.lower())
-            }
+            contas = {c for c in contas if busca in unidecode(plano[c].nome_cta.lower())}
 
         # Natureza
         if criterios.cod_nat:
@@ -201,9 +196,7 @@ class FilterEngine:
 
         return contas
 
-    def aplicar_saldos(
-        self, criterios: FilterCriteria
-    ) -> list[SaldoPeriodico]:
+    def aplicar_saldos(self, criterios: FilterCriteria) -> list[SaldoPeriodico]:
         """Aplica filtros sobre saldos periódicos (I155)."""
         contas = self._filtrar_contas(criterios)
 
@@ -238,16 +231,12 @@ class FilterEngine:
 
         # Sem movimento
         if criterios.ocultar_sem_movimento:
-            stmt = stmt.where(
-                (SaldoPeriodico.vl_deb != 0.0) | (SaldoPeriodico.vl_cred != 0.0)
-            )
+            stmt = stmt.where((SaldoPeriodico.vl_deb != 0.0) | (SaldoPeriodico.vl_cred != 0.0))
 
         stmt = stmt.order_by(SaldoPeriodico.cod_cta, SaldoPeriodico.dt_ini)
         return list(self.session.execute(stmt).scalars())
 
-    def aplicar_lancamentos(
-        self, criterios: FilterCriteria
-    ) -> list[Partida]:
+    def aplicar_lancamentos(self, criterios: FilterCriteria) -> list[Partida]:
         """Aplica filtros sobre partidas (I250), retornando com dados do lançamento."""
         contas = self._filtrar_contas(criterios)
 
@@ -288,9 +277,8 @@ class FilterEngine:
             stmt = stmt.where(Partida.cod_hist_pad.in_(criterios.cod_hist_pad))
         if criterios.sem_historico:
             from sqlalchemy import or_
-            stmt = stmt.where(
-                or_(Partida.hist.is_(None), Partida.hist == "")
-            )
+
+            stmt = stmt.where(or_(Partida.hist.is_(None), Partida.hist == ""))
 
         # Tipo de lançamento
         if criterios.ind_lcto:
@@ -303,21 +291,15 @@ class FilterEngine:
         # Flags de auditoria
         if criterios.vl_redondo_acima is not None:
             limite = criterios.vl_redondo_acima
-            stmt = stmt.where(
-                (Partida.vl_dc >= limite) & (Partida.vl_dc % 1 == 0)
-            )
+            stmt = stmt.where((Partida.vl_dc >= limite) & (Partida.vl_dc % 1 == 0))
         if criterios.fins_de_semana:
             # SQLite: strftime('%w', date) — 0=Domingo, 6=Sábado
-            stmt = stmt.where(
-                func.strftime("%w", Lancamento.dt_lcto).in_(["0", "6"])
-            )
+            stmt = stmt.where(func.strftime("%w", Lancamento.dt_lcto).in_(["0", "6"]))
 
         stmt = stmt.order_by(Lancamento.dt_lcto, Lancamento.num_lcto, Partida.cod_cta)
         return list(self.session.execute(stmt).all())
 
-    def aplicar_saldos_resultado(
-        self, criterios: FilterCriteria
-    ) -> list[SaldoResultado]:
+    def aplicar_saldos_resultado(self, criterios: FilterCriteria) -> list[SaldoResultado]:
         """Aplica filtros sobre saldos de resultado (I355)."""
         contas = self._filtrar_contas(criterios)
 
@@ -352,11 +334,20 @@ class FilterEngine:
         if criterios.cod_cta_prefixo:
             partes.append(f"Prefixo: {', '.join(criterios.cod_cta_prefixo)}")
         if criterios.cod_cta_intervalo:
-            partes.append(f"Contas de {criterios.cod_cta_intervalo[0]} a {criterios.cod_cta_intervalo[1]}")
+            partes.append(
+                f"Contas de {criterios.cod_cta_intervalo[0]} a {criterios.cod_cta_intervalo[1]}"
+            )
         if criterios.nome_cta:
-            partes.append(f"Nome contém: \"{criterios.nome_cta}\"")
+            partes.append(f'Nome contém: "{criterios.nome_cta}"')
         if criterios.cod_nat:
-            nat_map = {"01": "Ativo", "02": "Passivo", "03": "PL", "04": "Resultado", "05": "Compensação", "09": "Outras"}
+            nat_map = {
+                "01": "Ativo",
+                "02": "Passivo",
+                "03": "PL",
+                "04": "Resultado",
+                "05": "Compensação",
+                "09": "Outras",
+            }
             partes.append(f"Natureza: {', '.join(nat_map.get(n, n) for n in criterios.cod_nat)}")
         if criterios.ind_cta:
             partes.append(f"Classificação: {', '.join(criterios.ind_cta)}")
@@ -388,14 +379,16 @@ class FilterEngine:
         if criterios.somente_creditos:
             partes.append("Somente créditos")
         if criterios.hist_texto:
-            partes.append(f"Histórico contém: \"{criterios.hist_texto}\"")
+            partes.append(f'Histórico contém: "{criterios.hist_texto}"')
         if criterios.cod_hist_pad:
             partes.append(f"Hist. padronizado: {', '.join(criterios.cod_hist_pad)}")
         if criterios.sem_historico:
             partes.append("Sem histórico")
         if criterios.ind_lcto:
             lcto_map = {"N": "Normal", "E": "Encerramento", "X": "Extemporâneo"}
-            partes.append(f"Tipo lançamento: {', '.join(lcto_map.get(t, t) for t in criterios.ind_lcto)}")
+            partes.append(
+                f"Tipo lançamento: {', '.join(lcto_map.get(t, t) for t in criterios.ind_lcto)}"
+            )
         if criterios.cod_part:
             partes.append(f"Participante: {', '.join(criterios.cod_part)}")
         if criterios.ocultar_sem_movimento:

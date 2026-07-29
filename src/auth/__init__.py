@@ -6,11 +6,11 @@ Fase 12: +MultiTenantMiddleware com isolamento por escritório via contextvars.
 import contextvars
 import datetime
 import logging
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable
 
-from fastapi import Cookie, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import HTTPException, Request
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -63,7 +63,7 @@ class TenantFilter:
         if tid is None:
             return stmt
 
-        from src.db.models import ECD, Empresa, Escritorio, Usuario
+        from src.db.models import ECD, Empresa, Usuario
 
         # Modelos com escritorio_id direto
         if model_class in (Empresa, Usuario):
@@ -78,13 +78,16 @@ class TenantFilter:
         # Para outros modelos que pertencem a uma ECD (PlanoConta, Lancamento, etc.)
         # o filtro é aplicado via ECD → Empresa
         if hasattr(model_class, "ecd_id"):
-            return stmt.join(ECD, model_class.ecd_id == ECD.id).join(
-                Empresa, ECD.empresa_id == Empresa.id
-            ).where(Empresa.escritorio_id == tid)
+            return (
+                stmt.join(ECD, model_class.ecd_id == ECD.id)
+                .join(Empresa, ECD.empresa_id == Empresa.id)
+                .where(Empresa.escritorio_id == tid)
+            )
 
         # Para modelos que pertencem a Lancamento (Partida)
         if hasattr(model_class, "lancamento_id"):
             from src.db.models import Lancamento
+
             return (
                 stmt.join(Lancamento, model_class.lancamento_id == Lancamento.id)
                 .join(ECD, Lancamento.ecd_id == ECD.id)
@@ -166,19 +169,21 @@ class AuthService:
         """Migra instalações antigas promovendo o usuário mais antigo uma vez."""
         session = self._get_session()
         try:
-            users = session.execute(
-                select(Usuario).order_by(Usuario.criado_em.asc(), Usuario.id.asc())
-            ).scalars().all()
+            users = (
+                session.execute(select(Usuario).order_by(Usuario.criado_em.asc(), Usuario.id.asc()))
+                .scalars()
+                .all()
+            )
             if users and not any(user.admin for user in users):
                 users[0].admin = True
                 session.commit()
-                logger.warning(
-                    "Instalação sem administrador: usuário #%d promovido", users[0].id
-                )
+                logger.warning("Instalação sem administrador: usuário #%d promovido", users[0].id)
         finally:
             session.close()
 
-    def registrar(self, email: str, nome: str, senha: str, escritorio_id: int | None = None) -> Usuario:
+    def registrar(
+        self, email: str, nome: str, senha: str, escritorio_id: int | None = None
+    ) -> Usuario:
         """Registra um novo usuário."""
         session = self._get_session()
         try:
@@ -189,9 +194,7 @@ class AuthService:
                 raise ValueError("Email já cadastrado")
 
             senha_hash, salt = Usuario.hash_senha(senha)
-            is_first_user = (
-                session.execute(select(func.count(Usuario.id))).scalar_one() == 0
-            )
+            is_first_user = session.execute(select(func.count(Usuario.id))).scalar_one() == 0
             usuario = Usuario(
                 email=email,
                 nome=nome,
@@ -207,7 +210,9 @@ class AuthService:
         finally:
             session.close()
 
-    def login(self, email: str, senha: str, ip: str = "", user_agent: str = "") -> tuple[Usuario, str]:
+    def login(
+        self, email: str, senha: str, ip: str = "", user_agent: str = ""
+    ) -> tuple[Usuario, str]:
         """Autentica usuário e retorna token de sessão."""
         session = self._get_session()
         try:
@@ -278,9 +283,13 @@ class AuthService:
         """Lista empresas associadas ao usuário."""
         session = self._get_session()
         try:
-            result = session.execute(
-                select(UsuarioEmpresa).where(UsuarioEmpresa.usuario_id == usuario_id)
-            ).scalars().all()
+            result = (
+                session.execute(
+                    select(UsuarioEmpresa).where(UsuarioEmpresa.usuario_id == usuario_id)
+                )
+                .scalars()
+                .all()
+            )
             return [
                 {
                     "empresa_id": ue.empresa_id,
@@ -345,11 +354,7 @@ def usuario_pode_acessar_ecd(session: Session, usuario: Usuario, ecd_id: int) ->
 
     from src.db.models import ECD, Empresa
 
-    stmt = (
-        select(ECD.id)
-        .join(Empresa, ECD.empresa_id == Empresa.id)
-        .where(ECD.id == ecd_id)
-    )
+    stmt = select(ECD.id).join(Empresa, ECD.empresa_id == Empresa.id).where(ECD.id == ecd_id)
     stmt = aplicar_escopo_empresas(stmt, usuario)
     return session.execute(stmt).scalar_one_or_none() is not None
 
@@ -360,6 +365,7 @@ def requer_autenticacao(redirect: bool = True):
     Se redirect=True, redireciona para /login.
     Se redirect=False, retorna 401 JSON (para APIs).
     """
+
     def decorator(func: Callable):
         @wraps(func)
         async def wrapper(request: Request, *args, **kwargs):
@@ -373,5 +379,7 @@ def requer_autenticacao(redirect: bool = True):
             # Define tenant no contexto (Fase 12)
             set_tenant_id(usuario.escritorio_id)
             return await func(request, *args, **kwargs)
+
         return wrapper
+
     return decorator

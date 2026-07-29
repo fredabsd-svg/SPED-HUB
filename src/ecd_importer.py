@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
+    ECD,
     Aglutinacao,
     CentroCusto,
     ContaReferencial,
-    ECD,
     Empresa,
     HistoricoPadrao,
     Lancamento,
@@ -148,7 +148,12 @@ class ECDImportService:
 
         def ensure_context() -> tuple[Empresa, ECD, datetime.date, datetime.date]:
             nonlocal empresa, ecd, dt_ini, dt_fin
-            if ecd is not None and empresa is not None and dt_ini is not None and dt_fin is not None:
+            if (
+                ecd is not None
+                and empresa is not None
+                and dt_ini is not None
+                and dt_fin is not None
+            ):
                 return empresa, ecd, dt_ini, dt_fin
             if header_0000 is None:
                 raise ECDImportError("Arquivo não contém registro 0000")
@@ -166,9 +171,9 @@ class ECDImportService:
                 "nome": header_0000.get("NOME") or "",
                 "uf": header_0000.get("UF") or None,
                 "ie": header_0000.get("IE") or None,
-                "cod_mun": _digits(header_0000.get("COD_MUN"), 7)
-                if header_0000.get("COD_MUN")
-                else None,
+                "cod_mun": (
+                    _digits(header_0000.get("COD_MUN"), 7) if header_0000.get("COD_MUN") else None
+                ),
                 "im": header_0000.get("IM") or None,
                 "ind_sit_esp": _optional_int(header_0000.get("IND_SIT_ESP")),
                 "ind_nire": _optional_int(header_0000.get("IND_NIRE")),
@@ -259,9 +264,11 @@ class ECDImportService:
                         cod_nat=record.get("COD_NAT") or "01",
                         ind_cta=record.get("IND_CTA") or "A",
                         nivel=int(record.get("NIVEL") or 0),
-                        dt_alt=_date(record.get("DT_ALT"), start_date)
-                        if record.get("DT_ALT")
-                        else None,
+                        dt_alt=(
+                            _date(record.get("DT_ALT"), start_date)
+                            if record.get("DT_ALT")
+                            else None
+                        ),
                     )
                     self.session.add(account)
                     self.session.flush()
@@ -302,9 +309,11 @@ class ECDImportService:
                             ecd_id=current_ecd.id,
                             cod_ccus=record.get("COD_CCUS") or "",
                             ccus=record.get("CCUS") or "",
-                            dt_alt=_date(record.get("DT_ALT"), start_date)
-                            if record.get("DT_ALT")
-                            else None,
+                            dt_alt=(
+                                _date(record.get("DT_ALT"), start_date)
+                                if record.get("DT_ALT")
+                                else None
+                            ),
                         )
                     )
                 elif record_type == "I155":
@@ -353,9 +362,7 @@ class ECDImportService:
                             )
                         ).scalar_one_or_none()
                     if launch_id is None:
-                        raise ECDImportError(
-                            f"I250 sem I200 pai na linha {record.get('_linha')}"
-                        )
+                        raise ECDImportError(f"I250 sem I200 pai na linha {record.get('_linha')}")
                     self.session.add(
                         Partida(
                             lancamento_id=launch_id,

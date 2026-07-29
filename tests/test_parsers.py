@@ -1,12 +1,8 @@
 """Testes do parser ECD."""
 
-import datetime
 from pathlib import Path
 
-import pytest
-
 from src.parsers.ecd import ECDParser, detectar_encoding
-
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ecd_sample.txt"
 

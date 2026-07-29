@@ -5,9 +5,7 @@ Fornece dados agregados para KPIs, gráficos e visualizações interativas.
 Fase 6: +evolução multi-período, +notas explicativas automáticas.
 """
 
-import datetime
 from dataclasses import dataclass, field
-from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -16,16 +14,14 @@ from src.db.models import (
     ECD,
     Empresa,
     Lancamento,
-    Partida,
     PlanoConta,
     SaldoPeriodico,
-    SaldoResultado,
 )
-from src.filters.engine import FilterCriteria, FilterEngine
+from src.filters.engine import FilterEngine
 from src.reports.balanco import BalancoPatrimonial
-from src.reports.dre import DRE
+from src.reports.base import saldo_por_natureza, valor_sinalizado
 from src.reports.dfc import DFC
-from src.reports.base import valor_sinalizado, saldo_por_natureza
+from src.reports.dre import DRE
 
 
 @dataclass
@@ -76,13 +72,19 @@ class DashboardService:
         dre = DRE(self.session, self.ecd_id)
         _, linhas_dre, totais_dre = dre.gerar()
 
-        num_lancs = self.session.execute(
-            select(func.count(Lancamento.id)).where(Lancamento.ecd_id == self.ecd_id)
-        ).scalar() or 0
+        num_lancs = (
+            self.session.execute(
+                select(func.count(Lancamento.id)).where(Lancamento.ecd_id == self.ecd_id)
+            ).scalar()
+            or 0
+        )
 
-        num_contas = self.session.execute(
-            select(func.count(PlanoConta.id)).where(PlanoConta.ecd_id == self.ecd_id)
-        ).scalar() or 0
+        num_contas = (
+            self.session.execute(
+                select(func.count(PlanoConta.id)).where(PlanoConta.ecd_id == self.ecd_id)
+            ).scalar()
+            or 0
+        )
 
         kpis = self._calcular_kpis(totais, totais_dre, num_lancs, num_contas)
 
@@ -109,39 +111,88 @@ class DashboardService:
         receita_bruta = totais_dre.get("receita_bruta", 0.0)
         resultado = totais_dre.get("resultado_liquido", 0.0)
 
-        kpis.append(KPICard(titulo="Ativo Total", valor=ativo, formato="moeda",
-                            tendencia="neutro", descricao="Total de bens e direitos", icone="💰"))
-        kpis.append(KPICard(titulo="Patrimônio Líquido", valor=pl, formato="moeda",
-                            tendencia="up" if pl > 0 else "down", descricao="Capital próprio da empresa", icone="🏛️"))
+        kpis.append(
+            KPICard(
+                titulo="Ativo Total",
+                valor=ativo,
+                formato="moeda",
+                tendencia="neutro",
+                descricao="Total de bens e direitos",
+                icone="💰",
+            )
+        )
+        kpis.append(
+            KPICard(
+                titulo="Patrimônio Líquido",
+                valor=pl,
+                formato="moeda",
+                tendencia="up" if pl > 0 else "down",
+                descricao="Capital próprio da empresa",
+                icone="🏛️",
+            )
+        )
 
         if ativo > 0:
             endividamento = (passivo / ativo) * 100
-            kpis.append(KPICard(titulo="Endividamento", valor=endividamento, formato="percentual",
-                                tendencia="down" if endividamento < 60 else "up",
-                                descricao="Passivo ÷ Ativo Total", icone="📊"))
+            kpis.append(
+                KPICard(
+                    titulo="Endividamento",
+                    valor=endividamento,
+                    formato="percentual",
+                    tendencia="down" if endividamento < 60 else "up",
+                    descricao="Passivo ÷ Ativo Total",
+                    icone="📊",
+                )
+            )
 
-        kpis.append(KPICard(titulo="Resultado Líquido", valor=resultado, formato="moeda",
-                            tendencia="up" if resultado > 0 else "down",
-                            descricao="Lucro ou prejuízo do período", icone="📈"))
+        kpis.append(
+            KPICard(
+                titulo="Resultado Líquido",
+                valor=resultado,
+                formato="moeda",
+                tendencia="up" if resultado > 0 else "down",
+                descricao="Lucro ou prejuízo do período",
+                icone="📈",
+            )
+        )
 
         if receita_bruta > 0:
             margem = (resultado / receita_bruta) * 100
-            kpis.append(KPICard(titulo="Margem Líquida", valor=margem, formato="percentual",
-                                tendencia="up" if margem > 10 else "neutro",
-                                descricao="Resultado ÷ Receita Bruta", icone="🎯"))
+            kpis.append(
+                KPICard(
+                    titulo="Margem Líquida",
+                    valor=margem,
+                    formato="percentual",
+                    tendencia="up" if margem > 10 else "neutro",
+                    descricao="Resultado ÷ Receita Bruta",
+                    icone="🎯",
+                )
+            )
 
-        kpis.append(KPICard(titulo="Lançamentos", valor=num_lancs, formato="inteiro",
-                            tendencia="neutro", descricao="Total de lançamentos contábeis", icone="📝"))
+        kpis.append(
+            KPICard(
+                titulo="Lançamentos",
+                valor=num_lancs,
+                formato="inteiro",
+                tendencia="neutro",
+                descricao="Total de lançamentos contábeis",
+                icone="📝",
+            )
+        )
 
         return kpis
 
     def get_evolucao_patrimonial(self) -> dict:
         """Dados para gráfico de evolução patrimonial (Ativo vs Passivo+PL)."""
-        saldos = self.session.execute(
-            select(SaldoPeriodico)
-            .where(SaldoPeriodico.ecd_id == self.ecd_id)
-            .order_by(SaldoPeriodico.dt_ini)
-        ).scalars().all()
+        saldos = (
+            self.session.execute(
+                select(SaldoPeriodico)
+                .where(SaldoPeriodico.ecd_id == self.ecd_id)
+                .order_by(SaldoPeriodico.dt_ini)
+            )
+            .scalars()
+            .all()
+        )
 
         periodos: dict[str, dict[str, float]] = {}
         for s in saldos:
@@ -186,13 +237,17 @@ class DashboardService:
             return None
 
         # Busca todas as ECDs da mesma empresa, ordenadas por data
-        ecds = self.session.execute(
-            select(ECD)
-            .where(
-                ECD.empresa_id == ecd.empresa_id,
+        ecds = (
+            self.session.execute(
+                select(ECD)
+                .where(
+                    ECD.empresa_id == ecd.empresa_id,
+                )
+                .order_by(ECD.dt_ini.asc())
             )
-            .order_by(ECD.dt_ini.asc())
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         if len(ecds) < 2:
             return None
@@ -254,9 +309,11 @@ class DashboardService:
             ).scalars()
         }
 
-        saldos = self.session.execute(
-            select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == self.ecd_id)
-        ).scalars().all()
+        saldos = (
+            self.session.execute(select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == self.ecd_id))
+            .scalars()
+            .all()
+        )
 
         saldo_por_conta: dict[str, float] = {}
         for s in saldos:
@@ -265,34 +322,38 @@ class DashboardService:
 
         # Nota 1: Contexto operacional
         empresa = self.session.get(Empresa, ecd.empresa_id) if ecd.empresa_id else None
-        notas.append({
-            "numero": 1,
-            "titulo": "Contexto Operacional",
-            "texto": (
-                f"A empresa {empresa.nome if empresa else 'N/I'}, inscrita no CNPJ "
-                f"{empresa.cnpj if empresa else 'N/I'}, tem por objeto social a prestação "
-                f"de serviços e atividades correlatas. As demonstrações contábeis do "
-                f"exercício findo em {ecd.dt_fin} foram elaboradas conforme as práticas "
-                f"contábeis brasileiras (NBC TG)."
-            ),
-            "valor": 0.0,
-            "tipo": "contexto",
-        })
+        notas.append(
+            {
+                "numero": 1,
+                "titulo": "Contexto Operacional",
+                "texto": (
+                    f"A empresa {empresa.nome if empresa else 'N/I'}, inscrita no CNPJ "
+                    f"{empresa.cnpj if empresa else 'N/I'}, tem por objeto social a prestação "
+                    f"de serviços e atividades correlatas. As demonstrações contábeis do "
+                    f"exercício findo em {ecd.dt_fin} foram elaboradas conforme as práticas "
+                    f"contábeis brasileiras (NBC TG)."
+                ),
+                "valor": 0.0,
+                "tipo": "contexto",
+            }
+        )
 
         # Nota 2: Principais práticas contábeis
-        notas.append({
-            "numero": 2,
-            "titulo": "Principais Práticas Contábeis",
-            "texto": (
-                "As demonstrações contábeis foram elaboradas com base no custo histórico. "
-                "Os principais critérios adotados incluem: (a) disponibilidades — avaliadas "
-                "pelo custo acrescido de rendimentos; (b) contas a receber — valor nominal "
-                "com provisão para perdas; (c) imobilizado — custo de aquisição deduzido "
-                "da depreciação acumulada calculada pelo método linear."
-            ),
-            "valor": 0.0,
-            "tipo": "praticas",
-        })
+        notas.append(
+            {
+                "numero": 2,
+                "titulo": "Principais Práticas Contábeis",
+                "texto": (
+                    "As demonstrações contábeis foram elaboradas com base no custo histórico. "
+                    "Os principais critérios adotados incluem: (a) disponibilidades — avaliadas "
+                    "pelo custo acrescido de rendimentos; (b) contas a receber — valor nominal "
+                    "com provisão para perdas; (c) imobilizado — custo de aquisição deduzido "
+                    "da depreciação acumulada calculada pelo método linear."
+                ),
+                "valor": 0.0,
+                "tipo": "praticas",
+            }
+        )
 
         # Nota 3: Capital Social
         capital_social = 0.0
@@ -303,7 +364,6 @@ class DashboardService:
 
         if capital_social > 0:
             # Verifica se houve alteração (comparar com período anterior)
-            ecd_ant_id = None
             ecds_ant = self.session.execute(
                 select(ECD)
                 .where(
@@ -317,9 +377,13 @@ class DashboardService:
 
             capital_anterior = 0.0
             if ecds_ant:
-                saldos_ant = self.session.execute(
-                    select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecds_ant.id)
-                ).scalars().all()
+                saldos_ant = (
+                    self.session.execute(
+                        select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecds_ant.id)
+                    )
+                    .scalars()
+                    .all()
+                )
                 for s in saldos_ant:
                     if s.cod_cta in plano:
                         nome_ant = plano[s.cod_cta].nome_cta.upper()
@@ -329,35 +393,50 @@ class DashboardService:
             if capital_anterior > 0 and abs(capital_social - capital_anterior) > 0.01:
                 variacao = capital_social - capital_anterior
                 acao = "aumento" if variacao > 0 else "redução"
-                notas.append({
-                    "numero": 3,
-                    "titulo": "Capital Social",
-                    "texto": (
-                        f"O Capital Social, no valor de R$ {capital_social:,.2f}, sofreu "
-                        f"{acao} de R$ {abs(variacao):,.2f} no exercício, passando de "
-                        f"R$ {capital_anterior:,.2f} para R$ {capital_social:,.2f}."
-                    ),
-                    "valor": capital_social,
-                    "tipo": "capital",
-                })
+                notas.append(
+                    {
+                        "numero": 3,
+                        "titulo": "Capital Social",
+                        "texto": (
+                            f"O Capital Social, no valor de R$ {capital_social:,.2f}, sofreu "
+                            f"{acao} de R$ {abs(variacao):,.2f} no exercício, passando de "
+                            f"R$ {capital_anterior:,.2f} para R$ {capital_social:,.2f}."
+                        ),
+                        "valor": capital_social,
+                        "tipo": "capital",
+                    }
+                )
             else:
-                notas.append({
-                    "numero": 3,
-                    "titulo": "Capital Social",
-                    "texto": (
-                        f"O Capital Social é de R$ {capital_social:,.2f}, totalmente "
-                        f"integralizado, representado por quotas de valor nominal unitário."
-                    ),
-                    "valor": capital_social,
-                    "tipo": "capital",
-                })
+                notas.append(
+                    {
+                        "numero": 3,
+                        "titulo": "Capital Social",
+                        "texto": (
+                            f"O Capital Social é de R$ {capital_social:,.2f}, totalmente "
+                            f"integralizado, representado por quotas de valor nominal unitário."
+                        ),
+                        "valor": capital_social,
+                        "tipo": "capital",
+                    }
+                )
 
         # Nota 4: Imobilizado (se relevante)
         imob_contas = []
         for cod_cta, pc in plano.items():
             nome = pc.nome_cta.upper()
-            if any(t in nome for t in ["IMOBILIZADO", "MÁQUINAS", "EQUIPAMENTO", "VEÍCULO", "MÓVEIS",
-                                         "IMÓVEL", "EDIFÍCIO", "TERRENO"]):
+            if any(
+                t in nome
+                for t in [
+                    "IMOBILIZADO",
+                    "MÁQUINAS",
+                    "EQUIPAMENTO",
+                    "VEÍCULO",
+                    "MÓVEIS",
+                    "IMÓVEL",
+                    "EDIFÍCIO",
+                    "TERRENO",
+                ]
+            ):
                 vl = abs(saldo_por_conta.get(cod_cta, 0.0))
                 if vl > 0:
                     imob_contas.append((pc.nome_cta, vl))
@@ -366,31 +445,35 @@ class DashboardService:
             total_imob = sum(v for _, v in imob_contas)
             if total_imob > 0:
                 itens = "; ".join(f"{n}: R$ {v:,.2f}" for n, v in imob_contas[:5])
-                notas.append({
-                    "numero": len(notas) + 1,
-                    "titulo": "Imobilizado",
-                    "texto": (
-                        f"O ativo imobilizado totaliza R$ {total_imob:,.2f}, composto por: "
-                        f"{itens}. A depreciação é calculada pelo método linear às taxas "
-                        f"fiscais permitidas."
-                    ),
-                    "valor": total_imob,
-                    "tipo": "imobilizado",
-                })
+                notas.append(
+                    {
+                        "numero": len(notas) + 1,
+                        "titulo": "Imobilizado",
+                        "texto": (
+                            f"O ativo imobilizado totaliza R$ {total_imob:,.2f}, composto por: "
+                            f"{itens}. A depreciação é calculada pelo método linear às taxas "
+                            f"fiscais permitidas."
+                        ),
+                        "valor": total_imob,
+                        "tipo": "imobilizado",
+                    }
+                )
 
         # Nota 5: Eventos subsequentes
-        notas.append({
-            "numero": len(notas) + 1,
-            "titulo": "Eventos Subsequentes",
-            "texto": (
-                f"Não ocorreram eventos subsequentes entre a data de encerramento do "
-                f"exercício ({ecd.dt_fin}) e a data de elaboração destas demonstrações "
-                f"contábeis que pudessem afetar significativamente a posição patrimonial "
-                f"e financeira da empresa."
-            ),
-            "valor": 0.0,
-            "tipo": "eventos",
-        })
+        notas.append(
+            {
+                "numero": len(notas) + 1,
+                "titulo": "Eventos Subsequentes",
+                "texto": (
+                    f"Não ocorreram eventos subsequentes entre a data de encerramento do "
+                    f"exercício ({ecd.dt_fin}) e a data de elaboração destas demonstrações "
+                    f"contábeis que pudessem afetar significativamente a posição patrimonial "
+                    f"e financeira da empresa."
+                ),
+                "valor": 0.0,
+                "tipo": "eventos",
+            }
+        )
 
         return notas
 
@@ -430,10 +513,10 @@ class DashboardService:
 
         labels = []
         valores = []
-        for l in linhas:
-            if l.tipo in ("step", "subtotal", "total"):
-                labels.append(l.descricao)
-                valores.append(l.valor_atual)
+        for ln in linhas:
+            if ln.tipo in ("step", "subtotal", "total"):
+                labels.append(ln.descricao)
+                valores.append(ln.valor_atual)
 
         return {"labels": labels, "valores": valores}
 
@@ -444,10 +527,10 @@ class DashboardService:
 
         labels = []
         valores = []
-        for l in linhas:
-            if l.tipo in ("step", "subtotal", "total"):
-                labels.append(l.descricao)
-                valores.append(l.valor)
+        for ln in linhas:
+            if ln.tipo in ("step", "subtotal", "total"):
+                labels.append(ln.descricao)
+                valores.append(ln.valor)
 
         return {"labels": labels, "valores": valores, "totais": totais}
 
@@ -459,9 +542,7 @@ class DashboardService:
                 stmt = stmt.where(Empresa.escritorio_id.is_(None))
             else:
                 stmt = stmt.where(Empresa.escritorio_id == usuario.escritorio_id)
-        ecds = self.session.execute(
-            stmt.order_by(ECD.importado_em.desc()).limit(5)
-        ).all()
+        ecds = self.session.execute(stmt.order_by(ECD.importado_em.desc()).limit(5)).all()
 
         if len(ecds) < 2:
             return None
@@ -489,7 +570,6 @@ class DashboardService:
             "resultados": resultados,
         }
 
-
     def get_multi_ecd_comparison(self, ecd_ids: list[int]) -> dict | None:
         """Comparação lado a lado de múltiplas ECDs (Fase 7).
 
@@ -512,15 +592,28 @@ class DashboardService:
 
         ecds_data = []
         balanco_data: dict[str, list] = {"labels": [], "ativo": [], "passivo": [], "pl": []}
-        dre_data: dict[str, list] = {"labels": [], "receita_bruta": [], "resultado_liquido": [], "margem": []}
-        dfc_data: dict[str, list] = {"labels": [], "operacional": [], "investimento": [], "financiamento": [], "variacao": []}
+        dre_data: dict[str, list] = {
+            "labels": [],
+            "receita_bruta": [],
+            "resultado_liquido": [],
+            "margem": [],
+        }
+        dfc_data: dict[str, list] = {
+            "labels": [],
+            "operacional": [],
+            "investimento": [],
+            "financiamento": [],
+            "variacao": [],
+        }
 
         for ecd_id in ecd_ids:
             ecd = self.session.get(ECD, ecd_id)
             if not ecd:
                 continue
             empresa = self.session.get(Empresa, ecd.empresa_id)
-            label = f"{empresa.nome[:20] if empresa else '?'} {ecd.dt_ini.year if ecd.dt_ini else ''}"
+            label = (
+                f"{empresa.nome[:20] if empresa else '?'} {ecd.dt_ini.year if ecd.dt_ini else ''}"
+            )
 
             # Balanço
             balanco = BalancoPatrimonial(self.session, ecd_id)
@@ -550,11 +643,13 @@ class DashboardService:
             dfc_data["financiamento"].append(totais_f.get("financiamento", 0.0))
             dfc_data["variacao"].append(totais_f.get("variacao_caixa", 0.0))
 
-            ecds_data.append({
-                "id": ecd_id,
-                "empresa": empresa.nome if empresa else "",
-                "periodo": f"{ecd.dt_ini} a {ecd.dt_fin}",
-            })
+            ecds_data.append(
+                {
+                    "id": ecd_id,
+                    "empresa": empresa.nome if empresa else "",
+                    "periodo": f"{ecd.dt_ini} a {ecd.dt_fin}",
+                }
+            )
 
         return {
             "ecds": ecds_data,
@@ -619,9 +714,7 @@ class DashboardService:
                 stmt = stmt.where(Empresa.escritorio_id.is_(None))
             else:
                 stmt = stmt.where(Empresa.escritorio_id == usuario.escritorio_id)
-        ecds = self.session.execute(
-            stmt.order_by(ECD.importado_em.desc())
-        ).all()
+        ecds = self.session.execute(stmt.order_by(ECD.importado_em.desc())).all()
 
         return [
             {

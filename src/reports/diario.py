@@ -4,19 +4,17 @@ Formato formal com termos de abertura/encerramento, lançamentos numerados
 sequencialmente com partidas, totais e conferência.
 """
 
-import datetime
 from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import Lancamento, Partida, PlanoConta
+from src.db.models import PlanoConta
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
     fmt_data,
-    fmt_moeda,
     valor_sinalizado,
 )
 

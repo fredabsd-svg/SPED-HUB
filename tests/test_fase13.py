@@ -7,46 +7,32 @@ Cobre:
 """
 
 import datetime
-import json
 import os
 import tempfile
 import time
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select, func
+from sqlalchemy import select
 
-from src.version import APP_VERSION
+from src.api import ApiKeyService
+from src.audit import AuditService, init_audit_service
 from src.db.models import (
     ApiKey,
     AuditLog,
-    ECD,
-    Empresa,
-    Escritorio,
-    Lancamento,
-    Partida,
-    PlanoConta,
     RateLimitConfig,
-    SaldoPeriodico,
-    Usuario,
     criar_engine,
     get_session,
     init_db,
 )
-from src.db.repository import Repository
 from src.ratelimit import (
+    DEFAULT_JANELA,
+    DEFAULT_LIMITE,
     RateLimiter,
     RateLimitService,
-    RateLimitInfo,
-    DEFAULT_LIMITE,
-    DEFAULT_JANELA,
-    get_limiter,
     init_limiter,
 )
-from src.audit import AuditService, get_audit_service, init_audit_service
-from src.api import ApiKeyService, gerar_api_key, _hash_key
-
+from src.version import APP_VERSION
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -81,9 +67,7 @@ def api_key_record(db_path):
     init_db(engine)
     sess = get_session(engine)
     try:
-        key = sess.execute(
-            select(ApiKey).where(ApiKey.id == result["id"])
-        ).scalar_one()
+        key = sess.execute(select(ApiKey).where(ApiKey.id == result["id"])).scalar_one()
         return key, result["chave"]
     finally:
         sess.close()
@@ -369,6 +353,7 @@ class TestAuditService:
         """Registra log vinculado a usuário."""
         # Cria usuário
         from src.auth import AuthService
+
         auth = AuthService(db_path)
         usuario = auth.registrar(email="test@audit.com", nome="Test", senha="senha123")
 
@@ -400,7 +385,7 @@ class TestAuditService:
 
         logs = svc.listar(acao="auth.login")
         assert len(logs) == 2
-        assert all(l["acao"] == "auth.login" for l in logs)
+        assert all(ln["acao"] == "auth.login" for ln in logs)
 
     def test_listar_filtro_usuario(self, db_path):
         """Filtra logs por usuário."""
@@ -411,7 +396,7 @@ class TestAuditService:
 
         logs = svc.listar(usuario_id=1)
         assert len(logs) == 2
-        assert all(l["usuario_id"] == 1 for l in logs)
+        assert all(ln["usuario_id"] == 1 for ln in logs)
 
     def test_listar_paginacao(self, db_path):
         """Testa paginação na listagem."""
@@ -424,8 +409,8 @@ class TestAuditService:
         assert len(pagina1) == 5
         assert len(pagina2) == 5
         # Não deve haver sobreposição
-        ids1 = {l["id"] for l in pagina1}
-        ids2 = {l["id"] for l in pagina2}
+        ids1 = {ln["id"] for ln in pagina1}
+        ids2 = {ln["id"] for ln in pagina2}
         assert ids1.isdisjoint(ids2)
 
     def test_contar(self, db_path):
@@ -555,14 +540,13 @@ class TestE2EAuth:
     def test_registro_e_login(self, db_path):
         """Fluxo completo: registro → login → acesso → logout."""
         import os
-        os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
+        os.environ["SPED_HUB_DB"] = db_path
 
         # Inicializa serviços com o DB de teste
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -570,19 +554,25 @@ class TestE2EAuth:
         client = TestClient(app)
 
         # Registro
-        resp = client.post("/api/register", data={
-            "email": "e2e@test.com",
-            "nome": "E2E User",
-            "senha": "senha123",
-        })
+        resp = client.post(
+            "/api/register",
+            data={
+                "email": "e2e@test.com",
+                "nome": "E2E User",
+                "senha": "senha123",
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
         # Login
-        resp = client.post("/api/login", data={
-            "email": "e2e@test.com",
-            "senha": "senha123",
-        })
+        resp = client.post(
+            "/api/login",
+            data={
+                "email": "e2e@test.com",
+                "senha": "senha123",
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
@@ -603,12 +593,12 @@ class TestE2EAuth:
     def test_login_falho_registra_auditoria(self, db_path):
         """Login falho é registrado na auditoria."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -616,10 +606,13 @@ class TestE2EAuth:
         client = TestClient(app)
 
         # Login com senha errada
-        resp = client.post("/api/login", data={
-            "email": "naoexiste@test.com",
-            "senha": "errada",
-        })
+        resp = client.post(
+            "/api/login",
+            data={
+                "email": "naoexiste@test.com",
+                "senha": "errada",
+            },
+        )
         assert resp.status_code == 401
 
         # Verifica auditoria
@@ -637,12 +630,12 @@ class TestE2EAPI:
     def test_api_com_api_key(self, db_path):
         """Acesso à API com API Key válida."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -678,12 +671,12 @@ class TestE2EAPI:
     def test_api_rate_limit_429(self, db_path):
         """API retorna 429 quando rate limit é excedido."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -720,12 +713,12 @@ class TestE2EAPI:
     def test_api_auditoria_registrada(self, db_path):
         """Acessos à API são registrados na auditoria."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -734,7 +727,6 @@ class TestE2EAPI:
         svc = ApiKeyService(db_path)
         result = svc.criar(nome="Audit Test Key")
         chave = result["chave"]
-        key_id = result["id"]
 
         client = TestClient(app)
 
@@ -761,12 +753,12 @@ class TestE2EAuditDashboard:
     def test_pagina_auditoria_requer_auth(self, db_path):
         """Página de auditoria requer autenticação."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -782,12 +774,12 @@ class TestE2EAuditDashboard:
     def test_api_audit_logs_requer_auth(self, db_path):
         """Endpoint de logs de auditoria requer autenticação."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -803,12 +795,12 @@ class TestE2EAuditDashboard:
     def test_fluxo_auditoria_completo(self, db_path):
         """Fluxo completo: login → acessa auditoria → vê logs."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -816,15 +808,21 @@ class TestE2EAuditDashboard:
         client = TestClient(app)
 
         # Registro + Login
-        client.post("/api/register", data={
-            "email": "audit@test.com",
-            "nome": "Audit User",
-            "senha": "senha123",
-        })
-        client.post("/api/login", data={
-            "email": "audit@test.com",
-            "senha": "senha123",
-        })
+        client.post(
+            "/api/register",
+            data={
+                "email": "audit@test.com",
+                "nome": "Audit User",
+                "senha": "senha123",
+            },
+        )
+        client.post(
+            "/api/login",
+            data={
+                "email": "audit@test.com",
+                "senha": "senha123",
+            },
+        )
 
         # Acessa página de auditoria
         resp = client.get("/auditoria")
@@ -855,12 +853,12 @@ class TestE2ERateLimitConfig:
     def test_configurar_rate_limit_via_api(self, db_path):
         """Configura rate limit via endpoint da API."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -895,7 +893,9 @@ class TestE2ERateLimitConfig:
         assert resp.json()["default"] is False
 
         # Status do rate limit
-        resp = client.get(f"/api/v1/api-keys/{key_id}/rate-limit/status", headers={"X-API-Key": chave})
+        resp = client.get(
+            f"/api/v1/api-keys/{key_id}/rate-limit/status", headers={"X-API-Key": chave}
+        )
         assert resp.status_code == 200
         assert resp.json()["limite"] == 50
         assert resp.json()["requisicoes_restantes"] <= 50
@@ -905,12 +905,12 @@ class TestE2ERateLimitConfig:
     def test_remover_rate_limit_via_api(self, db_path):
         """Remove configuração de rate limit via API."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
         from src.auth import init_auth
-        from src.audit import init_audit_service
-        from src.ratelimit import init_limiter
+        from src.dashboard.app import app
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)

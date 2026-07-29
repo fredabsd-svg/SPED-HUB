@@ -23,9 +23,7 @@ Eventos capturados:
 """
 
 import datetime
-import json
 import logging
-from typing import Any, Optional
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -197,9 +195,12 @@ class AuditService:
             agora = datetime.datetime.now(datetime.UTC)
             inicio = agora - datetime.timedelta(hours=horas)
 
-            total = session.execute(
-                select(func.count(AuditLog.id)).where(AuditLog.criado_em >= inicio)
-            ).scalar() or 0
+            total = (
+                session.execute(
+                    select(func.count(AuditLog.id)).where(AuditLog.criado_em >= inicio)
+                ).scalar()
+                or 0
+            )
 
             # Por ação
             por_acao_raw = session.execute(
@@ -219,25 +220,34 @@ class AuditService:
             por_status = {str(status or "N/A"): count for status, count in por_status_raw}
 
             # Usuários únicos
-            usuarios_unicos = session.execute(
-                select(func.count(func.distinct(AuditLog.usuario_id)))
-                .where(AuditLog.criado_em >= inicio)
-                .where(AuditLog.usuario_id.isnot(None))
-            ).scalar() or 0
+            usuarios_unicos = (
+                session.execute(
+                    select(func.count(func.distinct(AuditLog.usuario_id)))
+                    .where(AuditLog.criado_em >= inicio)
+                    .where(AuditLog.usuario_id.isnot(None))
+                ).scalar()
+                or 0
+            )
 
             # IPs únicos
-            ips_unicos = session.execute(
-                select(func.count(func.distinct(AuditLog.ip)))
-                .where(AuditLog.criado_em >= inicio)
-                .where(AuditLog.ip.isnot(None))
-            ).scalar() or 0
+            ips_unicos = (
+                session.execute(
+                    select(func.count(func.distinct(AuditLog.ip)))
+                    .where(AuditLog.criado_em >= inicio)
+                    .where(AuditLog.ip.isnot(None))
+                ).scalar()
+                or 0
+            )
 
             # Erros (4xx, 5xx)
-            erros = session.execute(
-                select(func.count(AuditLog.id))
-                .where(AuditLog.criado_em >= inicio)
-                .where(AuditLog.status_code >= 400)
-            ).scalar() or 0
+            erros = (
+                session.execute(
+                    select(func.count(AuditLog.id))
+                    .where(AuditLog.criado_em >= inicio)
+                    .where(AuditLog.status_code >= 400)
+                ).scalar()
+                or 0
+            )
 
             return {
                 "janela_horas": horas,
@@ -263,9 +273,9 @@ class AuditService:
         session = self._get_session()
         try:
             limite = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=dias)
-            logs_antigos = session.execute(
-                select(AuditLog).where(AuditLog.criado_em < limite)
-            ).scalars().all()
+            logs_antigos = (
+                session.execute(select(AuditLog).where(AuditLog.criado_em < limite)).scalars().all()
+            )
 
             count = len(logs_antigos)
             for log in logs_antigos:

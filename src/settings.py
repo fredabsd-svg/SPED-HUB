@@ -18,13 +18,12 @@ Para sobrescrever em testes, basta ajustar o ambiente ou a função
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Mapping
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_CACHE: dict[tuple, "Settings"] = {}
+_CACHE: dict[tuple, Settings] = {}
 
 
 def _coerce_bool(value: str | bool | None, default: bool = False) -> bool:
@@ -119,7 +118,7 @@ class Settings:
         if not self.is_sqlite:
             return None
         prefix = "sqlite:///"
-        url = self.database_url[len(prefix):]
+        url = self.database_url[len(prefix) :]
         if url == ":memory:":
             return ":memory:"
         # Caminhos relativos passam a ser resolvidos a partir da raiz do projeto.
@@ -193,9 +192,7 @@ def _read_env(environ: Mapping[str, str] | None = None) -> dict:
             default = Settings.__dataclass_fields__[field_name].default
             overrides[field_name] = _coerce_int(raw, default)
         elif field_name == "allowed_hosts":
-            overrides[field_name] = tuple(
-                h.strip() for h in raw.split(",") if h.strip()
-            )
+            overrides[field_name] = tuple(h.strip() for h in raw.split(",") if h.strip())
         else:
             overrides[field_name] = raw
 

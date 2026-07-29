@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import importlib
-import os
-from unittest import mock
 
 import pytest
 
-from src.db.models import criar_engine, get_session, init_db
+from src.db.models import _normalizar_database_url, criar_engine, get_session, init_db
 from src.settings import (
     get_settings,
     reset_settings_cache,
@@ -192,22 +190,26 @@ class TestDatabaseEngineConfig:
         finally:
             engine.dispose()
 
-    def test_url_postgres_explicita_sem_driver(self):
-        # Quando psycopg não está disponível, criar_engine ainda
-        # constrói a engine — o erro aparece só ao tentar conectar.
+    def test_url_postgres_preservada_sem_driver(self):
+        """URL Postgres passa intacta e é reconhecida — sem exigir psycopg.
+
+        Não constrói ``Engine`` de propósito: o SQLAlchemy 2.x importa o DBAPI
+        já dentro de ``create_engine``, então instanciar exigiria ``psycopg``
+        instalado.  O que importa aqui é a camada do projeto — a URL não pode
+        ser convertida em caminho SQLite pelo caminho legado.
+        """
+        url = "postgresql+psycopg://u:p@h:5432/db"
+        assert _normalizar_database_url(url) == url
+        assert with_overrides(database_url=url).is_postgres is True
+        assert with_overrides(database_url=url).is_sqlite is False
+        assert with_overrides(database_url=url).database_file_path is None
+
+    def test_url_postgres_constroi_engine(self):
+        """Constrói a Engine de fato — só roda onde o driver existe."""
+        pytest.importorskip("psycopg", reason="driver Postgres não instalado")
         engine = criar_engine(url="postgresql+psycopg://u:p@h:5432/db")
         try:
             assert engine.url.get_backend_name() == "postgresql"
-        finally:
-            engine.dispose()
-
-    def test_url_postgres_nao_conecta_sem_driver(self):
-        engine = criar_engine(url="postgresql+psycopg://u:p@h:5432/db")
-        try:
-            pytest.importorskip("psycopg")
-            with pytest.raises(Exception):
-                with engine.connect() as conn:
-                    conn.exec_driver_sql("SELECT 1")
         finally:
             engine.dispose()
 

@@ -1,7 +1,6 @@
 """Testes de integração — ECDs sintéticos grandes e performance."""
 
 import datetime
-import tempfile
 import time
 
 import pytest
@@ -9,8 +8,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from src.db.models import (
-    Base,
     ECD,
+    Base,
     Empresa,
     Lancamento,
     Partida,
@@ -19,9 +18,9 @@ from src.db.models import (
     SaldoResultado,
 )
 from src.reports.balanco import BalancoPatrimonial
-from src.reports.dre import DRE
 from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
+from src.reports.dre import DRE
 from src.validators.integridade import ValidadorIntegridade
 
 
@@ -60,26 +59,44 @@ def db_grande():
     for nat, nome_nat in naturezas.items():
         # Sintética nível 1
         cod_sup = f"{nat}.0"
-        session.add(PlanoConta(
-            ecd_id=ecd.id, cod_cta=cod_sup, nome_cta=f"{nome_nat} Total",
-            cod_nat=nat, ind_cta="S", nivel=1,
-        ))
+        session.add(
+            PlanoConta(
+                ecd_id=ecd.id,
+                cod_cta=cod_sup,
+                nome_cta=f"{nome_nat} Total",
+                cod_nat=nat,
+                ind_cta="S",
+                nivel=1,
+            )
+        )
         # 5 subgrupos nível 2
         for g in range(1, 6):
             cod_grupo = f"{nat}.{g}"
-            session.add(PlanoConta(
-                ecd_id=ecd.id, cod_cta=cod_grupo,
-                nome_cta=f"{nome_nat} Grupo {g}",
-                cod_cta_sup=cod_sup, cod_nat=nat, ind_cta="S", nivel=2,
-            ))
+            session.add(
+                PlanoConta(
+                    ecd_id=ecd.id,
+                    cod_cta=cod_grupo,
+                    nome_cta=f"{nome_nat} Grupo {g}",
+                    cod_cta_sup=cod_sup,
+                    cod_nat=nat,
+                    ind_cta="S",
+                    nivel=2,
+                )
+            )
             # 20 contas analíticas por grupo
             for a in range(1, 21):
                 cod_ana = f"{nat}.{g}.{a:03d}"
-                session.add(PlanoConta(
-                    ecd_id=ecd.id, cod_cta=cod_ana,
-                    nome_cta=f"{nome_nat} Conta {g}.{a:03d}",
-                    cod_cta_sup=cod_grupo, cod_nat=nat, ind_cta="A", nivel=3,
-                ))
+                session.add(
+                    PlanoConta(
+                        ecd_id=ecd.id,
+                        cod_cta=cod_ana,
+                        nome_cta=f"{nome_nat} Conta {g}.{a:03d}",
+                        cod_cta_sup=cod_grupo,
+                        cod_nat=nat,
+                        ind_cta="A",
+                        nivel=3,
+                    )
+                )
                 contas.append((cod_ana, nat))
 
     session.flush()
@@ -95,23 +112,33 @@ def db_grande():
         else:
             si, dci, sf, dcf = 0.0, "D", 0.0, "D"
 
-        session.add(SaldoPeriodico(
-            ecd_id=ecd.id, cod_cta=cod_cta,
-            dt_ini=datetime.date(2024, 1, 1),
-            dt_fin=datetime.date(2024, 12, 31),
-            vl_sld_ini=si, ind_dc_ini=dci,
-            vl_deb=500.0, vl_cred=300.0,
-            vl_sld_fin=sf, ind_dc_fin=dcf,
-        ))
+        session.add(
+            SaldoPeriodico(
+                ecd_id=ecd.id,
+                cod_cta=cod_cta,
+                dt_ini=datetime.date(2024, 1, 1),
+                dt_fin=datetime.date(2024, 12, 31),
+                vl_sld_ini=si,
+                ind_dc_ini=dci,
+                vl_deb=500.0,
+                vl_cred=300.0,
+                vl_sld_fin=sf,
+                ind_dc_fin=dcf,
+            )
+        )
 
     # Saldos de resultado
     for cod_cta, nat in contas:
         if nat == "04":
-            session.add(SaldoResultado(
-                ecd_id=ecd.id, cod_cta=cod_cta,
-                dt_res=datetime.date(2024, 12, 31),
-                vl_sld_fin=2000.0, ind_dc_fin="C",
-            ))
+            session.add(
+                SaldoResultado(
+                    ecd_id=ecd.id,
+                    cod_cta=cod_cta,
+                    dt_res=datetime.date(2024, 12, 31),
+                    vl_sld_fin=2000.0,
+                    ind_dc_fin="C",
+                )
+            )
 
     # 200 lançamentos
     for i in range(1, 201):
@@ -126,14 +153,24 @@ def db_grande():
         session.flush()
 
         # 2 partidas por lançamento
-        session.add(Partida(
-            lancamento_id=lanc.id, cod_cta=contas[i % len(contas)][0],
-            vl_dc=1000.0, ind_dc="D", hist=f"Lançamento {i}",
-        ))
-        session.add(Partida(
-            lancamento_id=lanc.id, cod_cta=contas[(i + 50) % len(contas)][0],
-            vl_dc=1000.0, ind_dc="C", hist=f"Lançamento {i}",
-        ))
+        session.add(
+            Partida(
+                lancamento_id=lanc.id,
+                cod_cta=contas[i % len(contas)][0],
+                vl_dc=1000.0,
+                ind_dc="D",
+                hist=f"Lançamento {i}",
+            )
+        )
+        session.add(
+            Partida(
+                lancamento_id=lanc.id,
+                cod_cta=contas[(i + 50) % len(contas)][0],
+                vl_dc=1000.0,
+                ind_dc="C",
+                hist=f"Lançamento {i}",
+            )
+        )
 
     session.commit()
     yield session, ecd, emp
@@ -232,6 +269,7 @@ class TestIntegracaoGrande:
         total = session.query(Partida).join(Lancamento).filter(Lancamento.ecd_id == ecd.id).count()
         assert total == 400  # 2 partidas por lançamento
 
+
 class TestFase6:
     """Testes das novas funcionalidades da Fase 6."""
 
@@ -246,8 +284,8 @@ class TestFase6:
         assert "variacao_caixa" in totais
         assert "variacao_caixa_anterior" in totais
         # Todas as linhas devem ter valor_anterior
-        for l in linhas:
-            assert hasattr(l, "valor_anterior")
+        for ln in linhas:
+            assert hasattr(ln, "valor_anterior")
 
     def test_dfc_totais_subtotais(self, db_grande):
         """DFC deve ter totais operacional, investimento e financiamento."""
@@ -266,6 +304,7 @@ class TestFase6:
         """Evolução multi-período retorna None com apenas 1 ECD."""
         session, ecd, emp = db_grande
         from src.dashboard.services import DashboardService
+
         svc = DashboardService(session, ecd.id)
         result = svc.get_evolucao_multi_periodo()
         assert result is None  # só 1 ECD
@@ -274,6 +313,7 @@ class TestFase6:
         """Notas explicativas devem retornar lista com pelo menos 2 notas."""
         session, ecd, emp = db_grande
         from src.dashboard.services import DashboardService
+
         svc = DashboardService(session, ecd.id)
         notas = svc.get_notas_explicativas()
         assert isinstance(notas, list)
@@ -289,6 +329,7 @@ class TestFase6:
         """Notas devem incluir tipos: contexto, praticas, eventos."""
         session, ecd, emp = db_grande
         from src.dashboard.services import DashboardService
+
         svc = DashboardService(session, ecd.id)
         notas = svc.get_notas_explicativas()
         tipos = {n["tipo"] for n in notas}

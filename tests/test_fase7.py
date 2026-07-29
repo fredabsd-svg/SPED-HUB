@@ -1,13 +1,10 @@
 """Testes da Fase 7 — API REST v1, multi-ECD, watchdog, layout customizável."""
 
 import datetime
-import io
-import json
 import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, event, select
@@ -15,25 +12,19 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.api import _hash_key, gerar_api_key, verificar_api_key
+from src.dashboard.services import DashboardService
 from src.db.models import (
+    ECD,
     ApiKey,
     Base,
-    ECD,
     Empresa,
     Lancamento,
     Partida,
     PlanoConta,
     SaldoPeriodico,
     SaldoResultado,
-    criar_engine,
-    get_session,
-    init_db,
 )
-from src.dashboard.services import DashboardService
-from src.api import gerar_api_key, verificar_api_key, _hash_key
-from src.reports.balanco import BalancoPatrimonial
-from src.reports.dre import DRE
-from src.reports.dfc import DFC
 
 
 @pytest.fixture
@@ -87,10 +78,17 @@ def db_fase7():
             ("5.1", "Despesas Administrativas", "04", "A", 2, "5"),
         ]
         for cod, nome, nat, ind, nivel, sup in contas_data:
-            session.add(PlanoConta(
-                ecd_id=ecd.id, cod_cta=cod, nome_cta=nome,
-                cod_nat=nat, ind_cta=ind, nivel=nivel, cod_cta_sup=sup,
-            ))
+            session.add(
+                PlanoConta(
+                    ecd_id=ecd.id,
+                    cod_cta=cod,
+                    nome_cta=nome,
+                    cod_nat=nat,
+                    ind_cta=ind,
+                    nivel=nivel,
+                    cod_cta_sup=sup,
+                )
+            )
 
         # Saldos (crescentes por ano)
         base = 100000 * (ano - 2021)
@@ -103,53 +101,81 @@ def db_fase7():
             ("3.2", base * 0.05, "C"),
         ]
         for cod, vl, dc in saldos_data:
-            session.add(SaldoPeriodico(
-                ecd_id=ecd.id, cod_cta=cod,
-                dt_ini=datetime.date(ano, 1, 1),
-                dt_fin=datetime.date(ano, 12, 31),
-                vl_sld_ini=vl * 0.9, ind_dc_ini=dc,
-                vl_deb=vl * 0.2, vl_cred=vl * 0.1,
-                vl_sld_fin=vl, ind_dc_fin=dc,
-            ))
+            session.add(
+                SaldoPeriodico(
+                    ecd_id=ecd.id,
+                    cod_cta=cod,
+                    dt_ini=datetime.date(ano, 1, 1),
+                    dt_fin=datetime.date(ano, 12, 31),
+                    vl_sld_ini=vl * 0.9,
+                    ind_dc_ini=dc,
+                    vl_deb=vl * 0.2,
+                    vl_cred=vl * 0.1,
+                    vl_sld_fin=vl,
+                    ind_dc_fin=dc,
+                )
+            )
 
         # Saldos resultado
-        session.add(SaldoResultado(
-            ecd_id=ecd.id, cod_cta="4.1",
-            dt_res=datetime.date(ano, 12, 31),
-            vl_sld_fin=base * 0.5, ind_dc_fin="C",
-        ))
-        session.add(SaldoResultado(
-            ecd_id=ecd.id, cod_cta="5.1",
-            dt_res=datetime.date(ano, 12, 31),
-            vl_sld_fin=base * 0.3, ind_dc_fin="D",
-        ))
+        session.add(
+            SaldoResultado(
+                ecd_id=ecd.id,
+                cod_cta="4.1",
+                dt_res=datetime.date(ano, 12, 31),
+                vl_sld_fin=base * 0.5,
+                ind_dc_fin="C",
+            )
+        )
+        session.add(
+            SaldoResultado(
+                ecd_id=ecd.id,
+                cod_cta="5.1",
+                dt_res=datetime.date(ano, 12, 31),
+                vl_sld_fin=base * 0.3,
+                ind_dc_fin="D",
+            )
+        )
 
         # Lançamentos
         for i in range(1, 6):
             lanc = Lancamento(
-                ecd_id=ecd.id, num_lcto=str(i),
+                ecd_id=ecd.id,
+                num_lcto=str(i),
                 dt_lcto=datetime.date(ano, i * 2, 15),
-                vl_lcto=1000.0, ind_lcto="N",
+                vl_lcto=1000.0,
+                ind_lcto="N",
             )
             session.add(lanc)
             session.flush()
-            session.add(Partida(
-                lancamento_id=lanc.id, cod_cta="1.1.1",
-                vl_dc=1000.0, ind_dc="D", hist=f"Lanc {i}",
-            ))
-            session.add(Partida(
-                lancamento_id=lanc.id, cod_cta="4.1",
-                vl_dc=1000.0, ind_dc="C", hist=f"Lanc {i}",
-            ))
+            session.add(
+                Partida(
+                    lancamento_id=lanc.id,
+                    cod_cta="1.1.1",
+                    vl_dc=1000.0,
+                    ind_dc="D",
+                    hist=f"Lanc {i}",
+                )
+            )
+            session.add(
+                Partida(
+                    lancamento_id=lanc.id,
+                    cod_cta="4.1",
+                    vl_dc=1000.0,
+                    ind_dc="C",
+                    hist=f"Lanc {i}",
+                )
+            )
 
     # API Key para testes
     chave, hash_chave = gerar_api_key()
-    session.add(ApiKey(
-        nome="Test Key",
-        key_hash=hash_chave,
-        prefixo=chave[:8],
-        ativo=True,
-    ))
+    session.add(
+        ApiKey(
+            nome="Test Key",
+            key_hash=hash_chave,
+            prefixo=chave[:8],
+            ativo=True,
+        )
+    )
     session.commit()
 
     yield session, ecds, emp, chave
@@ -157,6 +183,7 @@ def db_fase7():
 
 
 # ── Testes: API Key ─────────────────────────────────────────────────────────
+
 
 class TestApiKey:
     def test_gerar_api_key_formato(self):
@@ -189,6 +216,7 @@ class TestApiKey:
 
 
 # ── Testes: Multi-ECD Comparison ────────────────────────────────────────────
+
 
 class TestMultiECD:
     def test_multi_ecd_comparison_3_ecds(self, db_fase7):
@@ -242,6 +270,7 @@ class TestMultiECD:
 
 # ── Testes: Layout Customizável ─────────────────────────────────────────────
 
+
 class TestLayoutCustomizavel:
     def test_layout_balanco(self, db_fase7):
         session, ecds, emp, chave = db_fase7
@@ -292,6 +321,7 @@ class TestLayoutCustomizavel:
 
 # ── Testes: Watchdog ────────────────────────────────────────────────────────
 
+
 class TestWatchdog:
     def test_watchdog_import_arquivo(self, db_fase7):
         """Testa importação via watchdog com arquivo ECD sintético."""
@@ -319,7 +349,8 @@ class TestWatchdog:
 
         try:
             from src.watchdog import processar_arquivo
-            result = processar_arquivo(Path(temp_path), ":memory:")
+
+            processar_arquivo(Path(temp_path), ":memory:")
             # Não podemos testar com :memory: pois o watchdog usa o mesmo db_path
             # mas podemos verificar que não lança exceção
         finally:
@@ -376,6 +407,7 @@ class TestWatchdog:
 
 # ── Testes: API v1 Health ───────────────────────────────────────────────────
 
+
 class TestApiV1Health:
     def test_health_db_ok(self, db_fase7):
         """Health check com banco funcionando."""
@@ -389,6 +421,7 @@ class TestApiV1Health:
 
 
 # ── Testes: Evolução Multi-Período com 3 ECDs ──────────────────────────────
+
 
 class TestEvolucaoMultiPeriodoFase7:
     def test_evolucao_multi_com_3_ecds(self, db_fase7):

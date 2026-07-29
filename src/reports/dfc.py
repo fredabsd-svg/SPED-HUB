@@ -9,9 +9,7 @@ Estrutura conforme NBC TG 03 / CPC 03:
 Fase 6: +período anterior comparativo.
 """
 
-import datetime
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,8 +18,6 @@ from src.db.models import Mapeamento, PlanoConta, SaldoPeriodico
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
-    fmt_moeda,
-    saldo_por_natureza,
     valor_sinalizado,
 )
 
@@ -36,29 +32,126 @@ class LinhaDFC:
 
 
 DFC_DEFAULT = [
-    {"tipo": "section", "descricao": "Fluxo das Atividades Operacionais", "categoria": None, "sinal": 0},
-    {"tipo": "step", "descricao": "Lucro Líquido do Exercício", "categoria": "lucro_liquido", "sinal": 1},
-    {"tipo": "step", "descricao": "(+) Depreciação e Amortização", "categoria": "depreciacao", "sinal": 1},
-    {"tipo": "step", "descricao": "(+/-) Variação em Contas a Receber", "categoria": "var_contas_receber", "sinal": 1},
-    {"tipo": "step", "descricao": "(+/-) Variação em Estoques", "categoria": "var_estoques", "sinal": 1},
-    {"tipo": "step", "descricao": "(+/-) Variação em Fornecedores", "categoria": "var_fornecedores", "sinal": 1},
-    {"tipo": "step", "descricao": "(+/-) Variação em Obrigações Fiscais", "categoria": "var_obrig_fiscais", "sinal": 1},
-    {"tipo": "step", "descricao": "(+/-) Outros Ajustes Operacionais", "categoria": "outros_operacionais", "sinal": 1},
-    {"tipo": "subtotal", "descricao": "= Caixa Gerado nas Operações", "categoria": None, "sinal": 0},
-
-    {"tipo": "section", "descricao": "Fluxo das Atividades de Investimento", "categoria": None, "sinal": 0},
-    {"tipo": "step", "descricao": "(-) Aquisição de Imobilizado", "categoria": "aquisicao_imobilizado", "sinal": -1},
-    {"tipo": "step", "descricao": "(+) Venda de Imobilizado", "categoria": "venda_imobilizado", "sinal": 1},
-    {"tipo": "step", "descricao": "(-) Aquisição de Intangível", "categoria": "aquisicao_intangivel", "sinal": -1},
-    {"tipo": "step", "descricao": "(+/-) Outros Investimentos", "categoria": "outros_investimentos", "sinal": 1},
-    {"tipo": "subtotal", "descricao": "= Caixa das Atividades de Investimento", "categoria": None, "sinal": 0},
-
-    {"tipo": "section", "descricao": "Fluxo das Atividades de Financiamento", "categoria": None, "sinal": 0},
-    {"tipo": "step", "descricao": "(+) Aumento de Capital", "categoria": "aumento_capital", "sinal": 1},
-    {"tipo": "step", "descricao": "(+/-) Empréstimos e Financiamentos", "categoria": "emprestimos", "sinal": 1},
-    {"tipo": "step", "descricao": "(-) Distribuição de Lucros", "categoria": "distribuicao_lucros", "sinal": -1},
-    {"tipo": "subtotal", "descricao": "= Caixa das Atividades de Financiamento", "categoria": None, "sinal": 0},
-
+    {
+        "tipo": "section",
+        "descricao": "Fluxo das Atividades Operacionais",
+        "categoria": None,
+        "sinal": 0,
+    },
+    {
+        "tipo": "step",
+        "descricao": "Lucro Líquido do Exercício",
+        "categoria": "lucro_liquido",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+) Depreciação e Amortização",
+        "categoria": "depreciacao",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+/-) Variação em Contas a Receber",
+        "categoria": "var_contas_receber",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+/-) Variação em Estoques",
+        "categoria": "var_estoques",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+/-) Variação em Fornecedores",
+        "categoria": "var_fornecedores",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+/-) Variação em Obrigações Fiscais",
+        "categoria": "var_obrig_fiscais",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+/-) Outros Ajustes Operacionais",
+        "categoria": "outros_operacionais",
+        "sinal": 1,
+    },
+    {
+        "tipo": "subtotal",
+        "descricao": "= Caixa Gerado nas Operações",
+        "categoria": None,
+        "sinal": 0,
+    },
+    {
+        "tipo": "section",
+        "descricao": "Fluxo das Atividades de Investimento",
+        "categoria": None,
+        "sinal": 0,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(-) Aquisição de Imobilizado",
+        "categoria": "aquisicao_imobilizado",
+        "sinal": -1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+) Venda de Imobilizado",
+        "categoria": "venda_imobilizado",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(-) Aquisição de Intangível",
+        "categoria": "aquisicao_intangivel",
+        "sinal": -1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+/-) Outros Investimentos",
+        "categoria": "outros_investimentos",
+        "sinal": 1,
+    },
+    {
+        "tipo": "subtotal",
+        "descricao": "= Caixa das Atividades de Investimento",
+        "categoria": None,
+        "sinal": 0,
+    },
+    {
+        "tipo": "section",
+        "descricao": "Fluxo das Atividades de Financiamento",
+        "categoria": None,
+        "sinal": 0,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+) Aumento de Capital",
+        "categoria": "aumento_capital",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+/-) Empréstimos e Financiamentos",
+        "categoria": "emprestimos",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(-) Distribuição de Lucros",
+        "categoria": "distribuicao_lucros",
+        "sinal": -1,
+    },
+    {
+        "tipo": "subtotal",
+        "descricao": "= Caixa das Atividades de Financiamento",
+        "categoria": None,
+        "sinal": 0,
+    },
     {"tipo": "total", "descricao": "= Variação Líquida de Caixa", "categoria": None, "sinal": 0},
 ]
 
@@ -73,14 +166,16 @@ class DFC:
 
     def _get_mapeamentos(self, empresa_id: int) -> dict[str, list[str]]:
         """Carrega mapeamentos DFC da empresa ou usa defaults."""
-        maps = list(self.session.execute(
-            select(Mapeamento)
-            .where(
-                Mapeamento.empresa_id == empresa_id,
-                Mapeamento.tipo == "dfc",
-            )
-            .order_by(Mapeamento.ordem)
-        ).scalars())
+        maps = list(
+            self.session.execute(
+                select(Mapeamento)
+                .where(
+                    Mapeamento.empresa_id == empresa_id,
+                    Mapeamento.tipo == "dfc",
+                )
+                .order_by(Mapeamento.ordem)
+            ).scalars()
+        )
 
         if maps:
             result: dict[str, list[str]] = {}
@@ -124,9 +219,23 @@ class DFC:
                 result["var_estoques"].append(cod_cta)
             elif any(t in nome for t in ["FORNECEDOR"]):
                 result["var_fornecedores"].append(cod_cta)
-            elif any(t in nome for t in ["IMPOSTO", "TRIBUTO", "OBRIGAÇÕES FISC", "PIS", "COFINS", "ICMS", "IRPJ", "CSLL"]):
+            elif any(
+                t in nome
+                for t in [
+                    "IMPOSTO",
+                    "TRIBUTO",
+                    "OBRIGAÇÕES FISC",
+                    "PIS",
+                    "COFINS",
+                    "ICMS",
+                    "IRPJ",
+                    "CSLL",
+                ]
+            ):
                 result["var_obrig_fiscais"].append(cod_cta)
-            elif any(t in nome for t in ["IMOBILIZADO", "MÁQUINAS", "EQUIPAMENTO", "VEÍCULO", "MÓVEIS"]):
+            elif any(
+                t in nome for t in ["IMOBILIZADO", "MÁQUINAS", "EQUIPAMENTO", "VEÍCULO", "MÓVEIS"]
+            ):
                 result["aquisicao_imobilizado"].append(cod_cta)
             elif any(t in nome for t in ["INTANGÍVEL", "SOFTWARE", "MARCA", "PATENTE"]):
                 result["aquisicao_intangivel"].append(cod_cta)
@@ -142,6 +251,7 @@ class DFC:
     def _get_ecd_anterior(self) -> int | None:
         """Encontra o ID da ECD do período anterior para a mesma empresa."""
         from src.db.models import ECD
+
         ecd_atual = self.session.get(ECD, self.ecd_id)
         if not ecd_atual:
             return None
@@ -159,9 +269,13 @@ class DFC:
 
     def _get_saldos_anteriores(self, ecd_anterior_id: int) -> dict[str, float]:
         """Carrega saldos do período anterior."""
-        saldos_ant = self.session.execute(
-            select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecd_anterior_id)
-        ).scalars().all()
+        saldos_ant = (
+            self.session.execute(
+                select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecd_anterior_id)
+            )
+            .scalars()
+            .all()
+        )
         result: dict[str, float] = {}
         for s in saldos_ant:
             vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
@@ -179,6 +293,7 @@ class DFC:
 
         if empresa_id is None:
             from src.db.models import ECD
+
             ecd = self.session.get(ECD, self.ecd_id)
             empresa_id = ecd.empresa_id if ecd else 0
 
@@ -214,21 +329,25 @@ class DFC:
         for i, degrau in enumerate(DFC_DEFAULT):
             if degrau["categoria"] is None:
                 if degrau["tipo"] in ("subtotal", "total"):
-                    linhas.append(LinhaDFC(
-                        tipo=degrau["tipo"],
-                        descricao=degrau["descricao"],
-                        valor=running,
-                        valor_anterior=running_ant,
-                        ordem=i,
-                    ))
+                    linhas.append(
+                        LinhaDFC(
+                            tipo=degrau["tipo"],
+                            descricao=degrau["descricao"],
+                            valor=running,
+                            valor_anterior=running_ant,
+                            ordem=i,
+                        )
+                    )
                 else:
-                    linhas.append(LinhaDFC(
-                        tipo=degrau["tipo"],
-                        descricao=degrau["descricao"],
-                        valor=0.0,
-                        valor_anterior=0.0,
-                        ordem=i,
-                    ))
+                    linhas.append(
+                        LinhaDFC(
+                            tipo=degrau["tipo"],
+                            descricao=degrau["descricao"],
+                            valor=0.0,
+                            valor_anterior=0.0,
+                            ordem=i,
+                        )
+                    )
             else:
                 vl = cat_valores.get(degrau["categoria"], 0.0)
                 vl_ant = cat_valores_ant.get(degrau["categoria"], 0.0)
@@ -236,34 +355,66 @@ class DFC:
                 vl_dfc_ant = vl_ant * degrau["sinal"]
                 running += vl_dfc
                 running_ant += vl_dfc_ant
-                linhas.append(LinhaDFC(
-                    tipo=degrau["tipo"],
-                    descricao=degrau["descricao"],
-                    valor=vl_dfc,
-                    valor_anterior=vl_dfc_ant,
-                    ordem=i,
-                ))
+                linhas.append(
+                    LinhaDFC(
+                        tipo=degrau["tipo"],
+                        descricao=degrau["descricao"],
+                        valor=vl_dfc,
+                        valor_anterior=vl_dfc_ant,
+                        ordem=i,
+                    )
+                )
 
         totais = {
             "variacao_caixa": running,
             "variacao_caixa_anterior": running_ant,
             "operacional": next(
-                (l.valor for l in linhas if "Operações" in l.descricao and l.tipo == "subtotal"), 0.0
+                (
+                    ln.valor
+                    for ln in linhas
+                    if "Operações" in ln.descricao and ln.tipo == "subtotal"
+                ),
+                0.0,
             ),
             "operacional_anterior": next(
-                (l.valor_anterior for l in linhas if "Operações" in l.descricao and l.tipo == "subtotal"), 0.0
+                (
+                    ln.valor_anterior
+                    for ln in linhas
+                    if "Operações" in ln.descricao and ln.tipo == "subtotal"
+                ),
+                0.0,
             ),
             "investimento": next(
-                (l.valor for l in linhas if "Investimento" in l.descricao and l.tipo == "subtotal"), 0.0
+                (
+                    ln.valor
+                    for ln in linhas
+                    if "Investimento" in ln.descricao and ln.tipo == "subtotal"
+                ),
+                0.0,
             ),
             "investimento_anterior": next(
-                (l.valor_anterior for l in linhas if "Investimento" in l.descricao and l.tipo == "subtotal"), 0.0
+                (
+                    ln.valor_anterior
+                    for ln in linhas
+                    if "Investimento" in ln.descricao and ln.tipo == "subtotal"
+                ),
+                0.0,
             ),
             "financiamento": next(
-                (l.valor for l in linhas if "Financiamento" in l.descricao and l.tipo == "subtotal"), 0.0
+                (
+                    ln.valor
+                    for ln in linhas
+                    if "Financiamento" in ln.descricao and ln.tipo == "subtotal"
+                ),
+                0.0,
             ),
             "financiamento_anterior": next(
-                (l.valor_anterior for l in linhas if "Financiamento" in l.descricao and l.tipo == "subtotal"), 0.0
+                (
+                    ln.valor_anterior
+                    for ln in linhas
+                    if "Financiamento" in ln.descricao and ln.tipo == "subtotal"
+                ),
+                0.0,
             ),
             "tem_anterior": ecd_ant_id is not None,
         }

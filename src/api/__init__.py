@@ -11,19 +11,16 @@ Fase 13: +Rate limiting, +Logs de auditoria, +Configuração de rate limit por A
 import datetime
 import hashlib
 import hmac
-import secrets
 import logging
-from functools import wraps
-from typing import Callable
+import secrets
 
-from fastapi import Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.audit import get_audit_service
 from src.db.models import ApiKey, criar_engine, get_session, init_db
-from src.ratelimit import RateLimiter, RateLimitService, get_limiter
-from src.audit import AuditService, get_audit_service
+from src.ratelimit import get_limiter
 
 logger = logging.getLogger("sped-hub.api")
 
@@ -113,7 +110,7 @@ async def validar_requisicao_api(request: Request, db_path: str):
             raise HTTPException(
                 status_code=429,
                 detail=f"Rate limit exceeded: {info.limite} requests per {info.janela}s. "
-                       f"Retry in {info.reset_em}s.",
+                f"Retry in {info.reset_em}s.",
                 headers={
                     "X-RateLimit-Limit": str(info.limite),
                     "X-RateLimit-Remaining": "0",
@@ -146,8 +143,6 @@ async def requer_api_key(request: Request):
     )
 
 
-
-
 # ── API Key Service (Fase 12) ───────────────────────────────────────────────
 
 
@@ -174,7 +169,9 @@ class ApiKeyService:
 
         expira_em = None
         if dias_expiracao:
-            expira_em = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=dias_expiracao)
+            expira_em = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+                days=dias_expiracao
+            )
 
         session = self._get_session()
         try:
@@ -213,9 +210,7 @@ class ApiKeyService:
         """Lista todas as API Keys (sem expor a chave completa)."""
         session = self._get_session()
         try:
-            keys = session.execute(
-                select(ApiKey).order_by(ApiKey.criado_em.desc())
-            ).scalars().all()
+            keys = session.execute(select(ApiKey).order_by(ApiKey.criado_em.desc())).scalars().all()
 
             return [
                 {

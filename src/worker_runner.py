@@ -18,8 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.worker_queue import init_worker_queue
 from src.cache.redis_cache import RedisCacheService
+from src.worker_queue import init_worker_queue
 
 logging.basicConfig(
     level=logging.INFO,

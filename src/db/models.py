@@ -13,12 +13,8 @@ import json
 import secrets
 
 from sqlalchemy import (
-    Boolean,
-    Column,
     DateTime,
-    Float,
     ForeignKey,
-    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -89,8 +85,12 @@ class Usuario(Base):
 
     # Relacionamentos
     escritorio: Mapped["Escritorio | None"] = relationship(back_populates="usuarios")
-    sessoes: Mapped[list["Sessao"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
-    empresas: Mapped[list["UsuarioEmpresa"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
+    sessoes: Mapped[list["Sessao"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
+    empresas: Mapped[list["UsuarioEmpresa"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
 
     @staticmethod
     def hash_senha(senha: str, salt: str | None = None) -> tuple[str, str]:
@@ -152,9 +152,7 @@ class UsuarioEmpresa(Base):
     usuario: Mapped["Usuario"] = relationship(back_populates="empresas")
     empresa: Mapped["Empresa"] = relationship(back_populates="usuarios")
 
-    __table_args__ = (
-        UniqueConstraint("usuario_id", "empresa_id", name="uq_usuario_empresa"),
-    )
+    __table_args__ = (UniqueConstraint("usuario_id", "empresa_id", name="uq_usuario_empresa"),)
 
 
 # ── Cadastros ──────────────────────────────────────────────────────────────
@@ -184,7 +182,9 @@ class Empresa(Base):
     # Relacionamentos
     escritorio: Mapped["Escritorio | None"] = relationship(back_populates="empresas")
     ecds: Mapped[list["ECD"]] = relationship(back_populates="empresa", cascade="all, delete-orphan")
-    usuarios: Mapped[list["UsuarioEmpresa"]] = relationship(back_populates="empresa", cascade="all, delete-orphan")
+    usuarios: Mapped[list["UsuarioEmpresa"]] = relationship(
+        back_populates="empresa", cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<Empresa {_hash_sensivel(self.cnpj)}>"
@@ -263,9 +263,7 @@ class PlanoConta(Base):
         back_populates="conta", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_cta", name="uq_plano_conta_ecd"),
-    )
+    __table_args__ = (UniqueConstraint("ecd_id", "cod_cta", name="uq_plano_conta_ecd"),)
 
     def __repr__(self):
         return f"<PlanoConta {self.cod_cta} {self.nome_cta[:30]}>"
@@ -275,7 +273,9 @@ class ContaReferencial(Base):
     __tablename__ = "contas_referenciais"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plano_conta_id: Mapped[int] = mapped_column(ForeignKey("plano_contas.id"), nullable=False, index=True)
+    plano_conta_id: Mapped[int] = mapped_column(
+        ForeignKey("plano_contas.id"), nullable=False, index=True
+    )
     cod_ccus: Mapped[str | None] = mapped_column(String(255))
     cod_cta_ref: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -286,7 +286,9 @@ class Aglutinacao(Base):
     __tablename__ = "aglutinacoes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plano_conta_id: Mapped[int] = mapped_column(ForeignKey("plano_contas.id"), nullable=False, index=True)
+    plano_conta_id: Mapped[int] = mapped_column(
+        ForeignKey("plano_contas.id"), nullable=False, index=True
+    )
     cod_ccus: Mapped[str | None] = mapped_column(String(255))
     cod_agl: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
@@ -307,9 +309,7 @@ class CentroCusto(Base):
 
     ecd: Mapped["ECD"] = relationship(back_populates="centros_custo")
 
-    __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_ccus", name="uq_centro_custo_ecd"),
-    )
+    __table_args__ = (UniqueConstraint("ecd_id", "cod_ccus", name="uq_centro_custo_ecd"),)
 
 
 # ── Participantes ──────────────────────────────────────────────────────────
@@ -327,9 +327,7 @@ class Participante(Base):
 
     ecd: Mapped["ECD"] = relationship(back_populates="participantes")
 
-    __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_part", name="uq_participante_ecd"),
-    )
+    __table_args__ = (UniqueConstraint("ecd_id", "cod_part", name="uq_participante_ecd"),)
 
 
 # ── Históricos Padronizados ────────────────────────────────────────────────
@@ -370,8 +368,9 @@ class SaldoPeriodico(Base):
     ecd: Mapped["ECD"] = relationship(back_populates="saldos_periodicos")
 
     __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_cta", "cod_ccus", "dt_ini", "dt_fin",
-                         name="uq_saldo_periodico"),
+        UniqueConstraint(
+            "ecd_id", "cod_cta", "cod_ccus", "dt_ini", "dt_fin", name="uq_saldo_periodico"
+        ),
     )
 
 
@@ -391,8 +390,7 @@ class SaldoResultado(Base):
     ecd: Mapped["ECD"] = relationship(back_populates="saldos_resultado")
 
     __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_cta", "cod_ccus", "dt_res",
-                         name="uq_saldo_resultado"),
+        UniqueConstraint("ecd_id", "cod_cta", "cod_ccus", "dt_res", name="uq_saldo_resultado"),
     )
 
 
@@ -417,9 +415,7 @@ class Lancamento(Base):
         back_populates="lancamento", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        UniqueConstraint("ecd_id", "num_lcto", "dt_lcto", name="uq_lancamento_ecd"),
-    )
+    __table_args__ = (UniqueConstraint("ecd_id", "num_lcto", "dt_lcto", name="uq_lancamento_ecd"),)
 
 
 class Partida(Base):
@@ -428,7 +424,9 @@ class Partida(Base):
     __tablename__ = "partidas"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    lancamento_id: Mapped[int] = mapped_column(ForeignKey("lancamentos.id"), nullable=False, index=True)
+    lancamento_id: Mapped[int] = mapped_column(
+        ForeignKey("lancamentos.id"), nullable=False, index=True
+    )
     cod_cta: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     cod_ccus: Mapped[str | None] = mapped_column(String(255))
     vl_dc: Mapped[float] = mapped_column(nullable=False, default=0.0)
@@ -451,14 +449,14 @@ class Mapeamento(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), nullable=False, index=True)
-    tipo: Mapped[str] = mapped_column(String(20), nullable=False)  # dre/dfc/disponibilidades/depreciacao
+    tipo: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # dre/dfc/disponibilidades/depreciacao
     cod_cta: Mapped[str] = mapped_column(String(255), nullable=False)
     categoria: Mapped[str] = mapped_column(String(100), nullable=False)
     ordem: Mapped[int] = mapped_column(default=0)
 
-    __table_args__ = (
-        UniqueConstraint("empresa_id", "tipo", "cod_cta", name="uq_mapeamento"),
-    )
+    __table_args__ = (UniqueConstraint("empresa_id", "tipo", "cod_cta", name="uq_mapeamento"),)
 
 
 # ── Visões de Filtro ───────────────────────────────────────────────────────
@@ -614,11 +612,11 @@ class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    webhook_id: Mapped[int] = mapped_column(
-        ForeignKey("webhooks.id"), nullable=False, index=True
-    )
+    webhook_id: Mapped[int] = mapped_column(ForeignKey("webhooks.id"), nullable=False, index=True)
     evento: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")  # pending, success, failed, retrying
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )  # pending, success, failed, retrying
     status_code: Mapped[int | None] = mapped_column()
     request_body: Mapped[str | None] = mapped_column(Text)
     response_body: Mapped[str | None] = mapped_column(Text)
@@ -648,8 +646,12 @@ class AsyncJob(Base):
     __tablename__ = "async_jobs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tipo: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # ecd_import, export_lote, etc.
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)  # pending, processing, completed, failed
+    tipo: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # ecd_import, export_lote, etc.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", index=True
+    )  # pending, processing, completed, failed
     progresso: Mapped[float] = mapped_column(default=0.0)  # 0-100
     parametros: Mapped[str | None] = mapped_column(Text)  # JSON
     resultado: Mapped[str | None] = mapped_column(Text)  # JSON
@@ -732,6 +734,7 @@ def criar_engine(
     engine = create_engine(final_url, echo=echo, future=True)
 
     if is_sqlite and not is_sqlite_memory:
+
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()

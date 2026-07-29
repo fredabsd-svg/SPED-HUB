@@ -7,18 +7,15 @@ Duas visões:
 Conforme Seção 3.2 do prompt: contas de natureza 01 = Ativo, 02 = Passivo, 03 = PL.
 """
 
-import datetime
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import Aglutinacao, PlanoConta, SaldoPeriodico
+from src.db.models import Aglutinacao, PlanoConta
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
-    fmt_moeda,
     saldo_por_natureza,
     valor_sinalizado,
 )
@@ -46,6 +43,7 @@ class BalancoPatrimonial:
     def _get_ecd_anterior(self) -> int | None:
         """Encontra o ID da ECD do período anterior para a mesma empresa."""
         from src.db.models import ECD
+
         ecd_atual = self.session.get(ECD, self.ecd_id)
         if not ecd_atual:
             return None
@@ -64,9 +62,10 @@ class BalancoPatrimonial:
     def _get_saldos_anteriores(self, ecd_anterior_id: int) -> dict[str, float]:
         """Carrega saldos do período anterior."""
         from src.db.models import SaldoPeriodico as SP
-        saldos_ant = self.session.execute(
-            select(SP).where(SP.ecd_id == ecd_anterior_id)
-        ).scalars().all()
+
+        saldos_ant = (
+            self.session.execute(select(SP).where(SP.ecd_id == ecd_anterior_id)).scalars().all()
+        )
         result: dict[str, float] = {}
         for s in saldos_ant:
             vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
@@ -149,13 +148,13 @@ class BalancoPatrimonial:
                 pl.append(linha)
 
         # Totais
-        total_ativo = sum(l.saldo_atual for l in ativo)
-        total_passivo = sum(l.saldo_atual for l in passivo)
-        total_pl = sum(l.saldo_atual for l in pl)
+        total_ativo = sum(ln.saldo_atual for ln in ativo)
+        total_passivo = sum(ln.saldo_atual for ln in passivo)
+        total_pl = sum(ln.saldo_atual for ln in pl)
 
-        total_ativo_ant = sum(l.saldo_anterior for l in ativo)
-        total_passivo_ant = sum(l.saldo_anterior for l in passivo)
-        total_pl_ant = sum(l.saldo_anterior for l in pl)
+        total_ativo_ant = sum(ln.saldo_anterior for ln in ativo)
+        total_passivo_ant = sum(ln.saldo_anterior for ln in passivo)
+        total_pl_ant = sum(ln.saldo_anterior for ln in pl)
 
         totais = {
             "ativo": total_ativo,
@@ -202,9 +201,7 @@ class BalancoPatrimonial:
         # Busca aglutinações
         agls = list(
             self.session.execute(
-                select(Aglutinacao)
-                .join(PlanoConta)
-                .where(PlanoConta.ecd_id == self.ecd_id)
+                select(Aglutinacao).join(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
             ).scalars()
         )
 
@@ -220,38 +217,54 @@ class BalancoPatrimonial:
             vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
             saldo_por_conta[s.cod_cta] = vl
 
-        # Busca plano de contas
-        plano = {
-            c.cod_cta: c
-            for c in self.session.execute(
-                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
-            ).scalars()
-        }
-
         # Estrutura hierárquica da publicação
         # Cada seção tem: nome, código_agl (ou None para agrupar sub-seções), sub_secoes
         estrutura = [
             # Ativo
-            {"nome": "ATIVO", "tipo": "grupo", "cod_nat": "01", "filhos": [
-                {"nome": "Ativo Circulante", "tipo": "secao", "cod_agl": "J100"},
-                {"nome": "Ativo Não Circulante", "tipo": "secao", "cod_agl": "J150", "filhos": [
-                    {"nome": "Realizável a Longo Prazo", "tipo": "subsecao", "cod_agl": "J151"},
-                    {"nome": "Investimentos", "tipo": "subsecao", "cod_agl": "J152"},
-                    {"nome": "Imobilizado", "tipo": "subsecao", "cod_agl": "J153"},
-                    {"nome": "Intangível", "tipo": "subsecao", "cod_agl": "J154"},
-                ]},
-            ]},
+            {
+                "nome": "ATIVO",
+                "tipo": "grupo",
+                "cod_nat": "01",
+                "filhos": [
+                    {"nome": "Ativo Circulante", "tipo": "secao", "cod_agl": "J100"},
+                    {
+                        "nome": "Ativo Não Circulante",
+                        "tipo": "secao",
+                        "cod_agl": "J150",
+                        "filhos": [
+                            {
+                                "nome": "Realizável a Longo Prazo",
+                                "tipo": "subsecao",
+                                "cod_agl": "J151",
+                            },
+                            {"nome": "Investimentos", "tipo": "subsecao", "cod_agl": "J152"},
+                            {"nome": "Imobilizado", "tipo": "subsecao", "cod_agl": "J153"},
+                            {"nome": "Intangível", "tipo": "subsecao", "cod_agl": "J154"},
+                        ],
+                    },
+                ],
+            },
             # Passivo
-            {"nome": "PASSIVO", "tipo": "grupo", "cod_nat": "02", "filhos": [
-                {"nome": "Passivo Circulante", "tipo": "secao", "cod_agl": "J200"},
-                {"nome": "Passivo Não Circulante", "tipo": "secao", "cod_agl": "J250"},
-            ]},
+            {
+                "nome": "PASSIVO",
+                "tipo": "grupo",
+                "cod_nat": "02",
+                "filhos": [
+                    {"nome": "Passivo Circulante", "tipo": "secao", "cod_agl": "J200"},
+                    {"nome": "Passivo Não Circulante", "tipo": "secao", "cod_agl": "J250"},
+                ],
+            },
             # PL
-            {"nome": "PATRIMÔNIO LÍQUIDO", "tipo": "grupo", "cod_nat": "03", "filhos": [
-                {"nome": "Capital Social", "tipo": "secao", "cod_agl": "J300"},
-                {"nome": "Reservas", "tipo": "secao", "cod_agl": "J310"},
-                {"nome": "Lucros/Prejuízos Acumulados", "tipo": "secao", "cod_agl": "J320"},
-            ]},
+            {
+                "nome": "PATRIMÔNIO LÍQUIDO",
+                "tipo": "grupo",
+                "cod_nat": "03",
+                "filhos": [
+                    {"nome": "Capital Social", "tipo": "secao", "cod_agl": "J300"},
+                    {"nome": "Reservas", "tipo": "secao", "cod_agl": "J310"},
+                    {"nome": "Lucros/Prejuízos Acumulados", "tipo": "secao", "cod_agl": "J320"},
+                ],
+            },
         ]
 
         def _calcular_saldo_agl(cod_agl: str) -> float:
@@ -275,15 +288,17 @@ class BalancoPatrimonial:
                 # Seção com código de aglutinação
                 vl = _calcular_saldo_agl(secao["cod_agl"])
                 if abs(vl) >= 0.005:
-                    linhas.append(LinhaBalanco(
-                        cod_cta=secao["cod_agl"],
-                        nome_cta=secao["nome"],
-                        nivel=1,
-                        cod_nat=nat,
-                        ind_cta="S",
-                        saldo_atual=abs(vl),
-                        saldo_anterior=0.0,
-                    ))
+                    linhas.append(
+                        LinhaBalanco(
+                            cod_cta=secao["cod_agl"],
+                            nome_cta=secao["nome"],
+                            nivel=1,
+                            cod_nat=nat,
+                            ind_cta="S",
+                            saldo_atual=abs(vl),
+                            saldo_anterior=0.0,
+                        )
+                    )
                 total = vl
 
             return linhas, total
@@ -303,24 +318,45 @@ class BalancoPatrimonial:
                 if sec_linhas:
                     # Adiciona cabeçalho da seção
                     if nat == "01":
-                        ativo.append(LinhaBalanco(
-                            cod_cta="", nome_cta=secao["nome"], nivel=0,
-                            cod_nat=nat, ind_cta="S", saldo_atual=0.0, saldo_anterior=0.0,
-                        ))
+                        ativo.append(
+                            LinhaBalanco(
+                                cod_cta="",
+                                nome_cta=secao["nome"],
+                                nivel=0,
+                                cod_nat=nat,
+                                ind_cta="S",
+                                saldo_atual=0.0,
+                                saldo_anterior=0.0,
+                            )
+                        )
                         ativo.extend(sec_linhas)
                         total_ativo += sec_total
                     elif nat == "02":
-                        passivo.append(LinhaBalanco(
-                            cod_cta="", nome_cta=secao["nome"], nivel=0,
-                            cod_nat=nat, ind_cta="S", saldo_atual=0.0, saldo_anterior=0.0,
-                        ))
+                        passivo.append(
+                            LinhaBalanco(
+                                cod_cta="",
+                                nome_cta=secao["nome"],
+                                nivel=0,
+                                cod_nat=nat,
+                                ind_cta="S",
+                                saldo_atual=0.0,
+                                saldo_anterior=0.0,
+                            )
+                        )
                         passivo.extend(sec_linhas)
                         total_passivo += sec_total
                     elif nat == "03":
-                        pl.append(LinhaBalanco(
-                            cod_cta="", nome_cta=secao["nome"], nivel=0,
-                            cod_nat=nat, ind_cta="S", saldo_atual=0.0, saldo_anterior=0.0,
-                        ))
+                        pl.append(
+                            LinhaBalanco(
+                                cod_cta="",
+                                nome_cta=secao["nome"],
+                                nivel=0,
+                                cod_nat=nat,
+                                ind_cta="S",
+                                saldo_atual=0.0,
+                                saldo_anterior=0.0,
+                            )
+                        )
                         pl.extend(sec_linhas)
                         total_pl += sec_total
 
