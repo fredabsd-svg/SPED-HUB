@@ -6,7 +6,7 @@ Atualizado ao fim de cada fase, não só em release (§1.7).
 As entradas descrevem o efeito para quem usa o sistema, não o detalhe
 interno da implementação.
 
-## [Não publicado]
+## [0.17.0] — 2026-07-29
 
 ### Adicionado
 - A importação passou a recusar ECD com hierarquia de plano de contas em
