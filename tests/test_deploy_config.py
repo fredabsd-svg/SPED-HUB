@@ -180,6 +180,58 @@ class TestMigracaoNoCompose:
         )
 
 
+class TestBuildDaImagemNoCI:
+    """O build da imagem precisa ser exercitado ANTES do merge.
+
+    Enquanto o job `docker` era `if: github.ref == 'refs/heads/main'`, ele só
+    rodava depois do merge: nenhum PR podia ser barrado por quebrar o
+    Dockerfile — só o main podia ficar vermelho depois do fato. Foi assim que
+    a renomeação do pacote gdk-pixbuf no Debian trixie entrou sem aviso.
+    """
+
+    @pytest.fixture
+    def ci(self) -> dict:
+        return yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8"))
+
+    def test_ci_roda_em_pull_request(self, ci):
+        gatilhos = ci[True] if True in ci else ci["on"]
+        assert "pull_request" in gatilhos, "a suíte deixou de rodar em PR"
+
+    def test_build_da_imagem_nao_e_restrito_ao_main(self, ci):
+        job = ci["jobs"]["docker"]
+        assert "if" not in job, (
+            f"job `docker` condicionado por {job.get('if')!r}: com isso o build "
+            "volta a ser verificado só depois do merge, e quebrar o Dockerfile "
+            "deixa de barrar o PR"
+        )
+
+    def test_build_depende_da_suite(self, ci):
+        """Construir imagem de código que não passa nos testes é desperdício."""
+        assert set(ci["jobs"]["docker"]["needs"]) >= {"test", "postgres"}
+
+
+class TestPacotesDoDockerfile:
+    def test_gdk_pixbuf_usa_o_nome_do_debian_atual(self):
+        """`libgdk-pixbuf2.0-0` não tem candidato a instalação no trixie.
+
+        O `python:3.11-slim` migrou de bookworm para trixie e o nome do
+        pacote ganhou um hífen. Com o nome antigo, `apt-get install` sai com
+        100 e a imagem não constrói de forma alguma.
+        """
+        # Só as linhas de comando: o nome antigo aparece de propósito no
+        # comentário que explica a troca.
+        instrucoes = "\n".join(
+            linha
+            for linha in DOCKERFILE.read_text("utf-8").splitlines()
+            if not linha.lstrip().startswith("#")
+        )
+        assert "libgdk-pixbuf-2.0-0" in instrucoes, "o Dockerfile não instala mais o gdk-pixbuf"
+        assert not re.search(r"libgdk-pixbuf2\.0-0(?![\w.-])", instrucoes), (
+            "`libgdk-pixbuf2.0-0` (sem hífen) não existe no Debian trixie, "
+            "base do python:3.11-slim — o build falha com exit code 100"
+        )
+
+
 class TestWorkflowDeRelease:
     """`release.yml` publica a imagem e para aí — deploy é decisão separada."""
 
