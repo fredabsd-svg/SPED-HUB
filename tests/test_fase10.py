@@ -1,18 +1,14 @@
 """Testes da Fase 10 — Webhooks, Multi-ECD Frontend, Layout Customizável, Cron."""
 
 import datetime
-import io
 import json
 import os
 import tempfile
-import zipfile
 from pathlib import Path
 
 import pytest
 
 from src.db.models import (
-    ECD,
-    Empresa,
     WebhookRegistration,
     criar_engine,
     get_session,
@@ -21,7 +17,6 @@ from src.db.models import (
 from src.db.repository import Repository
 from src.parsers.ecd import ECDParser
 from src.webhooks import EVENTOS_DISPONIVEIS, WebhookEvent, WebhookService
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -59,6 +54,7 @@ def db_comparar():
     registros = parser.parse_todos(fixture)
 
     from collections import defaultdict
+
     grupos = defaultdict(list)
     for r in registros:
         grupos[r["_reg"]].append(r)
@@ -66,21 +62,25 @@ def db_comparar():
     repo = Repository(session)
 
     r0000 = grupos["0000"][0]
-    empresa = repo.upsert_empresa({
-        "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
-        "nome": r0000.get("NOME", ""),
-        "uf": r0000.get("UF", ""),
-        "ie": r0000.get("IE", ""),
-        "cod_mun": str(int(r0000.get("COD_MUN", 0))).zfill(7) if r0000.get("COD_MUN") else None,
-        "im": r0000.get("IM", ""),
-        "ind_sit_esp": int(r0000.get("IND_SIT_ESP", 0)) if r0000.get("IND_SIT_ESP") else None,
-        "ind_nire": int(r0000.get("IND_NIRE", 0)) if r0000.get("IND_NIRE") else None,
-        "ind_fin_esc": int(r0000.get("IND_FIN_ESC", 0)) if r0000.get("IND_FIN_ESC") else None,
-        "ind_grande_por": int(r0000.get("IND_GRANDE_POR", 0)) if r0000.get("IND_GRANDE_POR") else None,
-        "tip_ecd": r0000.get("TIP_ECD", ""),
-        "ident_mf": r0000.get("IDENT_MF", ""),
-        "ind_esc_cons": r0000.get("IND_ESC_CONS", ""),
-    })
+    empresa = repo.upsert_empresa(
+        {
+            "cnpj": str(int(r0000.get("CNPJ", 0))).zfill(14),
+            "nome": r0000.get("NOME", ""),
+            "uf": r0000.get("UF", ""),
+            "ie": r0000.get("IE", ""),
+            "cod_mun": str(int(r0000.get("COD_MUN", 0))).zfill(7) if r0000.get("COD_MUN") else None,
+            "im": r0000.get("IM", ""),
+            "ind_sit_esp": int(r0000.get("IND_SIT_ESP", 0)) if r0000.get("IND_SIT_ESP") else None,
+            "ind_nire": int(r0000.get("IND_NIRE", 0)) if r0000.get("IND_NIRE") else None,
+            "ind_fin_esc": int(r0000.get("IND_FIN_ESC", 0)) if r0000.get("IND_FIN_ESC") else None,
+            "ind_grande_por": (
+                int(r0000.get("IND_GRANDE_POR", 0)) if r0000.get("IND_GRANDE_POR") else None
+            ),
+            "tip_ecd": r0000.get("TIP_ECD", ""),
+            "ident_mf": r0000.get("IDENT_MF", ""),
+            "ind_esc_cons": r0000.get("IND_ESC_CONS", ""),
+        }
+    )
 
     rI010 = grupos["I010"][0] if grupos["I010"] else {}
     leiaute = rI010.get("COD_VER_LC", "009")
@@ -93,71 +93,104 @@ def db_comparar():
     dt_ini = _parse_data(str(int(r0000.get("DT_INI", 0))).zfill(8))
     dt_fin = _parse_data(str(int(r0000.get("DT_FIN", 0))).zfill(8))
 
-    ecd = repo.criar_ecd(empresa.id, {
-        "leiaute": leiaute,
-        "dt_ini": dt_ini,
-        "dt_fin": dt_fin,
-        "ind_esc": rI010.get("IND_ESC", ""),
-        "cod_ver_lc": leiaute,
-        "hash_arquivo": "test_hash",
-        "nome_arquivo": "ecd_sample.txt",
-    })
+    ecd = repo.criar_ecd(
+        empresa.id,
+        {
+            "leiaute": leiaute,
+            "dt_ini": dt_ini,
+            "dt_fin": dt_fin,
+            "ind_esc": rI010.get("IND_ESC", ""),
+            "cod_ver_lc": leiaute,
+            "hash_arquivo": "test_hash",
+            "nome_arquivo": "ecd_sample.txt",
+        },
+    )
 
     contas = []
     for r in grupos["I050"]:
-        contas.append({
-            "cod_cta": r.get("COD_CTA", ""),
-            "cod_cta_sup": r.get("COD_CTA_SUP", ""),
-            "nome_cta": r.get("NOME_CTA", ""),
-            "cod_nat": r.get("COD_NAT", "01"),
-            "ind_cta": r.get("IND_CTA", "A"),
-            "nivel": int(r.get("NIVEL", 0)),
-            "dt_alt": _parse_data(str(int(r.get("DT_ALT", 0))).zfill(8)) if r.get("DT_ALT") else None,
-        })
+        contas.append(
+            {
+                "cod_cta": r.get("COD_CTA", ""),
+                "cod_cta_sup": r.get("COD_CTA_SUP", ""),
+                "nome_cta": r.get("NOME_CTA", ""),
+                "cod_nat": r.get("COD_NAT", "01"),
+                "ind_cta": r.get("IND_CTA", "A"),
+                "nivel": int(r.get("NIVEL", 0)),
+                "dt_alt": (
+                    _parse_data(str(int(r.get("DT_ALT", 0))).zfill(8)) if r.get("DT_ALT") else None
+                ),
+            }
+        )
     repo.inserir_plano_contas(ecd.id, contas)
 
     saldos = []
     for r in grupos["I155"]:
-        saldos.append({
-            "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-            "dt_ini": dt_ini, "dt_fin": dt_fin,
-            "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0, "ind_dc_ini": r.get("IND_DC_INI", "D"),
-            "vl_deb": r.get("VL_DEB", 0.0) or 0.0, "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
-            "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-        })
+        saldos.append(
+            {
+                "cod_cta": r.get("COD_CTA", ""),
+                "cod_ccus": r.get("COD_CCUS", ""),
+                "dt_ini": dt_ini,
+                "dt_fin": dt_fin,
+                "vl_sld_ini": r.get("VL_SLD_INI", 0.0) or 0.0,
+                "ind_dc_ini": r.get("IND_DC_INI", "D"),
+                "vl_deb": r.get("VL_DEB", 0.0) or 0.0,
+                "vl_cred": r.get("VL_CRED", 0.0) or 0.0,
+                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0,
+                "ind_dc_fin": r.get("IND_DC_FIN", "D"),
+            }
+        )
     repo.inserir_saldos_periodicos(ecd.id, saldos)
 
     saldos_res = []
     for r in grupos["I355"]:
-        saldos_res.append({
-            "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-            "dt_res": dt_fin,
-            "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0, "ind_dc_fin": r.get("IND_DC_FIN", "D"),
-        })
+        saldos_res.append(
+            {
+                "cod_cta": r.get("COD_CTA", ""),
+                "cod_ccus": r.get("COD_CCUS", ""),
+                "dt_res": dt_fin,
+                "vl_sld_fin": r.get("VL_SLD_FIN", 0.0) or 0.0,
+                "ind_dc_fin": r.get("IND_DC_FIN", "D"),
+            }
+        )
     repo.inserir_saldos_resultado(ecd.id, saldos_res)
 
     lancs = []
     for r in grupos["I200"]:
-        lancs.append({
-            "num_lcto": r.get("NUM_LCTO", ""),
-            "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)) if r.get("DT_LCTO") else dt_ini,
-            "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
-            "ind_lcto": r.get("IND_LCTO", "N"),
-            "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-        })
+        lancs.append(
+            {
+                "num_lcto": r.get("NUM_LCTO", ""),
+                "dt_lcto": (
+                    _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8))
+                    if r.get("DT_LCTO")
+                    else dt_ini
+                ),
+                "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
+                "ind_lcto": r.get("IND_LCTO", "N"),
+                "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
+            }
+        )
     repo.inserir_lancamentos(ecd.id, lancs)
 
     partidas = []
     for r in grupos["I250"]:
-        partidas.append({
-            "num_lcto": r.get("NUM_LCTO", ""),
-            "dt_lcto": _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat() if r.get("DT_LCTO") else dt_ini.isoformat(),
-            "cod_cta": r.get("COD_CTA", ""), "cod_ccus": r.get("COD_CCUS", ""),
-            "vl_dc": r.get("VL_DC", 0.0) or 0.0, "ind_dc": r.get("IND_DC", "D"),
-            "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
-            "cod_hist_pad": r.get("COD_HIST_PAD", ""), "hist": r.get("HIST", ""),
-            "cod_part": r.get("COD_PART", ""),
-        })
+        partidas.append(
+            {
+                "num_lcto": r.get("NUM_LCTO", ""),
+                "dt_lcto": (
+                    _parse_data(str(int(r.get("DT_LCTO", 0))).zfill(8)).isoformat()
+                    if r.get("DT_LCTO")
+                    else dt_ini.isoformat()
+                ),
+                "cod_cta": r.get("COD_CTA", ""),
+                "cod_ccus": r.get("COD_CCUS", ""),
+                "vl_dc": r.get("VL_DC", 0.0) or 0.0,
+                "ind_dc": r.get("IND_DC", "D"),
+                "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
+                "cod_hist_pad": r.get("COD_HIST_PAD", ""),
+                "hist": r.get("HIST", ""),
+                "cod_part": r.get("COD_PART", ""),
+            }
+        )
     repo.inserir_partidas(ecd.id, partidas)
 
     repo.commit()
@@ -282,6 +315,7 @@ class TestMultiECD:
     def test_get_multi_ecd_comparison_single(self, db_comparar):
         """Com uma única ECD, deve retornar None."""
         from src.dashboard.services import DashboardService
+
         engine = criar_engine(os.environ["SPED_HUB_DB"])
         session = get_session(engine)
         try:
@@ -294,6 +328,7 @@ class TestMultiECD:
     def test_get_multi_ecd_comparison_limite_5(self, db_comparar):
         """IDs além de 5 devem ser truncados."""
         from src.dashboard.services import DashboardService
+
         engine = criar_engine(os.environ["SPED_HUB_DB"])
         session = get_session(engine)
         try:
@@ -314,6 +349,7 @@ class TestLayoutCustomizavel:
 
     def test_get_layout_default(self, db_comparar):
         from src.dashboard.services import DashboardService
+
         engine = criar_engine(os.environ["SPED_HUB_DB"])
         session = get_session(engine)
         try:
@@ -327,6 +363,7 @@ class TestLayoutCustomizavel:
 
     def test_get_layout_dre(self, db_comparar):
         from src.dashboard.services import DashboardService
+
         engine = criar_engine(os.environ["SPED_HUB_DB"])
         session = get_session(engine)
         try:
@@ -339,6 +376,7 @@ class TestLayoutCustomizavel:
 
     def test_get_layout_dfc(self, db_comparar):
         from src.dashboard.services import DashboardService
+
         engine = criar_engine(os.environ["SPED_HUB_DB"])
         session = get_session(engine)
         try:
@@ -351,6 +389,7 @@ class TestLayoutCustomizavel:
 
     def test_get_layout_diario(self, db_comparar):
         from src.dashboard.services import DashboardService
+
         engine = criar_engine(os.environ["SPED_HUB_DB"])
         session = get_session(engine)
         try:
@@ -368,16 +407,16 @@ class TestLayoutCustomizavel:
 class TestAPIWebhooks:
 
     def test_listar_eventos(self, db_webhook):
-        from src.api.routes import listar_eventos
         import asyncio
+
         # Mock da dependência api_key
         result = asyncio.run(_call_listar_eventos())
         assert "eventos" in result
         assert len(result["eventos"]) == 3
 
     def test_registrar_webhook_api(self, db_webhook):
-        from src.api.routes import registrar_webhook
         import asyncio
+
         payload = {
             "url": "https://example.com/hook",
             "eventos": ["ecd.importada"],
@@ -388,30 +427,32 @@ class TestAPIWebhooks:
         assert result["url"] == "https://example.com/hook"
 
     def test_registrar_webhook_sem_url(self, db_webhook):
-        from src.api.routes import registrar_webhook
-        from fastapi import HTTPException
         import asyncio
+
+        from fastapi import HTTPException
+
         payload = {"url": "", "eventos": ["ecd.importada"]}
         try:
             asyncio.run(_call_registrar(payload))
-            assert False, "Deveria ter lançado HTTPException"
+            raise AssertionError("Deveria ter lançado HTTPException")
         except HTTPException as e:
             assert e.status_code == 400
 
     def test_registrar_webhook_evento_invalido(self, db_webhook):
-        from src.api.routes import registrar_webhook
-        from fastapi import HTTPException
         import asyncio
+
+        from fastapi import HTTPException
+
         payload = {"url": "https://x.com/hook", "eventos": ["evento.invalido"]}
         try:
             asyncio.run(_call_registrar(payload))
-            assert False, "Deveria ter lançado HTTPException"
+            raise AssertionError("Deveria ter lançado HTTPException")
         except HTTPException as e:
             assert e.status_code == 400
 
     def test_listar_webhooks(self, db_webhook):
-        from src.api.routes import listar_webhooks
         import asyncio
+
         # Registra um primeiro
         svc = WebhookService(db_webhook)
         svc.registrar(url="https://a.com/hook", eventos=["ecd.importada"])
@@ -419,20 +460,21 @@ class TestAPIWebhooks:
         assert result["total"] >= 1
 
     def test_remover_webhook(self, db_webhook):
-        from src.api.routes import remover_webhook
         import asyncio
+
         svc = WebhookService(db_webhook)
         wh = svc.registrar(url="https://x.com/hook", eventos=["ecd.importada"])
         result = asyncio.run(_call_remover(wh.id))
         assert result["status"] == "ok"
 
     def test_remover_webhook_inexistente(self, db_webhook):
-        from src.api.routes import remover_webhook
-        from fastapi import HTTPException
         import asyncio
+
+        from fastapi import HTTPException
+
         try:
             asyncio.run(_call_remover(9999))
-            assert False
+            raise AssertionError("Deveria ter lançado HTTPException")
         except HTTPException as e:
             assert e.status_code == 404
 
@@ -442,21 +484,25 @@ class TestAPIWebhooks:
 
 async def _call_listar_eventos():
     from src.api.routes import listar_eventos
+
     return await listar_eventos(api_key="test")
 
 
 async def _call_registrar(payload):
     from src.api.routes import registrar_webhook
+
     return await registrar_webhook(payload=payload, api_key="test")
 
 
 async def _call_listar_webhooks():
     from src.api.routes import listar_webhooks
+
     return await listar_webhooks(api_key="test")
 
 
 async def _call_remover(webhook_id):
     from src.api.routes import remover_webhook
+
     return await remover_webhook(webhook_id=webhook_id, api_key="test")
 
 
@@ -482,7 +528,9 @@ class TestCronScript:
 class TestTemplatesFase10:
 
     def test_comparar_template_existe(self):
-        template = Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "comparar.html"
+        template = (
+            Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "comparar.html"
+        )
         assert template.exists()
 
     def test_layout_template_existe(self):
@@ -490,7 +538,9 @@ class TestTemplatesFase10:
         assert template.exists()
 
     def test_comparar_template_tem_chartjs(self):
-        template = Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "comparar.html"
+        template = (
+            Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "comparar.html"
+        )
         content = template.read_text()
         assert "chart.js" in content.lower()
         assert "alpinejs" in content.lower()

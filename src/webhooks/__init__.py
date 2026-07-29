@@ -19,7 +19,6 @@ import hmac
 import ipaddress
 import json
 import logging
-import os
 import socket
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
@@ -35,6 +34,7 @@ from src.db.models import (
     get_session,
     init_db,
 )
+from src.settings import get_settings
 
 logger = logging.getLogger("sped-hub.webhooks")
 
@@ -52,7 +52,7 @@ BACKOFF_MAX = 60
 def validate_webhook_url(url: str, *, resolve: bool = False) -> str:
     """Valida URL e bloqueia alvos locais/privados para reduzir risco de SSRF."""
     parsed = urlsplit(url.strip())
-    allow_http = os.environ.get("SPED_HUB_WEBHOOK_ALLOW_HTTP", "false").lower() == "true"
+    allow_http = get_settings().webhook_allow_http
     allowed_schemes = {"https", "http"} if allow_http else {"https"}
     if parsed.scheme.lower() not in allowed_schemes:
         expected = "HTTPS" if not allow_http else "HTTP ou HTTPS"
@@ -87,7 +87,7 @@ def validate_webhook_url(url: str, *, resolve: bool = False) -> str:
                 except socket.gaierror as dns_error:
                     raise ValueError("Hostname do webhook não pôde ser resolvido") from dns_error
                 if not addresses:
-                    raise ValueError("Hostname do webhook não possui endereço válido")
+                    raise ValueError("Hostname do webhook não possui endereço válido") from exc
                 for address in addresses:
                     ensure_public(address)
             elif parsed.hostname.lower() in {"localhost", "localhost.localdomain"}:
@@ -101,11 +101,10 @@ def validate_webhook_url(url: str, *, resolve: bool = False) -> str:
 @dataclass
 class WebhookEvent:
     """Evento disparado internamente."""
+
     tipo: str
     dados: dict = field(default_factory=dict)
-    timestamp: str = field(
-        default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.datetime.now(datetime.UTC).isoformat())
 
 
 class WebhookService:
@@ -229,50 +228,63 @@ class WebhookService:
         """Estatísticas agregadas para o dashboard de webhooks."""
         session = self._get_session()
         try:
-            total_webhooks = session.execute(
-                select(func.count(WebhookRegistration.id))
-            ).scalar() or 0
+            total_webhooks = (
+                session.execute(select(func.count(WebhookRegistration.id))).scalar() or 0
+            )
 
-            total_ativos = session.execute(
-                select(func.count(WebhookRegistration.id)).where(
-                    WebhookRegistration.ativo == True
-                )
-            ).scalar() or 0
+            total_ativos = (
+                session.execute(
+                    select(func.count(WebhookRegistration.id)).where(
+                        WebhookRegistration.ativo.is_(True)
+                    )
+                ).scalar()
+                or 0
+            )
 
-            total_deliveries = session.execute(
-                select(func.count(WebhookDelivery.id))
-            ).scalar() or 0
+            total_deliveries = session.execute(select(func.count(WebhookDelivery.id))).scalar() or 0
 
-            total_success = session.execute(
-                select(func.count(WebhookDelivery.id)).where(
-                    WebhookDelivery.status == "success"
-                )
-            ).scalar() or 0
+            total_success = (
+                session.execute(
+                    select(func.count(WebhookDelivery.id)).where(
+                        WebhookDelivery.status == "success"
+                    )
+                ).scalar()
+                or 0
+            )
 
-            total_failed = session.execute(
-                select(func.count(WebhookDelivery.id)).where(
-                    WebhookDelivery.status == "failed"
-                )
-            ).scalar() or 0
+            total_failed = (
+                session.execute(
+                    select(func.count(WebhookDelivery.id)).where(WebhookDelivery.status == "failed")
+                ).scalar()
+                or 0
+            )
 
             # Últimas 24h
             agora = datetime.datetime.now(datetime.UTC)
             ontem = agora - datetime.timedelta(hours=24)
-            deliveries_24h = session.execute(
-                select(func.count(WebhookDelivery.id)).where(
-                    WebhookDelivery.criado_em >= ontem
-                )
-            ).scalar() or 0
+            deliveries_24h = (
+                session.execute(
+                    select(func.count(WebhookDelivery.id)).where(WebhookDelivery.criado_em >= ontem)
+                ).scalar()
+                or 0
+            )
 
-            success_24h = session.execute(
-                select(func.count(WebhookDelivery.id)).where(
-                    WebhookDelivery.criado_em >= ontem,
-                    WebhookDelivery.status == "success",
-                )
-            ).scalar() or 0
+            success_24h = (
+                session.execute(
+                    select(func.count(WebhookDelivery.id)).where(
+                        WebhookDelivery.criado_em >= ontem,
+                        WebhookDelivery.status == "success",
+                    )
+                ).scalar()
+                or 0
+            )
 
             # Taxa de sucesso
-            taxa_sucesso = round((total_success / total_deliveries * 100), 1) if total_deliveries > 0 else 100.0
+            taxa_sucesso = (
+                round((total_success / total_deliveries * 100), 1)
+                if total_deliveries > 0
+                else 100.0
+            )
 
             return {
                 "total_webhooks": total_webhooks,
@@ -295,11 +307,13 @@ class WebhookService:
         """
         session = self._get_session()
         try:
-            webhooks = session.execute(
-                select(WebhookRegistration).where(
-                    WebhookRegistration.ativo == True
+            webhooks = (
+                session.execute(
+                    select(WebhookRegistration).where(WebhookRegistration.ativo.is_(True))
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         finally:
             session.close()
 
@@ -319,9 +333,7 @@ class WebhookService:
 
         return {"sucessos": sucessos, "falhas": falhas}
 
-    async def _enviar_com_retry(
-        self, wh: WebhookRegistration, evento: WebhookEvent
-    ) -> bool:
+    async def _enviar_com_retry(self, wh: WebhookRegistration, evento: WebhookEvent) -> bool:
         """Envia webhook com retry usando exponential backoff."""
         payload = {
             "evento": evento.tipo,
@@ -337,9 +349,7 @@ class WebhookService:
         }
 
         if wh.secret:
-            signature = hmac.new(
-                wh.secret.encode(), body, hashlib.sha256
-            ).hexdigest()
+            signature = hmac.new(wh.secret.encode(), body, hashlib.sha256).hexdigest()
             headers["X-SPED-HUB-Signature"] = signature
 
         target_url = validate_webhook_url(wh.url, resolve=True)
@@ -348,9 +358,7 @@ class WebhookService:
         last_error = "Max retries exceeded"
         for tentativa in range(1, max_tentativas + 1):
             # Cria registro de entrega
-            delivery = self._criar_delivery(
-                wh.id, evento.tipo, json.dumps(payload), tentativa
-            )
+            delivery = self._criar_delivery(wh.id, evento.tipo, json.dumps(payload), tentativa)
 
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
@@ -358,28 +366,27 @@ class WebhookService:
 
                 if 200 <= response.status_code < 300:
                     self._atualizar_delivery(
-                        delivery.id, "success", response.status_code,
-                        response.text[:2000]
+                        delivery.id, "success", response.status_code, response.text[:2000]
                     )
                     self._atualizar_webhook_stats(wh.id, sucesso=True)
                     return True
                 else:
                     last_error = f"HTTP {response.status_code}"
                     self._atualizar_delivery(
-                        delivery.id, "retrying", response.status_code,
+                        delivery.id,
+                        "retrying",
+                        response.status_code,
                         response.text[:2000],
-                        f"HTTP {response.status_code}"
+                        f"HTTP {response.status_code}",
                     )
 
             except Exception as exc:
                 last_error = str(exc)[:500]
-                self._atualizar_delivery(
-                    delivery.id, "retrying", error=last_error
-                )
+                self._atualizar_delivery(delivery.id, "retrying", error=last_error)
 
             # Backoff antes do próximo retry
             if tentativa < max_tentativas:
-                delay = min(BACKOFF_BASE ** tentativa, BACKOFF_MAX)
+                delay = min(BACKOFF_BASE**tentativa, BACKOFF_MAX)
                 await asyncio.sleep(delay)
 
         # Todas as tentativas falharam
@@ -454,9 +461,11 @@ class WebhookService:
             query = select(WebhookDelivery).where(WebhookDelivery.status == "failed")
             if webhook_id:
                 query = query.where(WebhookDelivery.webhook_id == webhook_id)
-            deliveries = session.execute(
-                query.order_by(WebhookDelivery.criado_em.desc()).limit(100)
-            ).scalars().all()
+            deliveries = (
+                session.execute(query.order_by(WebhookDelivery.criado_em.desc()).limit(100))
+                .scalars()
+                .all()
+            )
             pending = [
                 {
                     "id": delivery.id,

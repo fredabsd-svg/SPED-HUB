@@ -6,7 +6,6 @@ contrapartida(s), débito, crédito e saldo corrente linha a linha.
 
 import datetime
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -15,7 +14,6 @@ from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
     fmt_moeda,
-    saldo_por_natureza,
     valor_sinalizado,
 )
 
@@ -93,7 +91,6 @@ class Razao:
         ).scalar_one_or_none()
 
         nome_cta = pc.nome_cta if pc else cod_cta
-        cod_nat = pc.cod_nat if pc else "01"
 
         # Monta linhas do razão
         linhas = []
@@ -156,21 +153,19 @@ class Razao:
         """Converte linhas para dicionários."""
         return [
             {
-                "data": l.data.isoformat(),
-                "num_lcto": l.num_lcto,
-                "historico": l.historico,
-                "contrapartidas": l.contrapartidas,
-                "debito": fmt_moeda(l.debito) if l.debito else "–",
-                "credito": fmt_moeda(l.credito) if l.credito else "–",
-                "saldo_corrente": fmt_moeda(l.saldo_corrente),
-                "ind_lcto": l.ind_lcto,
+                "data": ln.data.isoformat(),
+                "num_lcto": ln.num_lcto,
+                "historico": ln.historico,
+                "contrapartidas": ln.contrapartidas,
+                "debito": fmt_moeda(ln.debito) if ln.debito else "–",
+                "credito": fmt_moeda(ln.credito) if ln.credito else "–",
+                "saldo_corrente": fmt_moeda(ln.saldo_corrente),
+                "ind_lcto": ln.ind_lcto,
             }
-            for l in linhas
+            for ln in linhas
         ]
 
-    def conferir_saldo_final(
-        self, linhas: list[LinhaRazao], saldo_i155: float
-    ) -> dict:
+    def conferir_saldo_final(self, linhas: list[LinhaRazao], saldo_i155: float) -> dict:
         """Compara o saldo final do razão com o I155."""
         saldo_razao = linhas[-1].saldo_corrente if linhas else 0.0
         div = saldo_razao - saldo_i155

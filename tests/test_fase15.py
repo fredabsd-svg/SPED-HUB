@@ -7,17 +7,11 @@ Cobre:
   4. Playwright E2E — login, upload, dashboard, relatórios
 """
 
-import datetime
-import json
-import os
-import tempfile
 import time
-from pathlib import Path
 
 import pytest
 
 from src.cache.redis_cache import RedisCacheService
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Fixtures
@@ -40,6 +34,7 @@ def redis_cache():
 def email_svc():
     """Email service em modo log."""
     from src.email_service import EmailService
+
     return EmailService(modo="log")
 
 
@@ -282,10 +277,7 @@ class TestWorkerQueue:
             deadline = time.time() + 10
             while time.time() < deadline:
                 q.process_results()
-                all_done = all(
-                    q.status(tid)["status"] in ("completed", "failed")
-                    for tid in ids
-                )
+                all_done = all(q.status(tid)["status"] in ("completed", "failed") for tid in ids)
                 if all_done:
                     break
                 time.sleep(0.1)
@@ -496,7 +488,7 @@ class TestIntegracaoFase15:
         q.start()
 
         try:
-            task_id = q.enqueue("test", {})
+            q.enqueue("test", {})
 
             deadline = time.time() + 5
             while time.time() < deadline:
@@ -518,8 +510,8 @@ class TestIntegracaoFase15:
         é local a cada worker. Verificamos que ambas as tasks completam.
         Cache entre processos requer Redis (testado separadamente).
         """
-        from src.worker_queue import WorkerQueue
         from src.cache.redis_cache import RedisCacheService
+        from src.worker_queue import WorkerQueue
 
         # Cache local ao handler (cada worker tem o seu)
         def handler_com_cache(payload, update_progress):

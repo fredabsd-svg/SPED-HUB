@@ -16,28 +16,22 @@ import time
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
 
+from src.async_jobs import (
+    AsyncJobService,
+    JobStatus,
+    init_async_job_service,
+)
+from src.cache import (
+    CacheService,
+    cached,
+)
 from src.db.models import (
     AsyncJob,
     criar_engine,
     get_session,
     init_db,
 )
-from src.async_jobs import (
-    AsyncJobService,
-    JobInfo,
-    JobStatus,
-    get_async_job_service,
-    init_async_job_service,
-)
-from src.cache import (
-    CacheService,
-    cached,
-    get_cache,
-    init_cache,
-)
-
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -376,6 +370,7 @@ class TestCachedDecorator:
 
         # Força uso do cache de teste
         import src.cache as cache_mod
+
         cache_mod._cache_service = cache_svc
 
         assert pesada(5) == 10
@@ -407,6 +402,7 @@ class TestCachedDecorator:
             return x
 
         import src.cache as cache_mod
+
         cache_mod._cache_service = cache_svc
 
         assert func_a(1) == 1
@@ -426,13 +422,14 @@ class TestUploadAsync:
     def test_upload_async_cria_job(self, db_path):
         """Upload assíncrono cria job e retorna job_id."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
-        from src.auth import init_auth
         from src.audit import init_audit_service
+        from src.auth import init_auth
+        from src.dashboard.app import app
         from src.ratelimit import init_limiter
-        from src.async_jobs import init_async_job_service
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -496,6 +493,7 @@ class TestUploadAsync:
 
         # Poll até concluir (timeout 10s)
         import time
+
         deadline = time.time() + 10
         while time.time() < deadline:
             resp = client.get(f"/api/jobs/{job_id}")
@@ -516,13 +514,14 @@ class TestUploadAsync:
     def test_job_inexistente(self, db_path):
         """GET /api/jobs/999 retorna 404."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
-        from src.auth import init_auth
         from src.audit import init_audit_service
+        from src.auth import init_auth
+        from src.dashboard.app import app
         from src.ratelimit import init_limiter
-        from src.async_jobs import init_async_job_service
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -538,13 +537,14 @@ class TestUploadAsync:
     def test_listar_jobs(self, db_path):
         """GET /api/jobs lista jobs."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
-        from src.auth import init_auth
         from src.audit import init_audit_service
+        from src.auth import init_auth
+        from src.dashboard.app import app
         from src.ratelimit import init_limiter
-        from src.async_jobs import init_async_job_service
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -562,12 +562,14 @@ class TestUploadAsync:
     def test_cache_stats_endpoint(self, db_path):
         """GET /api/cache/stats retorna estatísticas."""
         import os
+
         os.environ["SPED_HUB_DB"] = db_path
 
-        from src.dashboard.app import app
-        from src.auth import init_auth
         from src.audit import init_audit_service
+        from src.auth import init_auth
+        from src.dashboard.app import app
         from src.ratelimit import init_limiter
+
         init_auth(db_path)
         init_audit_service(db_path)
         init_limiter(db_path)
@@ -597,7 +599,9 @@ class TestBenchmark:
         from src.parsers.ecd import ECDParser
 
         linhas = []
-        linhas.append("|0000|LECD|01012024|31122024|EMPRESA BENCH LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||")
+        linhas.append(
+            "|0000|LECD|01012024|31122024|EMPRESA BENCH LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||"
+        )
         linhas.append("|I001|0|")
         linhas.append("|I010|G|009|")
         linhas.append("|I030|01012024|31122024|A|")
@@ -628,21 +632,21 @@ class TestBenchmark:
 
         linhas.append("|I990|99|")
         linhas.append("|9001|0|")
-        linhas.append(f"|9900|0000|1|")
-        linhas.append(f"|9900|I001|1|")
-        linhas.append(f"|9900|I010|1|")
-        linhas.append(f"|9900|I030|1|")
-        linhas.append(f"|9900|I050|100|")
-        linhas.append(f"|9900|I075|5|")
-        linhas.append(f"|9900|I150|1|")
-        linhas.append(f"|9900|I155|100|")
-        linhas.append(f"|9900|I200|200|")
-        linhas.append(f"|9900|I250|400|")
-        linhas.append(f"|9900|I350|1|")
-        linhas.append(f"|9900|I355|10|")
-        linhas.append(f"|9900|I990|1|")
-        linhas.append(f"|9900|9001|1|")
-        linhas.append(f"|9900|9900|15|")
+        linhas.append("|9900|0000|1|")
+        linhas.append("|9900|I001|1|")
+        linhas.append("|9900|I010|1|")
+        linhas.append("|9900|I030|1|")
+        linhas.append("|9900|I050|100|")
+        linhas.append("|9900|I075|5|")
+        linhas.append("|9900|I150|1|")
+        linhas.append("|9900|I155|100|")
+        linhas.append("|9900|I200|200|")
+        linhas.append("|9900|I250|400|")
+        linhas.append("|9900|I350|1|")
+        linhas.append("|9900|I355|10|")
+        linhas.append("|9900|I990|1|")
+        linhas.append("|9900|9001|1|")
+        linhas.append("|9900|9900|15|")
         total = len(linhas)
         linhas.append(f"|9999|{total}|")
 
@@ -690,7 +694,9 @@ class TestBenchmark:
         from src.parsers.ecd import ECDParser
 
         linhas = []
-        linhas.append("|0000|LECD|01012024|31122024|EMPRESA MEDIA LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||")
+        linhas.append(
+            "|0000|LECD|01012024|31122024|EMPRESA MEDIA LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||"
+        )
         linhas.append("|I001|0|")
         linhas.append("|I010|G|009|")
         linhas.append("|I030|01012024|31122024|A|")
@@ -758,7 +764,9 @@ class TestBenchmark:
 
         # Gera arquivo maior (~2000 registros)
         linhas = []
-        linhas.append("|0000|LECD|01012024|31122024|EMPRESA STREAM LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||")
+        linhas.append(
+            "|0000|LECD|01012024|31122024|EMPRESA STREAM LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||"
+        )
         linhas.append("|I001|0|")
         linhas.append("|I010|G|009|")
         linhas.append("|I030|01012024|31122024|A|")
@@ -793,7 +801,7 @@ class TestBenchmark:
             # Streaming: processa sem acumular tudo
             t0 = time.time()
             count = 0
-            for registro in parser.parse(Path(path)):
+            for _registro in parser.parse(Path(path)):
                 count += 1
             t_stream = time.time() - t0
 

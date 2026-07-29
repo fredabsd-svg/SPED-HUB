@@ -17,18 +17,15 @@ Degraus:
   11. = Resultado Líquido do Exercício
 """
 
-import datetime
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import Mapeamento, PlanoConta, SaldoPeriodico, SaldoResultado
+from src.db.models import Mapeamento, PlanoConta, SaldoResultado
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
-    fmt_moeda,
     valor_sinalizado,
 )
 
@@ -44,17 +41,47 @@ class LinhaDRE:
 
 # ── Estrutura default da DRE ──
 DRE_DEFAULT = [
-    {"tipo": "step", "descricao": "Receita Operacional Bruta", "categoria": "receita_bruta", "sinal": 1},
+    {
+        "tipo": "step",
+        "descricao": "Receita Operacional Bruta",
+        "categoria": "receita_bruta",
+        "sinal": 1,
+    },
     {"tipo": "step", "descricao": "(-) Deduções da Receita", "categoria": "deducoes", "sinal": -1},
-    {"tipo": "subtotal", "descricao": "= Receita Operacional Líquida", "categoria": None, "sinal": 0},
+    {
+        "tipo": "subtotal",
+        "descricao": "= Receita Operacional Líquida",
+        "categoria": None,
+        "sinal": 0,
+    },
     {"tipo": "step", "descricao": "(-) Custos", "categoria": "custos", "sinal": -1},
     {"tipo": "subtotal", "descricao": "= Lucro Bruto", "categoria": None, "sinal": 0},
-    {"tipo": "step", "descricao": "(-) Despesas Operacionais", "categoria": "despesas_operacionais", "sinal": -1},
-    {"tipo": "step", "descricao": "(+) Receitas Financeiras", "categoria": "receitas_financeiras", "sinal": 1},
-    {"tipo": "step", "descricao": "(-) Despesas Financeiras", "categoria": "despesas_financeiras", "sinal": -1},
+    {
+        "tipo": "step",
+        "descricao": "(-) Despesas Operacionais",
+        "categoria": "despesas_operacionais",
+        "sinal": -1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(+) Receitas Financeiras",
+        "categoria": "receitas_financeiras",
+        "sinal": 1,
+    },
+    {
+        "tipo": "step",
+        "descricao": "(-) Despesas Financeiras",
+        "categoria": "despesas_financeiras",
+        "sinal": -1,
+    },
     {"tipo": "subtotal", "descricao": "= Resultado Antes IRPJ/CSLL", "categoria": None, "sinal": 0},
     {"tipo": "step", "descricao": "(-) IRPJ / CSLL", "categoria": "irpj_csll", "sinal": -1},
-    {"tipo": "total", "descricao": "= Resultado Líquido do Exercício", "categoria": None, "sinal": 0},
+    {
+        "tipo": "total",
+        "descricao": "= Resultado Líquido do Exercício",
+        "categoria": None,
+        "sinal": 0,
+    },
 ]
 
 
@@ -68,14 +95,16 @@ class DRE:
 
     def _get_mapeamentos(self, empresa_id: int) -> dict[str, list[str]]:
         """Carrega mapeamentos DRE da empresa ou usa defaults."""
-        maps = list(self.session.execute(
-            select(Mapeamento)
-            .where(
-                Mapeamento.empresa_id == empresa_id,
-                Mapeamento.tipo == "dre",
-            )
-            .order_by(Mapeamento.ordem)
-        ).scalars())
+        maps = list(
+            self.session.execute(
+                select(Mapeamento)
+                .where(
+                    Mapeamento.empresa_id == empresa_id,
+                    Mapeamento.tipo == "dre",
+                )
+                .order_by(Mapeamento.ordem)
+            ).scalars()
+        )
 
         if maps:
             result: dict[str, list[str]] = {}
@@ -109,15 +138,52 @@ class DRE:
             # Ordem importa: mais específico primeiro
             if any(t in nome for t in ["IRPJ", "CSLL", "IMPOSTO DE RENDA", "CONTRIBUIÇÃO SOCIAL"]):
                 result["irpj_csll"].append(cod_cta)
-            elif any(t in nome for t in ["DESPESAS FINANC", "DESPESA FINANC", "JUROS P", "JURO P", "VARIAÇÃO MONETÁRIA PASSIVA", "DESCONTO CONCED"]):
+            elif any(
+                t in nome
+                for t in [
+                    "DESPESAS FINANC",
+                    "DESPESA FINANC",
+                    "JUROS P",
+                    "JURO P",
+                    "VARIAÇÃO MONETÁRIA PASSIVA",
+                    "DESCONTO CONCED",
+                ]
+            ):
                 result["despesas_financeiras"].append(cod_cta)
-            elif any(t in nome for t in ["RECEITAS FINANC", "RECEITA FINANC", "JUROS A", "JURO A", "DESCONTO OBT", "RENDIMENTO", "VARIAÇÃO MONETÁRIA ATIVA"]):
+            elif any(
+                t in nome
+                for t in [
+                    "RECEITAS FINANC",
+                    "RECEITA FINANC",
+                    "JUROS A",
+                    "JURO A",
+                    "DESCONTO OBT",
+                    "RENDIMENTO",
+                    "VARIAÇÃO MONETÁRIA ATIVA",
+                ]
+            ):
                 result["receitas_financeiras"].append(cod_cta)
-            elif any(t in nome for t in ["DEVOLU", "CANCEL", "ABATIMENTO", "IMPOSTO S/", "PIS", "COFINS", "ICMS"]):
+            elif any(
+                t in nome
+                for t in ["DEVOLU", "CANCEL", "ABATIMENTO", "IMPOSTO S/", "PIS", "COFINS", "ICMS"]
+            ):
                 result["deducoes"].append(cod_cta)
             elif any(t in nome for t in ["CMV", "CUSTO", "CSP"]):
                 result["custos"].append(cod_cta)
-            elif any(t in nome for t in ["DESPESAS ADMIN", "DESPESA ADMIN", "DESPESAS GERAL", "DESPESA GERAL", "DESPESAS COM", "DESPESA COM", "ADMINISTRATIVA", "SALÁRIO", "VENCIMENTO"]):
+            elif any(
+                t in nome
+                for t in [
+                    "DESPESAS ADMIN",
+                    "DESPESA ADMIN",
+                    "DESPESAS GERAL",
+                    "DESPESA GERAL",
+                    "DESPESAS COM",
+                    "DESPESA COM",
+                    "ADMINISTRATIVA",
+                    "SALÁRIO",
+                    "VENCIMENTO",
+                ]
+            ):
                 result["despesas_operacionais"].append(cod_cta)
             elif any(t in nome for t in ["RECEITAS", "RECEITA", "VENDA", "SERVIÇO", "FATURAMENTO"]):
                 result["receita_bruta"].append(cod_cta)
@@ -126,10 +192,10 @@ class DRE:
 
         return result
 
-
     def _get_ecd_anterior(self) -> int | None:
         """Encontra o ID da ECD do período anterior para a mesma empresa."""
         from src.db.models import ECD
+
         ecd_atual = self.session.get(ECD, self.ecd_id)
         if not ecd_atual:
             return None
@@ -147,9 +213,13 @@ class DRE:
 
     def _get_saldos_resultado_anteriores(self, ecd_anterior_id: int) -> dict[str, float]:
         """Carrega saldos de resultado do período anterior."""
-        saldos_ant = self.session.execute(
-            select(SaldoResultado).where(SaldoResultado.ecd_id == ecd_anterior_id)
-        ).scalars().all()
+        saldos_ant = (
+            self.session.execute(
+                select(SaldoResultado).where(SaldoResultado.ecd_id == ecd_anterior_id)
+            )
+            .scalars()
+            .all()
+        )
         result: dict[str, float] = {}
         for s in saldos_ant:
             vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
@@ -176,6 +246,7 @@ class DRE:
         # Determina empresa_id
         if empresa_id is None:
             from src.db.models import ECD
+
             ecd = self.session.get(ECD, self.ecd_id)
             empresa_id = ecd.empresa_id if ecd else 0
 
@@ -256,7 +327,7 @@ class DRE:
             "resultado_liquido": resultado_liquido,
             "receita_bruta": cat_valores.get("receita_bruta", 0.0),
             "lucro_bruto": next(
-                (l.valor_atual for l in linhas if "Lucro Bruto" in l.descricao), 0.0
+                (ln.valor_atual for ln in linhas if "Lucro Bruto" in ln.descricao), 0.0
             ),
         }
 

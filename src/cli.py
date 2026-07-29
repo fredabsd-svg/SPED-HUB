@@ -18,13 +18,13 @@ from pathlib import Path
 from src.db.models import criar_engine, get_session, init_db
 from src.db.repository import Repository
 from src.ecd_importer import ECDImportService
-from src.filters.engine import FilterCriteria, FilterEngine
+from src.filters.engine import FilterCriteria
 from src.reports.balancete import Balancete
-from src.reports.razao import Razao
 from src.reports.balanco import BalancoPatrimonial
-from src.reports.dre import DRE
 from src.reports.diario import LivroDiario
+from src.reports.dre import DRE
 from src.reports.export_engine import ExportEngine, WhiteLabel
+from src.reports.razao import Razao
 from src.validators.integridade import ValidadorIntegridade
 
 logging.basicConfig(
@@ -46,8 +46,10 @@ def _get_ecd(session, repo, ecd_id=None):
     """Busca ECD por ID ou última importada."""
     if ecd_id:
         return repo.get_ecd(ecd_id)
-    from sqlalchemy import select, desc
+    from sqlalchemy import desc, select
+
     from src.db.models import ECD
+
     return session.execute(
         select(ECD).order_by(desc(ECD.importado_em)).limit(1)
     ).scalar_one_or_none()
@@ -72,6 +74,7 @@ def _build_criterios(args) -> FilterCriteria:
 # ═══════════════════════════════════════════════════════════════════════════
 # importar-ecd
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def cmd_importar_ecd(args):
     """Importa arquivo ECD de forma incremental."""
@@ -99,7 +102,8 @@ def cmd_importar_ecd(args):
         return result
     except Exception:
         logger.exception("Falha ao importar %s", caminho.name)
-        raise SystemExit(1)
+        # O traceback já foi registrado; o encadeamento só poluiria a saída da CLI.
+        raise SystemExit(1) from None
     finally:
         session.close()
 
@@ -107,6 +111,7 @@ def cmd_importar_ecd(args):
 # ═══════════════════════════════════════════════════════════════════════════
 # relatorio
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def cmd_relatorio(args):
     """Gera relatórios."""
@@ -143,20 +148,24 @@ def _cmd_balancete(session, ecd, criterios):
     if ctx.filtros_descricao != "Nenhum filtro aplicado":
         print(f"  Filtros: {ctx.filtros_descricao}")
     print(f"{'='*80}")
-    print(f"{'Conta':<20} {'Nome':<35} {'Nív':>3} {'Sld Inicial':>16} {'Débitos':>16} {'Créditos':>16} {'Sld Final':>16} {'Div':>10}")
+    print(
+        f"{'Conta':<20} {'Nome':<35} {'Nív':>3} {'Sld Inicial':>16} {'Débitos':>16} {'Créditos':>16} {'Sld Final':>16} {'Div':>10}"
+    )
     print(f"{'-'*20} {'-'*35} {'-'*3} {'-'*16} {'-'*16} {'-'*16} {'-'*16} {'-'*10}")
 
-    for l in linhas:
-        indent = "  " * (l.nivel - 1)
-        div = f"R$ {l.divergencia:,.2f}" if l.tem_divergencia else "–"
+    for ln in linhas:
+        indent = "  " * (ln.nivel - 1)
+        div = f"R$ {ln.divergencia:,.2f}" if ln.tem_divergencia else "–"
         print(
-            f"{indent}{l.cod_cta:<20} {l.nome_cta[:35]:<35} {l.nivel:>3} "
-            f"{l.saldo_inicial:>16,.2f} {l.debitos:>16,.2f} {l.creditos:>16,.2f} "
-            f"{l.saldo_final:>16,.2f} {div:>10}"
+            f"{indent}{ln.cod_cta:<20} {ln.nome_cta[:35]:<35} {ln.nivel:>3} "
+            f"{ln.saldo_inicial:>16,.2f} {ln.debitos:>16,.2f} {ln.creditos:>16,.2f} "
+            f"{ln.saldo_final:>16,.2f} {div:>10}"
         )
 
     conf = balancete.conferir(linhas)
-    print(f"\nConferência: {conf['status']} — {conf['contas_com_divergencia']}/{conf['total_contas']} contas com divergência")
+    print(
+        f"\nConferência: {conf['status']} — {conf['contas_com_divergencia']}/{conf['total_contas']} contas com divergência"
+    )
 
 
 def _cmd_razao(session, ecd, criterios, args):
@@ -173,14 +182,16 @@ def _cmd_razao(session, ecd, criterios, args):
     if ctx.filtros_descricao != "Nenhum filtro aplicado":
         print(f"  Filtros: {ctx.filtros_descricao}")
     print(f"{'='*80}")
-    print(f"{'Data':<12} {'Nº Lcto':<15} {'Histórico':<30} {'Contrapartidas':<25} {'Débito':>14} {'Crédito':>14} {'Saldo':>14}")
+    print(
+        f"{'Data':<12} {'Nº Lcto':<15} {'Histórico':<30} {'Contrapartidas':<25} {'Débito':>14} {'Crédito':>14} {'Saldo':>14}"
+    )
     print(f"{'-'*12} {'-'*15} {'-'*30} {'-'*25} {'-'*14} {'-'*14} {'-'*14}")
 
-    for l in linhas:
+    for ln in linhas:
         print(
-            f"{l.data.isoformat():<12} {l.num_lcto:<15} {l.historico[:30]:<30} "
-            f"{l.contrapartidas[:25]:<25} "
-            f"{l.debito:>14,.2f} {l.credito:>14,.2f} {l.saldo_corrente:>14,.2f}"
+            f"{ln.data.isoformat():<12} {ln.num_lcto:<15} {ln.historico[:30]:<30} "
+            f"{ln.contrapartidas[:25]:<25} "
+            f"{ln.debito:>14,.2f} {ln.credito:>14,.2f} {ln.saldo_corrente:>14,.2f}"
         )
 
 
@@ -202,9 +213,9 @@ def _cmd_balanco(session, ecd, criterios, args):
         print(f"\n  ── {titulo} ──")
         print(f"  {'Conta':<20} {'Nome':<40} {'Saldo':>18}")
         print(f"  {'-'*20} {'-'*40} {'-'*18}")
-        for l in grupos[secao]:
-            indent = "  " * (l.nivel - 1)
-            print(f"  {indent}{l.cod_cta:<20} {l.nome_cta[:40]:<40} {l.saldo_atual:>18,.2f}")
+        for ln in grupos[secao]:
+            indent = "  " * (ln.nivel - 1)
+            print(f"  {indent}{ln.cod_cta:<20} {ln.nome_cta[:40]:<40} {ln.saldo_atual:>18,.2f}")
         total = totais[secao]
         print(f"  {'─'*20} {'─'*40} {'─'*18}")
         print(f"  {'TOTAL':<20} {'':<40} {total:>18,.2f}")
@@ -227,13 +238,13 @@ def _cmd_dre(session, ecd, criterios):
     print(f"  {'Descrição':<50} {'Valor':>18}")
     print(f"  {'-'*50} {'-'*18}")
 
-    for l in linhas:
+    for ln in linhas:
         marker = ""
-        if l.tipo == "subtotal":
+        if ln.tipo == "subtotal":
             marker = "  "
-        elif l.tipo == "total":
+        elif ln.tipo == "total":
             marker = "══"
-        print(f"  {marker}{l.descricao:<50} {l.valor_atual:>18,.2f}")
+        print(f"  {marker}{ln.descricao:<50} {ln.valor_atual:>18,.2f}")
 
     print(f"\n  Resultado Líquido: {totais['resultado_liquido']:,.2f}")
 
@@ -265,6 +276,7 @@ def _cmd_diario(session, ecd, criterios):
 # exportar
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def cmd_exportar(args):
     """Exporta relatório para PDF ou XLSX."""
     engine = criar_engine(args.db)
@@ -278,6 +290,7 @@ def cmd_exportar(args):
 
     # Busca empresa
     from src.db.models import Empresa
+
     empresa = session.get(Empresa, ecd.empresa_id)
 
     criterios = _build_criterios(args)
@@ -293,6 +306,7 @@ def cmd_exportar(args):
     # Carrega logo se fornecida
     if args.logo and Path(args.logo).exists():
         import base64
+
         with open(args.logo, "rb") as f:
             wl.logo_base64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode()}"
 
@@ -300,6 +314,7 @@ def cmd_exportar(args):
 
     # Preenche contexto
     from src.reports.base import ReportContext
+
     ctx = ReportContext(
         titulo="",
         empresa_nome=empresa.nome if empresa else "",
@@ -344,7 +359,9 @@ def _export_pdf(args, session, ecd, ctx, criterios, wl, export, output_path):
         ctx_rel, lancamentos, totais = diario.gerar(criterios)
         ctx.titulo = ctx_rel.titulo
         ctx.filtros_descricao = ctx_rel.filtros_descricao
-        export.export_pdf("diario.html", output_path, ctx, wl, lancamentos=lancamentos, totais=totais)
+        export.export_pdf(
+            "diario.html", output_path, ctx, wl, lancamentos=lancamentos, totais=totais
+        )
 
     elif args.tipo == "balancete":
         balancete = Balancete(session, ecd.id)
@@ -353,8 +370,18 @@ def _export_pdf(args, session, ecd, ctx, criterios, wl, export, output_path):
         ctx.filtros_descricao = ctx_rel.filtros_descricao
         # Balancete usa template genérico — renderiza como tabela
         linhas_dict = balancete.to_dict(linhas)
-        colunas = ["cod_cta", "nome_cta", "nivel", "saldo_inicial", "debitos", "creditos", "saldo_final"]
-        export.export_xlsx(output_path.replace(".pdf", ".xlsx"), ctx, linhas_dict, colunas, ctx.titulo, wl)
+        colunas = [
+            "cod_cta",
+            "nome_cta",
+            "nivel",
+            "saldo_inicial",
+            "debitos",
+            "creditos",
+            "saldo_final",
+        ]
+        export.export_xlsx(
+            output_path.replace(".pdf", ".xlsx"), ctx, linhas_dict, colunas, ctx.titulo, wl
+        )
         logger.info("Balancete exportado como XLSX (formato tabular)")
         return
 
@@ -368,7 +395,16 @@ def _export_xlsx(args, session, ecd, ctx, criterios, wl, export, output_path):
         ctx_rel, linhas = balancete.gerar(criterios)
         ctx.titulo = ctx_rel.titulo
         linhas_dict = balancete.to_dict(linhas)
-        colunas = ["cod_cta", "nome_cta", "nivel", "saldo_inicial", "debitos", "creditos", "saldo_final", "divergencia"]
+        colunas = [
+            "cod_cta",
+            "nome_cta",
+            "nivel",
+            "saldo_inicial",
+            "debitos",
+            "creditos",
+            "saldo_final",
+            "divergencia",
+        ]
         export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
     elif args.tipo == "balanco":
@@ -382,13 +418,15 @@ def _export_xlsx(args, session, ecd, ctx, criterios, wl, export, output_path):
 
         linhas_dict = []
         for secao, nome in [("ativo", "Ativo"), ("passivo", "Passivo"), ("pl", "PL")]:
-            for l in grupos[secao]:
-                linhas_dict.append({
-                    "secao": nome,
-                    "cod_cta": l.cod_cta,
-                    "nome_cta": l.nome_cta,
-                    "saldo_atual": l.saldo_atual,
-                })
+            for ln in grupos[secao]:
+                linhas_dict.append(
+                    {
+                        "secao": nome,
+                        "cod_cta": ln.cod_cta,
+                        "nome_cta": ln.nome_cta,
+                        "saldo_atual": ln.saldo_atual,
+                    }
+                )
         colunas = ["secao", "cod_cta", "nome_cta", "saldo_atual"]
         export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
@@ -397,8 +435,8 @@ def _export_xlsx(args, session, ecd, ctx, criterios, wl, export, output_path):
         ctx_rel, linhas, totais = dre.gerar(criterios)
         ctx.titulo = ctx_rel.titulo
         linhas_dict = [
-            {"tipo": l.tipo, "descricao": l.descricao, "valor_atual": l.valor_atual}
-            for l in linhas
+            {"tipo": ln.tipo, "descricao": ln.descricao, "valor_atual": ln.valor_atual}
+            for ln in linhas
         ]
         colunas = ["tipo", "descricao", "valor_atual"]
         export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
@@ -410,14 +448,16 @@ def _export_xlsx(args, session, ecd, ctx, criterios, wl, export, output_path):
         linhas_dict = []
         for lanc in lancamentos:
             for p in lanc.partidas:
-                linhas_dict.append({
-                    "num_lcto": lanc.num_lcto,
-                    "data": lanc.data,
-                    "cod_cta": p.cod_cta,
-                    "historico": p.historico,
-                    "debito": p.debito if p.debito else "",
-                    "credito": p.credito if p.credito else "",
-                })
+                linhas_dict.append(
+                    {
+                        "num_lcto": lanc.num_lcto,
+                        "data": lanc.data,
+                        "cod_cta": p.cod_cta,
+                        "historico": p.historico,
+                        "debito": p.debito if p.debito else "",
+                        "credito": p.credito if p.credito else "",
+                    }
+                )
         colunas = ["num_lcto", "data", "cod_cta", "historico", "debito", "credito"]
         export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
@@ -427,6 +467,7 @@ def _export_xlsx(args, session, ecd, ctx, criterios, wl, export, output_path):
 # ═══════════════════════════════════════════════════════════════════════════
 # validar
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def cmd_validar(args):
     """Executa validações de integridade."""
@@ -462,6 +503,7 @@ def cmd_validar(args):
 # filtros
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def cmd_filtros(args):
     """Gerencia visões salvas de filtros."""
     engine = criar_engine(args.db)
@@ -477,6 +519,7 @@ def cmd_filtros(args):
 
     elif args.acao == "salvar":
         import json
+
         criterios = json.loads(args.criterios) if args.criterios else {}
         fv = repo.salvar_filter_view(args.nome, criterios)
         repo.commit()
@@ -486,6 +529,7 @@ def cmd_filtros(args):
         fv = repo.get_filter_view(args.nome)
         if fv:
             import json
+
             print(json.dumps(fv.get_criterios(), indent=2, ensure_ascii=False))
         else:
             print(f"Visão '{args.nome}' não encontrada.")
@@ -495,13 +539,15 @@ def cmd_filtros(args):
 # info
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 def cmd_info(args):
     """Exibe informações do banco."""
     engine = criar_engine(args.db)
     session = get_session(engine)
 
-    from sqlalchemy import select, func
-    from src.db.models import Empresa, ECD, PlanoConta, Lancamento, Partida, SaldoPeriodico
+    from sqlalchemy import func, select
+
+    from src.db.models import ECD, Empresa, Lancamento, Partida, PlanoConta
 
     print(f"\nBanco: {args.db}")
     print(f"Empresas: {session.execute(select(func.count(Empresa.id))).scalar()}")
@@ -519,13 +565,16 @@ def cmd_info(args):
         n_partidas = session.execute(
             select(func.count(Partida.id)).join(Lancamento).where(Lancamento.ecd_id == e.id)
         ).scalar()
-        print(f"  ECD #{e.id}: {emp.nome if emp else '?'} | {e.dt_ini}–{e.dt_fin} | "
-              f"{n_contas} contas | {n_lancs} lançamentos | {n_partidas} partidas")
+        print(
+            f"  ECD #{e.id}: {emp.nome if emp else '?'} | {e.dt_ini}–{e.dt_fin} | "
+            f"{n_contas} contas | {n_lancs} lançamentos | {n_partidas} partidas"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # main
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -541,32 +590,43 @@ def main():
 
     # relatorio
     p_rel = sub.add_parser("relatorio", help="Gerar relatórios")
-    p_rel.add_argument("tipo", choices=["balancete", "razao", "balanco", "dre", "diario"],
-                       help="Tipo de relatório")
+    p_rel.add_argument(
+        "tipo", choices=["balancete", "razao", "balanco", "dre", "diario"], help="Tipo de relatório"
+    )
     p_rel.add_argument("--conta", help="Código da conta (obrigatório para razão)")
     p_rel.add_argument("--natureza", help="Filtrar por natureza (01-05,09)")
     p_rel.add_argument("--nivel-ate", help="Profundidade máxima")
     p_rel.add_argument("--dt-ini", help="Data inicial (DDMMAAAA ou AAAA-MM-DD)")
     p_rel.add_argument("--dt-fin", help="Data final (DDMMAAAA ou AAAA-MM-DD)")
-    p_rel.add_argument("--visao", choices=["hierarquica", "publicacao"],
-                        default="hierarquica", help="Visão do balanço (default: hierarquica)")
+    p_rel.add_argument(
+        "--visao",
+        choices=["hierarquica", "publicacao"],
+        default="hierarquica",
+        help="Visão do balanço (default: hierarquica)",
+    )
     p_rel.add_argument("--ecd-id", type=int, help="ID da ECD (default: última importada)")
     p_rel.add_argument("--db", default="sped_hub.db", help="Banco SQLite")
 
     # exportar
     p_exp = sub.add_parser("exportar", help="Exportar relatório para PDF/XLSX")
-    p_exp.add_argument("tipo", choices=["balancete", "balanco", "dre", "diario"],
-                       help="Tipo de relatório")
-    p_exp.add_argument("--formato", choices=["pdf", "xlsx"], default="pdf",
-                       help="Formato de saída (default: pdf)")
+    p_exp.add_argument(
+        "tipo", choices=["balancete", "balanco", "dre", "diario"], help="Tipo de relatório"
+    )
+    p_exp.add_argument(
+        "--formato", choices=["pdf", "xlsx"], default="pdf", help="Formato de saída (default: pdf)"
+    )
     p_exp.add_argument("--saida", help="Caminho do arquivo de saída")
     p_exp.add_argument("--conta", help="Código da conta (filtro)")
     p_exp.add_argument("--natureza", help="Filtrar por natureza")
     p_exp.add_argument("--nivel-ate", help="Profundidade máxima")
     p_exp.add_argument("--dt-ini", help="Data inicial")
     p_exp.add_argument("--dt-fin", help="Data final")
-    p_exp.add_argument("--visao", choices=["hierarquica", "publicacao"],
-                        default="hierarquica", help="Visão do balanço")
+    p_exp.add_argument(
+        "--visao",
+        choices=["hierarquica", "publicacao"],
+        default="hierarquica",
+        help="Visão do balanço",
+    )
     p_exp.add_argument("--ecd-id", type=int, help="ID da ECD")
     p_exp.add_argument("--db", default="sped_hub.db", help="Banco SQLite")
     # White-label

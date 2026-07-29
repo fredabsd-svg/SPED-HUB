@@ -18,13 +18,14 @@ Para sobrescrever em testes, basta ajustar o ambiente ou a função
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Mapping
 
+from src.version import APP_VERSION
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_CACHE: dict[tuple, "Settings"] = {}
+_CACHE: dict[tuple, Settings] = {}
 
 
 def _coerce_bool(value: str | bool | None, default: bool = False) -> bool:
@@ -34,6 +35,35 @@ def _coerce_bool(value: str | bool | None, default: bool = False) -> bool:
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "on", "y", "t"}
+
+
+_SQLITE_INLINE_URLS = {
+    ":memory:": "sqlite:///:memory:",
+    "": "sqlite:///:memory:",
+}
+
+
+def caminho_para_url_sqlite(caminho: str) -> str:
+    """Converte um caminho de arquivo SQLite (ou URL pronta) em URL SQLAlchemy.
+
+    Regras:
+        * URL já formada (contém ``://``) passa intacta.
+        * ``:memory:`` e vazio → ``sqlite:///:memory:``.
+        * Caminho absoluto → ``sqlite:///{caminho}`` — a barra do próprio
+          caminho compõe as quatro barras que o SQLAlchemy espera.
+        * Caminho relativo → ``sqlite:///./{caminho}``.
+
+    O tratamento do caminho absoluto é o ponto delicado: um ``lstrip("./")``
+    ingênuo remove a barra inicial e transforma ``/tmp/x.db`` no *relativo*
+    ``sqlite:///./tmp/x.db``, apontando para outro banco.
+    """
+    if "://" in caminho:
+        return caminho
+    if caminho in _SQLITE_INLINE_URLS:
+        return _SQLITE_INLINE_URLS[caminho]
+    if caminho.startswith("/"):
+        return f"sqlite:///{caminho}"
+    return f"sqlite:///./{caminho}"
 
 
 def _coerce_int(value: str | int | None, default: int) -> int:
@@ -59,6 +89,10 @@ class Settings:
     # Ambiente
     env: str = "dev"  # dev | test | prod
     debug: bool = False
+    # RESERVADO: nenhum componente consome esta chave hoje.  Sessões e tokens
+    # usam ``secrets.token_hex`` (CSPRNG, dispensa chave) e a assinatura de
+    # webhook usa o segredo por registro.  Mantida para quando surgir uma
+    # necessidade real de assinatura global — não confie nela como proteção.
     secret_key: str = "change-me-in-production"
 
     # Banco de dados
@@ -67,15 +101,27 @@ class Settings:
 
     # Aplicação
     app_name: str = "SPED-HUB"
-    app_version: str = "0.15.0"
+    app_version: str = APP_VERSION
     default_db_path: str = "sped_hub.db"
     log_level: str = "INFO"
     allowed_hosts: tuple[str, ...] = field(default_factory=lambda: ("*",))
 
+    # Servidor (uvicorn)
+    host: str = "127.0.0.1"
+    port: int = 8000
+    reload: bool = False
+
     # Uploads e processamento
     max_upload_mb: int = 200
+    # Alias legado em bytes (``SPED_HUB_MAX_UPLOAD_BYTES``).  Quando definido
+    # vence ``max_upload_mb`` — ver a propriedade ``max_upload_bytes``.
+    max_upload_bytes_override: int | None = None
+    upload_dir: str = str(PROJECT_ROOT / "uploads")
     ecd_import_chunk_rows: int = 5_000
     ecd_import_chunk_bytes: int = 8 * 1024 * 1024  # 8MB de arquivo lido por vez
+
+    # Workers
+    worker_count: int = 4
 
     # Observabilidade
     monitoring_retention_hours: int = 24
@@ -97,6 +143,9 @@ class Settings:
     # Webhooks
     webhook_default_max_retries: int = 3
     webhook_timeout_seconds: int = 10
+    # Permite destino http:// (só para desenvolvimento — em produção o
+    # webhook exige https e endereço público).
+    webhook_allow_http: bool = False
 
     # Rate limiting
     rate_limit_default: int = 100
@@ -119,7 +168,7 @@ class Settings:
         if not self.is_sqlite:
             return None
         prefix = "sqlite:///"
-        url = self.database_url[len(prefix):]
+        url = self.database_url[len(prefix) :]
         if url == ":memory:":
             return ":memory:"
         # Caminhos relativos passam a ser resolvidos a partir da raiz do projeto.
@@ -131,6 +180,22 @@ class Settings:
     @property
     def cors_origins(self) -> tuple[str, ...]:
         return self.allowed_hosts
+
+    @property
+    def max_upload_bytes(self) -> int:
+        """Limite de upload em bytes.
+
+        ``SPED_HUB_MAX_UPLOAD_BYTES`` (legado, em bytes) tem precedência sobre
+        ``SPED_HUB_MAX_UPLOAD_MB``; valores não positivos caem no default.
+        """
+        if self.max_upload_bytes_override and self.max_upload_bytes_override > 0:
+            return self.max_upload_bytes_override
+        return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def redis_url_or_local(self) -> str:
+        """URL do Redis, caindo no localhost padrão quando não configurada."""
+        return self.redis_url or "redis://localhost:6379/0"
 
 
 # Mapeamento das variáveis de ambiente suportadas.  Strings vazias são
@@ -144,10 +209,16 @@ _ENV_TO_FIELD: Mapping[str, str] = {
     "DATABASE_URL": "database_url",
     "SPED_HUB_DB_ECHO": "database_echo",
     "SPED_HUB_LOG_LEVEL": "log_level",
+    "SPED_HUB_HOST": "host",
+    "SPED_HUB_PORT": "port",
+    "SPED_HUB_RELOAD": "reload",
     "SPED_HUB_ALLOWED_HOSTS": "allowed_hosts",
     "SPED_HUB_MAX_UPLOAD_MB": "max_upload_mb",
+    "SPED_HUB_MAX_UPLOAD_BYTES": "max_upload_bytes_override",
+    "SPED_HUB_UPLOAD_DIR": "upload_dir",
     "SPED_HUB_ECD_CHUNK_ROWS": "ecd_import_chunk_rows",
     "SPED_HUB_ECD_CHUNK_BYTES": "ecd_import_chunk_bytes",
+    "WORKER_COUNT": "worker_count",
     "SPED_HUB_MONITORING_RETENTION_HOURS": "monitoring_retention_hours",
     "SPED_HUB_METRICS_WINDOW_MINUTES": "metrics_window_minutes",
     "SMTP_HOST": "smtp_host",
@@ -160,12 +231,22 @@ _ENV_TO_FIELD: Mapping[str, str] = {
     "REDIS_URL": "redis_url",
     "SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES": "webhook_default_max_retries",
     "SPED_HUB_WEBHOOK_TIMEOUT": "webhook_timeout_seconds",
+    "SPED_HUB_WEBHOOK_ALLOW_HTTP": "webhook_allow_http",
     "SPED_HUB_RATE_LIMIT_DEFAULT": "rate_limit_default",
     "SPED_HUB_RATE_LIMIT_WINDOW": "rate_limit_window_seconds",
 }
 
+# Nomes antigos ainda aceitos, para não quebrar deploys existentes (o
+# docker-compose.yml, por exemplo, sempre passou SMTP_PASS/SMTP_FROM).
+# O nome documentado tem precedência quando ambos estiverem definidos.
+_LEGACY_ALIASES: Mapping[str, str] = {
+    "SMTP_PASS": "SMTP_PASSWORD",
+    "SMTP_FROM": "EMAIL_FROM",
+}
+
 _INT_FIELDS = {
     "max_upload_mb",
+    "max_upload_bytes_override",
     "ecd_import_chunk_rows",
     "ecd_import_chunk_bytes",
     "monitoring_retention_hours",
@@ -175,6 +256,20 @@ _INT_FIELDS = {
     "webhook_timeout_seconds",
     "rate_limit_default",
     "rate_limit_window_seconds",
+    "worker_count",
+    "port",
+}
+
+# Campos booleanos precisam de coerção explícita: sem isto, ``EMAIL_ENABLED=false``
+# vira a *string* ``"false"``, que é verdadeira em Python — desligar a opção a
+# ligava.  Valia para todos os booleanos menos ``debug``.
+_BOOL_FIELDS = {
+    "debug",
+    "database_echo",
+    "smtp_use_tls",
+    "email_enabled",
+    "webhook_allow_http",
+    "reload",
 }
 
 
@@ -186,16 +281,21 @@ def _read_env(environ: Mapping[str, str] | None = None) -> dict:
     for env_key, field_name in _ENV_TO_FIELD.items():
         raw = env.get(env_key)
         if raw is None or raw == "":
+            # Nome documentado ausente: aceita o alias legado, se houver.
+            for legado, oficial in _LEGACY_ALIASES.items():
+                if oficial == env_key:
+                    raw = env.get(legado)
+                    break
+        if raw is None or raw == "":
             continue
-        if field_name == "debug":
-            overrides[field_name] = _coerce_bool(raw)
+        if field_name in _BOOL_FIELDS:
+            default = Settings.__dataclass_fields__[field_name].default
+            overrides[field_name] = _coerce_bool(raw, default)
         elif field_name in _INT_FIELDS:
             default = Settings.__dataclass_fields__[field_name].default
             overrides[field_name] = _coerce_int(raw, default)
         elif field_name == "allowed_hosts":
-            overrides[field_name] = tuple(
-                h.strip() for h in raw.split(",") if h.strip()
-            )
+            overrides[field_name] = tuple(h.strip() for h in raw.split(",") if h.strip())
         else:
             overrides[field_name] = raw
 
@@ -203,18 +303,12 @@ def _read_env(environ: Mapping[str, str] | None = None) -> dict:
     #   1) DATABASE_URL sempre vence (já lido acima).
     #   2) SPED_HUB_DB (legado) só é usado para preencher DATABASE_URL
     #      quando ``DATABASE_URL`` não estiver definido.  Aceita caminho
-    #      relativo puro ou ":memory:".
+    #      absoluto, relativo ou ":memory:".
     db_url = env.get("DATABASE_URL")
     db_legacy = env.get("SPED_HUB_DB")
 
-    if db_url is None or db_url == "":
-        if db_legacy:
-            if db_legacy == ":memory:":
-                overrides["database_url"] = "sqlite:///:memory:"
-            elif "://" in db_legacy:
-                overrides["database_url"] = db_legacy
-            else:
-                overrides["database_url"] = f"sqlite:///./{db_legacy.lstrip('./')}"
+    if (db_url is None or db_url == "") and db_legacy:
+        overrides["database_url"] = caminho_para_url_sqlite(db_legacy)
     return overrides
 
 
@@ -224,7 +318,7 @@ def _cache_key(environ: Mapping[str, str] | None) -> tuple:
         env = os.environ
     else:
         env = environ
-    keys = sorted(set(_ENV_TO_FIELD.keys()) | {"SPED_HUB_DB"})
+    keys = sorted(set(_ENV_TO_FIELD.keys()) | set(_LEGACY_ALIASES.keys()) | {"SPED_HUB_DB"})
     return tuple((k, env.get(k, "")) for k in keys)
 
 
@@ -238,6 +332,20 @@ def get_settings(environ: Mapping[str, str] | None = None) -> Settings:
     if environ is None:
         _CACHE[key] = settings
     return settings
+
+
+def database_reference() -> str:
+    """Referência de banco para componentes que recebem ``db_path: str``.
+
+    Devolve sempre a URL SQLAlchemy corrente.  ``criar_engine`` aceita tanto
+    URL quanto caminho de arquivo, então isto é compatível com todos os
+    chamadores existentes — e, ao contrário de ler ``SPED_HUB_DB`` direto do
+    ambiente, respeita ``DATABASE_URL``.
+
+    É lido a cada chamada (não em tempo de import) porque as fixtures de teste
+    trocam o banco em runtime.
+    """
+    return get_settings().database_url
 
 
 def reset_settings_cache() -> None:

@@ -21,9 +21,9 @@ from pathlib import Path
 from sqlalchemy import func, select
 
 from src.db.models import (
+    ECD,
     AsyncJob,
     AuditLog,
-    ECD,
     Empresa,
     WebhookDelivery,
     criar_engine,
@@ -145,32 +145,47 @@ def _database_metrics(db_path: str, minutes: int) -> dict:
     try:
         companies = session.execute(select(func.count(Empresa.id))).scalar() or 0
         ecds = session.execute(select(func.count(ECD.id))).scalar() or 0
-        active_jobs = session.execute(
-            select(func.count(AsyncJob.id)).where(
-                AsyncJob.status.in_(["pending", "processing"])
-            )
-        ).scalar() or 0
-        failed_jobs = session.execute(
-            select(func.count(AsyncJob.id)).where(
-                AsyncJob.status == "failed",
-                AsyncJob.criado_em >= cutoff,
-            )
-        ).scalar() or 0
-        failed_webhooks = session.execute(
-            select(func.count(WebhookDelivery.id)).where(
-                WebhookDelivery.status == "failed",
-                WebhookDelivery.criado_em >= cutoff,
-            )
-        ).scalar() or 0
-        audit_events = session.execute(
-            select(func.count(AuditLog.id)).where(AuditLog.criado_em >= cutoff)
-        ).scalar() or 0
-        audit_errors = session.execute(
-            select(func.count(AuditLog.id)).where(
-                AuditLog.criado_em >= cutoff,
-                AuditLog.status_code >= 400,
-            )
-        ).scalar() or 0
+        active_jobs = (
+            session.execute(
+                select(func.count(AsyncJob.id)).where(
+                    AsyncJob.status.in_(["pending", "processing"])
+                )
+            ).scalar()
+            or 0
+        )
+        failed_jobs = (
+            session.execute(
+                select(func.count(AsyncJob.id)).where(
+                    AsyncJob.status == "failed",
+                    AsyncJob.criado_em >= cutoff,
+                )
+            ).scalar()
+            or 0
+        )
+        failed_webhooks = (
+            session.execute(
+                select(func.count(WebhookDelivery.id)).where(
+                    WebhookDelivery.status == "failed",
+                    WebhookDelivery.criado_em >= cutoff,
+                )
+            ).scalar()
+            or 0
+        )
+        audit_events = (
+            session.execute(
+                select(func.count(AuditLog.id)).where(AuditLog.criado_em >= cutoff)
+            ).scalar()
+            or 0
+        )
+        audit_errors = (
+            session.execute(
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.criado_em >= cutoff,
+                    AuditLog.status_code >= 400,
+                )
+            ).scalar()
+            or 0
+        )
         return {
             "status": "ok",
             "companies": companies,
@@ -203,7 +218,9 @@ def _database_size(db_path: str) -> int:
 def _process_metrics() -> dict:
     usage = resource.getrusage(resource.RUSAGE_SELF)
     # Linux reports KiB; macOS reports bytes. The project deploy target is Linux.
-    rss_bytes = int(usage.ru_maxrss * 1024) if sys.platform.startswith("linux") else int(usage.ru_maxrss)
+    rss_bytes = (
+        int(usage.ru_maxrss * 1024) if sys.platform.startswith("linux") else int(usage.ru_maxrss)
+    )
     return {
         "rss_bytes": rss_bytes,
         "threads": threading.active_count(),

@@ -12,8 +12,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.db.models import (
-    Aglutinacao,
     ECD,
+    Aglutinacao,
     Empresa,
     Lancamento,
     Mapeamento,
@@ -27,10 +27,10 @@ from src.db.models import (
 )
 from src.filters.engine import FilterCriteria
 from src.reports.balanco import BalancoPatrimonial
-from src.reports.dre import DRE
-from src.reports.diario import LivroDiario
-from src.reports.export_engine import ExportEngine, WhiteLabel
 from src.reports.base import ReportContext
+from src.reports.diario import LivroDiario
+from src.reports.dre import DRE
+from src.reports.export_engine import ExportEngine, WhiteLabel
 
 
 @pytest.fixture
@@ -87,10 +87,17 @@ def db():
         ("4.6", "4", "IRPJ/CSLL", "04", "A", 2),
     ]
     for cod_cta, sup, nome, nat, ind, niv in contas_data:
-        session.add(PlanoConta(
-            ecd_id=ecd.id, cod_cta=cod_cta, cod_cta_sup=sup,
-            nome_cta=nome, cod_nat=nat, ind_cta=ind, nivel=niv,
-        ))
+        session.add(
+            PlanoConta(
+                ecd_id=ecd.id,
+                cod_cta=cod_cta,
+                cod_cta_sup=sup,
+                nome_cta=nome,
+                cod_nat=nat,
+                ind_cta=ind,
+                nivel=niv,
+            )
+        )
     session.flush()
 
     # Saldos Periódicos (I155) — valores sinalizados internamente
@@ -109,55 +116,85 @@ def db():
         ("3.2", 85000.0, "C", 0.0, 0.0, 85000.0, "C"),
     ]
     for cod_cta, si, dci, deb, cred, sf, dcf in saldos_data:
-        session.add(SaldoPeriodico(
-            ecd_id=ecd.id, cod_cta=cod_cta,
-            dt_ini=datetime.date(2024, 1, 1),
-            dt_fin=datetime.date(2024, 12, 31),
-            vl_sld_ini=si, ind_dc_ini=dci,
-            vl_deb=deb, vl_cred=cred,
-            vl_sld_fin=sf, ind_dc_fin=dcf,
-        ))
+        session.add(
+            SaldoPeriodico(
+                ecd_id=ecd.id,
+                cod_cta=cod_cta,
+                dt_ini=datetime.date(2024, 1, 1),
+                dt_fin=datetime.date(2024, 12, 31),
+                vl_sld_ini=si,
+                ind_dc_ini=dci,
+                vl_deb=deb,
+                vl_cred=cred,
+                vl_sld_fin=sf,
+                ind_dc_fin=dcf,
+            )
+        )
     session.flush()
 
     # Saldos Resultado (I355)
     res_data = [
-        ("4.1", 500000.0, "C"),   # Receita Vendas
-        ("4.2", 300000.0, "D"),   # CMV
-        ("4.3", 80000.0, "D"),    # Desp Admin
-        ("4.4", 5000.0, "C"),     # Rec Financeiras
-        ("4.5", 10000.0, "D"),    # Desp Financeiras
-        ("4.6", 30000.0, "D"),    # IRPJ/CSLL
+        ("4.1", 500000.0, "C"),  # Receita Vendas
+        ("4.2", 300000.0, "D"),  # CMV
+        ("4.3", 80000.0, "D"),  # Desp Admin
+        ("4.4", 5000.0, "C"),  # Rec Financeiras
+        ("4.5", 10000.0, "D"),  # Desp Financeiras
+        ("4.6", 30000.0, "D"),  # IRPJ/CSLL
     ]
     for cod_cta, sf, dcf in res_data:
-        session.add(SaldoResultado(
-            ecd_id=ecd.id, cod_cta=cod_cta,
-            dt_res=datetime.date(2024, 12, 31),
-            vl_sld_fin=sf, ind_dc_fin=dcf,
-        ))
+        session.add(
+            SaldoResultado(
+                ecd_id=ecd.id,
+                cod_cta=cod_cta,
+                dt_res=datetime.date(2024, 12, 31),
+                vl_sld_fin=sf,
+                ind_dc_fin=dcf,
+            )
+        )
     session.flush()
 
     # Lançamentos e Partidas
     lanc = Lancamento(
-        ecd_id=ecd.id, num_lcto="1",
+        ecd_id=ecd.id,
+        num_lcto="1",
         dt_lcto=datetime.date(2024, 1, 15),
-        vl_lcto=10000.0, ind_lcto="N",
+        vl_lcto=10000.0,
+        ind_lcto="N",
     )
     session.add(lanc)
     session.flush()
 
-    session.add(Partida(lancamento_id=lanc.id, cod_cta="1.1.1", vl_dc=10000.0, ind_dc="D", hist="Venda à vista"))
-    session.add(Partida(lancamento_id=lanc.id, cod_cta="4.1", vl_dc=10000.0, ind_dc="C", hist="Receita de venda"))
+    session.add(
+        Partida(
+            lancamento_id=lanc.id, cod_cta="1.1.1", vl_dc=10000.0, ind_dc="D", hist="Venda à vista"
+        )
+    )
+    session.add(
+        Partida(
+            lancamento_id=lanc.id, cod_cta="4.1", vl_dc=10000.0, ind_dc="C", hist="Receita de venda"
+        )
+    )
     session.flush()
 
     # Aglutinações para teste de publicação
-    session.add(Aglutinacao(
-        plano_conta_id=session.query(PlanoConta).filter_by(ecd_id=ecd.id, cod_cta="1.1.1").first().id,
-        cod_agl="J100",
-    ))
-    session.add(Aglutinacao(
-        plano_conta_id=session.query(PlanoConta).filter_by(ecd_id=ecd.id, cod_cta="1.1.2").first().id,
-        cod_agl="J100",
-    ))
+    session.add(
+        Aglutinacao(
+            plano_conta_id=session.query(PlanoConta)
+            .filter_by(ecd_id=ecd.id, cod_cta="1.1.1")
+            .first()
+            .id,
+            cod_agl="J100",
+        )
+    )
+    session.add(
+        Aglutinacao(
+            plano_conta_id=session.query(PlanoConta)
+            .filter_by(ecd_id=ecd.id, cod_cta="1.1.2")
+            .first()
+            .id,
+            cod_agl="J100",
+        )
+    )
     session.flush()
 
     session.commit()
@@ -168,6 +205,7 @@ def db():
 # ═══════════════════════════════════════════════════════════════════════════
 # Balanço Patrimonial
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestBalancoPatrimonial:
     def test_gerar_visao_hierarquica(self, db):
@@ -216,6 +254,7 @@ class TestBalancoPatrimonial:
 # DRE
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 class TestDRE:
     def test_gerar_dre(self, db):
         session, ecd, emp = db
@@ -238,14 +277,24 @@ class TestDRE:
     def test_dre_com_mapeamento_personalizado(self, db):
         session, ecd, emp = db
         # Cria mapeamento customizado
-        session.add(Mapeamento(
-            empresa_id=emp.id, tipo="dre",
-            cod_cta="4.1", categoria="receita_bruta", ordem=1,
-        ))
-        session.add(Mapeamento(
-            empresa_id=emp.id, tipo="dre",
-            cod_cta="4.2", categoria="custos", ordem=2,
-        ))
+        session.add(
+            Mapeamento(
+                empresa_id=emp.id,
+                tipo="dre",
+                cod_cta="4.1",
+                categoria="receita_bruta",
+                ordem=1,
+            )
+        )
+        session.add(
+            Mapeamento(
+                empresa_id=emp.id,
+                tipo="dre",
+                cod_cta="4.2",
+                categoria="custos",
+                ordem=2,
+            )
+        )
         session.commit()
 
         dre = DRE(session, ecd.id)
@@ -268,6 +317,7 @@ class TestDRE:
 # ═══════════════════════════════════════════════════════════════════════════
 # Livro Diário
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestLivroDiario:
     def test_gerar_diario(self, db):
@@ -303,6 +353,7 @@ class TestLivroDiario:
 # ═══════════════════════════════════════════════════════════════════════════
 # Export Engine
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestExportEngine:
     def test_render_html_balanco(self, db):
@@ -418,9 +469,25 @@ class TestExportEngine:
         )
 
         linhas = [
-            {"cod_cta": "1.1.1", "nome_cta": "Caixa", "nivel": 3, "saldo_inicial": "50.000,00", "debitos": "10.000,00", "creditos": "5.000,00", "saldo_final": "55.000,00"},
+            {
+                "cod_cta": "1.1.1",
+                "nome_cta": "Caixa",
+                "nivel": 3,
+                "saldo_inicial": "50.000,00",
+                "debitos": "10.000,00",
+                "creditos": "5.000,00",
+                "saldo_final": "55.000,00",
+            },
         ]
-        colunas = ["cod_cta", "nome_cta", "nivel", "saldo_inicial", "debitos", "creditos", "saldo_final"]
+        colunas = [
+            "cod_cta",
+            "nome_cta",
+            "nivel",
+            "saldo_inicial",
+            "debitos",
+            "creditos",
+            "saldo_final",
+        ]
 
         export = ExportEngine()
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:

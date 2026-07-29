@@ -21,7 +21,8 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("sped-hub.cache")
 
@@ -184,6 +185,7 @@ def cached(ttl: int = 300, prefix: str = ""):
         def get_kpis(ecd_id: int) -> dict:
             ...
     """
+
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -208,4 +210,5 @@ def cached(ttl: int = 300, prefix: str = ""):
             return result
 
         return wrapper
+
     return decorator

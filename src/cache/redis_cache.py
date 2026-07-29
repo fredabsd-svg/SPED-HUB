@@ -53,6 +53,7 @@ class RedisCacheService:
         """Tenta conectar ao Redis."""
         try:
             import redis as redis_lib
+
             self._redis = redis_lib.from_url(
                 self._redis_url,
                 socket_connect_timeout=2,
@@ -64,9 +65,7 @@ class RedisCacheService:
             logger.info("Redis conectado: %s", self._redis_url)
         except Exception as e:
             self._redis_available = False
-            logger.warning(
-                "Redis indisponível (%s) — usando cache em memória", e
-            )
+            logger.warning("Redis indisponível (%s) — usando cache em memória", e)
 
     def _key(self, key: str) -> str:
         return f"{self._prefix}{key}"
@@ -145,9 +144,7 @@ class RedisCacheService:
             try:
                 cursor = 0
                 while True:
-                    cursor, keys = self._redis.scan(
-                        cursor, match=f"{full_prefix}*", count=100
-                    )
+                    cursor, keys = self._redis.scan(cursor, match=f"{full_prefix}*", count=100)
                     if keys:
                         self._redis.delete(*keys)
                         count += len(keys)
@@ -173,9 +170,7 @@ class RedisCacheService:
             try:
                 cursor = 0
                 while True:
-                    cursor, keys = self._redis.scan(
-                        cursor, match=f"{self._prefix}*", count=100
-                    )
+                    cursor, keys = self._redis.scan(cursor, match=f"{self._prefix}*", count=100)
                     if keys:
                         self._redis.delete(*keys)
                         count += len(keys)

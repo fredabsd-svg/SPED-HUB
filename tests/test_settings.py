@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import importlib
-import os
-from unittest import mock
 
 import pytest
 
-from src.db.models import criar_engine, get_session, init_db
+from src.db.models import (
+    _normalizar_database_url,
+    criar_engine,
+    get_session,
+    init_db,
+    obter_engine,
+)
 from src.settings import (
+    database_reference,
     get_settings,
     reset_settings_cache,
     with_overrides,
 )
+from src.version import APP_VERSION
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +67,7 @@ class TestSettingsDefaults:
         assert cfg.max_upload_mb == 200
         assert cfg.monitoring_retention_hours == 24
         assert cfg.rate_limit_default == 100
-        assert cfg.app_version == "0.15.0"
+        assert cfg.app_version == APP_VERSION
 
     def test_helpers_reconhecem_sqlite_e_postgres(self):
         cfg = with_overrides(database_url="sqlite:///./foo.db")
@@ -192,22 +198,26 @@ class TestDatabaseEngineConfig:
         finally:
             engine.dispose()
 
-    def test_url_postgres_explicita_sem_driver(self):
-        # Quando psycopg não está disponível, criar_engine ainda
-        # constrói a engine — o erro aparece só ao tentar conectar.
+    def test_url_postgres_preservada_sem_driver(self):
+        """URL Postgres passa intacta e é reconhecida — sem exigir psycopg.
+
+        Não constrói ``Engine`` de propósito: o SQLAlchemy 2.x importa o DBAPI
+        já dentro de ``create_engine``, então instanciar exigiria ``psycopg``
+        instalado.  O que importa aqui é a camada do projeto — a URL não pode
+        ser convertida em caminho SQLite pelo caminho legado.
+        """
+        url = "postgresql+psycopg://u:p@h:5432/db"
+        assert _normalizar_database_url(url) == url
+        assert with_overrides(database_url=url).is_postgres is True
+        assert with_overrides(database_url=url).is_sqlite is False
+        assert with_overrides(database_url=url).database_file_path is None
+
+    def test_url_postgres_constroi_engine(self):
+        """Constrói a Engine de fato — só roda onde o driver existe."""
+        pytest.importorskip("psycopg", reason="driver Postgres não instalado")
         engine = criar_engine(url="postgresql+psycopg://u:p@h:5432/db")
         try:
             assert engine.url.get_backend_name() == "postgresql"
-        finally:
-            engine.dispose()
-
-    def test_url_postgres_nao_conecta_sem_driver(self):
-        engine = criar_engine(url="postgresql+psycopg://u:p@h:5432/db")
-        try:
-            pytest.importorskip("psycopg")
-            with pytest.raises(Exception):
-                with engine.connect() as conn:
-                    conn.exec_driver_sql("SELECT 1")
         finally:
             engine.dispose()
 
@@ -271,3 +281,231 @@ class TestSettingsImports:
         assert hasattr(mod, "get_settings")
         assert hasattr(mod, "with_overrides")
         assert hasattr(mod, "reset_settings_cache")
+
+
+class TestCoercaoBooleana:
+    """Todo campo booleano precisa de coerção, não só ``debug``.
+
+    Sem ela, ``SPED_HUB_DB_ECHO=false`` virava a *string* ``"false"`` — que é
+    verdadeira em Python.  Como esse campo alimenta o ``echo`` do SQLAlchemy,
+    desligar explicitamente o echo o ligava, despejando todo SQL no log.
+    """
+
+    @pytest.mark.parametrize(
+        "env_key,campo",
+        [
+            ("SPED_HUB_DEBUG", "debug"),
+            ("SPED_HUB_DB_ECHO", "database_echo"),
+            ("SMTP_USE_TLS", "smtp_use_tls"),
+            ("EMAIL_ENABLED", "email_enabled"),
+            ("SPED_HUB_WEBHOOK_ALLOW_HTTP", "webhook_allow_http"),
+            ("SPED_HUB_RELOAD", "reload"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "valor,esperado",
+        [("false", False), ("0", False), ("no", False), ("true", True), ("1", True)],
+    )
+    def test_valores_viram_bool_de_verdade(self, monkeypatch, env_key, campo, valor, esperado):
+        monkeypatch.setenv(env_key, valor)
+        cfg = get_settings()
+        assert getattr(cfg, campo) is esperado
+
+
+class TestCaminhoSqlite:
+    """Conversão caminho → URL, em especial o caso absoluto."""
+
+    def test_caminho_absoluto_permanece_absoluto(self, monkeypatch):
+        # `lstrip("./")` comia a barra inicial e devolvia um caminho relativo,
+        # apontando para um banco diferente do pedido.
+        monkeypatch.setenv("SPED_HUB_DB", "/tmp/sped_hub_abs.db")
+        assert get_settings().database_url == "sqlite:////tmp/sped_hub_abs.db"
+
+    def test_caminho_relativo(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_DB", "rel.db")
+        assert get_settings().database_url == "sqlite:///./rel.db"
+
+    def test_memory_e_url_pronta(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_DB", ":memory:")
+        assert get_settings().database_url == "sqlite:///:memory:"
+        monkeypatch.setenv("SPED_HUB_DB", "postgresql+psycopg://u@h/db")
+        assert get_settings().database_url == "postgresql+psycopg://u@h/db"
+
+    def test_engine_abre_o_arquivo_pedido(self, tmp_path, monkeypatch):
+        alvo = tmp_path / "destino.db"
+        monkeypatch.setenv("SPED_HUB_DB", str(alvo))
+        engine = criar_engine()
+        try:
+            init_db(engine)
+            with engine.connect() as conn:
+                conn.exec_driver_sql("SELECT 1")
+        finally:
+            engine.dispose()
+        assert alvo.exists()
+
+
+class TestAliasesLegados:
+    """SMTP_PASS/SMTP_FROM continuam válidos; o nome documentado vence."""
+
+    def test_alias_legado_preenche(self, monkeypatch):
+        monkeypatch.setenv("SMTP_PASS", "senha-legada")
+        monkeypatch.setenv("SMTP_FROM", "legado@example.com")
+        cfg = get_settings()
+        assert cfg.smtp_password == "senha-legada"
+        assert cfg.email_from == "legado@example.com"
+
+    def test_nome_documentado_tem_precedencia(self, monkeypatch):
+        monkeypatch.setenv("SMTP_PASS", "legada")
+        monkeypatch.setenv("SMTP_PASSWORD", "oficial")
+        monkeypatch.setenv("SMTP_FROM", "legado@example.com")
+        monkeypatch.setenv("EMAIL_FROM", "oficial@example.com")
+        cfg = get_settings()
+        assert cfg.smtp_password == "oficial"
+        assert cfg.email_from == "oficial@example.com"
+
+
+class TestLimiteDeUpload:
+    def test_default_deriva_de_mb(self):
+        assert get_settings().max_upload_bytes == 200 * 1024 * 1024
+
+    def test_mb_configuravel(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_MB", "50")
+        assert get_settings().max_upload_bytes == 50 * 1024 * 1024
+
+    def test_override_legado_em_bytes_vence(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_MB", "50")
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_BYTES", "4")
+        assert get_settings().max_upload_bytes == 4
+
+    def test_override_invalido_cai_no_mb(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_BYTES", "-1")
+        assert get_settings().max_upload_bytes == 200 * 1024 * 1024
+
+
+class TestDatabaseReferenceNosServicos:
+    """DATABASE_URL precisa chegar em todos os serviços, não só em criar_engine.
+
+    Antes, dashboard, API REST e GraphQL liam ``SPED_HUB_DB`` direto do
+    ambiente: quem configurasse ``DATABASE_URL`` (inclusive o exemplo de
+    PostgreSQL do README) subia silenciosamente em SQLite.
+    """
+
+    def test_database_reference_segue_database_url(self, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/referencia.db")
+        assert database_reference() == "sqlite:////tmp/referencia.db"
+
+    def test_api_rest_e_graphql_usam_a_mesma_referencia(self, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", "sqlite:////tmp/referencia.db")
+        from src.api.graphql import _get_db_path as graphql_db
+        from src.api.routes import _get_db_path as rest_db
+
+        assert rest_db() == "sqlite:////tmp/referencia.db"
+        assert graphql_db() == "sqlite:////tmp/referencia.db"
+
+    def test_sped_hub_db_continua_funcionando(self, monkeypatch):
+        monkeypatch.setenv("SPED_HUB_DB", "/tmp/legado.db")
+        assert database_reference() == "sqlite:////tmp/legado.db"
+
+
+class TestCacheDeEngine:
+    """``obter_engine`` reaproveita o pool; ``criar_engine`` continua criando novo.
+
+    O caminho quente (validar sessão, resolver tenant, cada request do
+    dashboard) criava uma engine e rodava ``create_all`` — reflexão das 24
+    tabelas — a cada chamada.
+    """
+
+    def test_mesma_url_devolve_a_mesma_engine(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'cache.db'}"
+        assert obter_engine(url=url) is obter_engine(url=url)
+
+    def test_urls_distintas_nao_se_misturam(self, tmp_path):
+        a = obter_engine(url=f"sqlite:///{tmp_path / 'a.db'}")
+        b = obter_engine(url=f"sqlite:///{tmp_path / 'b.db'}")
+        assert a is not b
+
+    def test_criar_engine_continua_sem_cache(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'sem_cache.db'}"
+        primeira = criar_engine(url=url)
+        try:
+            assert primeira is not criar_engine(url=url)
+        finally:
+            primeira.dispose()
+
+    def test_memory_nunca_e_compartilhada(self):
+        # Cada engine `:memory:` é um banco próprio; compartilhá-las faria
+        # bancos de teste independentes enxergarem os dados uns dos outros.
+        assert obter_engine(":memory:") is not obter_engine(":memory:")
+
+    def test_init_db_once_roda_uma_vez_por_engine(self, tmp_path, monkeypatch):
+        from src.db import models
+
+        chamadas = []
+        original = models.Base.metadata.create_all
+        monkeypatch.setattr(
+            models.Base.metadata,
+            "create_all",
+            lambda *a, **k: (chamadas.append(1), original(*a, **k))[1],
+        )
+        engine = obter_engine(url=f"sqlite:///{tmp_path / 'once.db'}")
+        for _ in range(5):
+            models.init_db_once(engine)
+        assert len(chamadas) == 1
+
+    def test_init_db_once_roda_de_novo_para_engine_nova(self, tmp_path):
+        from src.db import models
+
+        engine = criar_engine(url=f"sqlite:///{tmp_path / 'nova.db'}")
+        try:
+            models.init_db_once(engine)
+            with engine.connect() as conn:
+                conn.exec_driver_sql("SELECT 1 FROM usuarios LIMIT 1")
+        finally:
+            engine.dispose()
+
+    def test_cache_e_zerado_no_processo_filho(self, tmp_path):
+        """Pools do SQLAlchemy não sobrevivem a ``fork`` — o worker usa multiprocessing."""
+        import multiprocessing
+        import os
+
+        if not hasattr(os, "fork"):
+            pytest.skip("plataforma sem fork")
+
+        from src.db import models
+
+        obter_engine(url=f"sqlite:///{tmp_path / 'fork.db'}")
+        assert models._ENGINES, "pré-condição: cache populado no pai"
+
+        ctx = multiprocessing.get_context("fork")
+        fila = ctx.Queue()
+        processo = ctx.Process(target=_reportar_tamanho_do_cache, args=(fila,))
+        processo.start()
+        processo.join(timeout=30)
+        assert fila.get(timeout=5) == 0, "o filho herdou engines do pai"
+
+
+def _reportar_tamanho_do_cache(fila):
+    from src.db import models
+
+    fila.put(len(models._ENGINES))
+
+
+class TestComparacaoDeSenha:
+    def test_usa_comparacao_em_tempo_constante(self):
+        """`==` entre hashes vaza, por tempo, quantos bytes foram acertados."""
+        import inspect
+
+        from src.db.models import Usuario
+
+        fonte = inspect.getsource(Usuario.verificar_senha)
+        assert "compare_digest" in fonte
+        assert "== self.senha_hash" not in fonte
+
+    def test_senha_correta_e_incorreta(self):
+        from src.db.models import Usuario
+
+        senha_hash, salt = Usuario.hash_senha("senha-correta")
+        usuario = Usuario(email="a@b.c", nome="A", senha_hash=senha_hash, salt=salt)
+        assert usuario.verificar_senha("senha-correta") is True
+        assert usuario.verificar_senha("senha-errada") is False
+        assert usuario.verificar_senha("") is False

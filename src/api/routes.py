@@ -28,45 +28,43 @@ API Keys (Fase 12):
 """
 
 import datetime
-import json
 import logging
-from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from sqlalchemy import desc, func, select
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.api import requer_api_key
+from src.api import ApiKeyService, requer_api_key
+from src.audit import AuditService
+from src.dashboard.services import DashboardService
 from src.db.models import (
     ECD,
     Empresa,
     Lancamento,
     Partida,
     PlanoConta,
-    SaldoPeriodico,
-    SaldoResultado,
-    WebhookDelivery,
-    WebhookRegistration,
     criar_engine,
     get_session,
     init_db,
 )
-from src.dashboard.services import DashboardService
+from src.ratelimit import RateLimitService, get_limiter
 from src.reports.balanco import BalancoPatrimonial
 from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
+from src.settings import database_reference
 from src.validators.integridade import ValidadorIntegridade
-from src.webhooks import EVENTOS_DISPONIVEIS, WebhookService
 from src.version import APP_VERSION
+from src.webhooks import EVENTOS_DISPONIVEIS, WebhookService
 
 logger = logging.getLogger("sped-hub.api.v1")
 
 router = APIRouter(prefix="/api/v1", tags=["API v1"])
 
+
 def _get_db_path() -> str:
-    import os as _os
-    return _os.environ.get("SPED_HUB_DB", "sped_hub.db")
+
+    return database_reference()
 
 
 def _get_session() -> Session:
@@ -111,9 +109,11 @@ async def listar_empresas(
     try:
         total = session.execute(select(func.count(Empresa.id))).scalar() or 0
         offset = (pagina - 1) * limite
-        empresas = session.execute(
-            select(Empresa).order_by(Empresa.nome).offset(offset).limit(limite)
-        ).scalars().all()
+        empresas = (
+            session.execute(select(Empresa).order_by(Empresa.nome).offset(offset).limit(limite))
+            .scalars()
+            .all()
+        )
 
         return {
             "pagina": pagina,
@@ -145,9 +145,13 @@ async def detalhe_empresa(empresa_id: int, api_key=Depends(requer_api_key)):
         if not empresa:
             raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
-        ecds = session.execute(
-            select(ECD).where(ECD.empresa_id == empresa_id).order_by(ECD.dt_ini.desc())
-        ).scalars().all()
+        ecds = (
+            session.execute(
+                select(ECD).where(ECD.empresa_id == empresa_id).order_by(ECD.dt_ini.desc())
+            )
+            .scalars()
+            .all()
+        )
 
         return {
             "id": empresa.id,
@@ -239,17 +243,24 @@ async def detalhe_ecd(ecd_id: int, api_key=Depends(requer_api_key)):
 
         empresa = session.get(Empresa, ecd.empresa_id)
 
-        n_contas = session.execute(
-            select(func.count(PlanoConta.id)).where(PlanoConta.ecd_id == ecd_id)
-        ).scalar() or 0
-        n_lancs = session.execute(
-            select(func.count(Lancamento.id)).where(Lancamento.ecd_id == ecd_id)
-        ).scalar() or 0
-        n_partidas = session.execute(
-            select(func.count(Partida.id))
-            .join(Lancamento)
-            .where(Lancamento.ecd_id == ecd_id)
-        ).scalar() or 0
+        n_contas = (
+            session.execute(
+                select(func.count(PlanoConta.id)).where(PlanoConta.ecd_id == ecd_id)
+            ).scalar()
+            or 0
+        )
+        n_lancs = (
+            session.execute(
+                select(func.count(Lancamento.id)).where(Lancamento.ecd_id == ecd_id)
+            ).scalar()
+            or 0
+        )
+        n_partidas = (
+            session.execute(
+                select(func.count(Partida.id)).join(Lancamento).where(Lancamento.ecd_id == ecd_id)
+            ).scalar()
+            or 0
+        )
 
         return {
             "id": ecd.id,
@@ -298,33 +309,33 @@ async def api_balanco(
             "titulo": ctx.titulo,
             "ativo": [
                 {
-                    "cod_cta": l.cod_cta,
-                    "nome_cta": l.nome_cta,
-                    "nivel": l.nivel,
-                    "saldo_atual": l.saldo_atual,
-                    "saldo_anterior": l.saldo_anterior,
+                    "cod_cta": ln.cod_cta,
+                    "nome_cta": ln.nome_cta,
+                    "nivel": ln.nivel,
+                    "saldo_atual": ln.saldo_atual,
+                    "saldo_anterior": ln.saldo_anterior,
                 }
-                for l in grupos["ativo"]
+                for ln in grupos["ativo"]
             ],
             "passivo": [
                 {
-                    "cod_cta": l.cod_cta,
-                    "nome_cta": l.nome_cta,
-                    "nivel": l.nivel,
-                    "saldo_atual": l.saldo_atual,
-                    "saldo_anterior": l.saldo_anterior,
+                    "cod_cta": ln.cod_cta,
+                    "nome_cta": ln.nome_cta,
+                    "nivel": ln.nivel,
+                    "saldo_atual": ln.saldo_atual,
+                    "saldo_anterior": ln.saldo_anterior,
                 }
-                for l in grupos["passivo"]
+                for ln in grupos["passivo"]
             ],
             "patrimonio_liquido": [
                 {
-                    "cod_cta": l.cod_cta,
-                    "nome_cta": l.nome_cta,
-                    "nivel": l.nivel,
-                    "saldo_atual": l.saldo_atual,
-                    "saldo_anterior": l.saldo_anterior,
+                    "cod_cta": ln.cod_cta,
+                    "nome_cta": ln.nome_cta,
+                    "nivel": ln.nivel,
+                    "saldo_atual": ln.saldo_atual,
+                    "saldo_anterior": ln.saldo_anterior,
                 }
-                for l in grupos["pl"]
+                for ln in grupos["pl"]
             ],
             "totais": totais,
         }
@@ -344,12 +355,12 @@ async def api_dre(ecd_id: int, api_key=Depends(requer_api_key)):
             "titulo": ctx.titulo,
             "linhas": [
                 {
-                    "tipo": l.tipo,
-                    "descricao": l.descricao,
-                    "valor_atual": l.valor_atual,
-                    "valor_anterior": l.valor_anterior,
+                    "tipo": ln.tipo,
+                    "descricao": ln.descricao,
+                    "valor_atual": ln.valor_atual,
+                    "valor_anterior": ln.valor_anterior,
                 }
-                for l in linhas
+                for ln in linhas
             ],
             "totais": totais,
         }
@@ -369,12 +380,12 @@ async def api_dfc(ecd_id: int, api_key=Depends(requer_api_key)):
             "titulo": ctx.titulo,
             "linhas": [
                 {
-                    "tipo": l.tipo,
-                    "descricao": l.descricao,
-                    "valor": l.valor,
-                    "valor_anterior": l.valor_anterior,
+                    "tipo": ln.tipo,
+                    "descricao": ln.descricao,
+                    "valor": ln.valor,
+                    "valor_anterior": ln.valor_anterior,
                 }
-                for l in linhas
+                for ln in linhas
             ],
             "totais": totais,
         }
@@ -411,11 +422,11 @@ async def api_diario(
             "totais": totais,
             "lancamentos": [
                 {
-                    "num_lcto": l.num_lcto,
-                    "data": str(l.data),
-                    "ind_lcto": l.ind_lcto if hasattr(l, "ind_lcto") else "",
-                    "total_debito": l.total_debito if hasattr(l, "total_debito") else 0.0,
-                    "total_credito": l.total_credito if hasattr(l, "total_credito") else 0.0,
+                    "num_lcto": ln.num_lcto,
+                    "data": str(ln.data),
+                    "ind_lcto": ln.ind_lcto if hasattr(ln, "ind_lcto") else "",
+                    "total_debito": ln.total_debito if hasattr(ln, "total_debito") else 0.0,
+                    "total_credito": ln.total_credito if hasattr(ln, "total_credito") else 0.0,
                     "partidas": [
                         {
                             "cod_cta": p.cod_cta,
@@ -423,10 +434,10 @@ async def api_diario(
                             "debito": p.debito if hasattr(p, "debito") else 0.0,
                             "credito": p.credito if hasattr(p, "credito") else 0.0,
                         }
-                        for p in (l.partidas if hasattr(l, "partidas") else [])
+                        for p in (ln.partidas if hasattr(ln, "partidas") else [])
                     ],
                 }
-                for l in pagina_lancs
+                for ln in pagina_lancs
             ],
         }
     finally:
@@ -453,7 +464,12 @@ async def api_kpis(ecd_id: int, api_key=Depends(requer_api_key)):
             "num_lancamentos": data.num_lancamentos,
             "num_contas": data.num_contas,
             "kpis": [
-                {"titulo": k.titulo, "valor": k.valor, "formato": k.formato, "tendencia": k.tendencia}
+                {
+                    "titulo": k.titulo,
+                    "valor": k.valor,
+                    "formato": k.formato,
+                    "tendencia": k.tendencia,
+                }
                 for k in data.kpis
             ],
         }
@@ -493,7 +509,14 @@ async def api_evolucao_multi(ecd_id: int, api_key=Depends(requer_api_key)):
     try:
         svc = DashboardService(session, ecd_id)
         data = svc.get_evolucao_multi_periodo()
-        return data or {"labels": [], "ativos": [], "passivos": [], "pls": [], "resultados": [], "num_periodos": 0}
+        return data or {
+            "labels": [],
+            "ativos": [],
+            "passivos": [],
+            "pls": [],
+            "resultados": [],
+            "num_periodos": 0,
+        }
     finally:
         session.close()
 
@@ -505,10 +528,7 @@ async def api_evolucao_multi(ecd_id: int, api_key=Depends(requer_api_key)):
 async def listar_eventos(api_key=Depends(requer_api_key)):
     """Lista eventos disponíveis para webhooks."""
     return {
-        "eventos": [
-            {"tipo": e, "descricao": _descricao_evento(e)}
-            for e in EVENTOS_DISPONIVEIS
-        ]
+        "eventos": [{"tipo": e, "descricao": _descricao_evento(e)} for e in EVENTOS_DISPONIVEIS]
     }
 
 
@@ -640,6 +660,8 @@ def _descricao_evento(tipo: str) -> str:
         "ecd.validada": "Disparado quando a validação de integridade é concluída",
         "relatorio.gerado": "Disparado quando um relatório contábil é gerado",
     }.get(tipo, tipo)
+
+
 # ── Webhooks Dashboard (Fase 11) ─────────────────────────────────────────────
 
 
@@ -692,8 +714,6 @@ async def retry_webhooks(
 
 # ── API Keys (Fase 12) ──────────────────────────────────────────────────────
 
-from src.api import ApiKeyService
-
 
 @router.get("/api-keys")
 async def listar_api_keys(api_key=Depends(requer_api_key)):
@@ -737,8 +757,6 @@ async def revogar_api_key(key_id: int, api_key=Depends(requer_api_key)):
 
 
 # ── Rate Limiting (Fase 13) ────────────────────────────────────────────────
-
-from src.ratelimit import RateLimitService, get_limiter
 
 
 @router.get("/api-keys/{key_id}/rate-limit")
@@ -785,7 +803,7 @@ async def configurar_rate_limit(
         result = svc.configurar(key_id, limite, janela)
         return {"status": "ok", **result}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.delete("/api-keys/{key_id}/rate-limit")
@@ -813,8 +831,6 @@ async def status_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
 
 
 # ── Auditoria (Fase 13) ────────────────────────────────────────────────────
-
-from src.audit import AuditService
 
 
 @router.get("/audit/logs")
@@ -860,4 +876,8 @@ async def limpar_audit_logs(
     """Remove logs de auditoria mais antigos que o número de dias especificado."""
     svc = AuditService(_get_db_path())
     removidos = svc.limpar_antigos(dias=dias)
-    return {"status": "ok", "removidos": removidos, "mensagem": f"{removidos} logs removidos (> {dias} dias)"}
+    return {
+        "status": "ok",
+        "removidos": removidos,
+        "mensagem": f"{removidos} logs removidos (> {dias} dias)",
+    }

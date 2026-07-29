@@ -54,7 +54,8 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 pip install -e ".[dev]"
 ```
 
-> **Versão atual:** 0.15.0 — Configuração por ambiente e banco configurável (Fase 17, etapa 1).
+> **Versão atual:** 0.15.1 — configuração por ambiente efetivamente ligada
+> a toda a aplicação e CI verde (Fase 17, etapa 1 concluída).
 
 ### Docker
 ```bash
@@ -64,8 +65,10 @@ docker compose up -d
 
 ## Configuração
 
-A Fase 17 introduziu um ponto único de configuração em `src/settings.py`,
-lido por CLI, dashboard, API e workers.
+`src/settings.py` é o ponto único de configuração, lido por CLI, dashboard,
+API REST/GraphQL, webhooks, e-mail e workers.  Nenhum módulo lê
+`os.environ` por conta própria — o que significa que `DATABASE_URL` vale
+para a aplicação inteira, não só para o `criar_engine`.
 
 A maneira mais rápida é copiar o exemplo e ajustar:
 
@@ -81,19 +84,31 @@ desenvolvimento):
 |---|---|---|
 | `DATABASE_URL` | URL SQLAlchemy (`sqlite:///./sped_hub.db`, `postgresql+psycopg://...`) | `sqlite:///./sped_hub.db` |
 | `SPED_HUB_DB` | Alias legado: caminho SQLite puro (sobrescrito por `DATABASE_URL`) | — |
-| `SPED_HUB_SECRET_KEY` | Chave usada para tokens, HMAC e sessões | `change-me-in-production` |
 | `SPED_HUB_LOG_LEVEL` | `DEBUG`/`INFO`/`WARNING`/`ERROR` | `INFO` |
 | `SPED_HUB_ALLOWED_HOSTS` | CSV de hosts confiáveis | `*` |
+| `SPED_HUB_HOST` / `SPED_HUB_PORT` / `SPED_HUB_RELOAD` | Bind do uvicorn | `127.0.0.1` / `8000` / `false` |
 | `SPED_HUB_MAX_UPLOAD_MB` | Tamanho máximo de upload (MB) | `200` |
+| `SPED_HUB_MAX_UPLOAD_BYTES` | Override legado em bytes (vence o `_MB`) | — |
+| `SPED_HUB_UPLOAD_DIR` | Diretório dos uploads temporários | `<raiz>/uploads` |
 | `SPED_HUB_ECD_CHUNK_ROWS` | Linhas por lote na importação | `5000` |
 | `SPED_HUB_ECD_CHUNK_BYTES` | Bytes por leitura de arquivo | `8388608` (8 MB) |
+| `WORKER_COUNT` | Processos do worker de fila | `4` |
 | `SPED_HUB_MONITORING_RETENTION_HOURS` | Retenção do snapshot operacional | `24` |
 | `SPED_HUB_METRICS_WINDOW_MINUTES` | Janela padrão de métricas | `60` |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP transacional | — |
 | `EMAIL_FROM` / `EMAIL_ENABLED` | Remetente e habilitação de e-mail | `noreply@...` / `false` |
-| `REDIS_URL` | Cache/fila (opcional) | — |
+| `REDIS_URL` | Cache/fila (opcional) | `redis://localhost:6379/0` quando acionado |
 | `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` / `SPED_HUB_WEBHOOK_TIMEOUT` | Resiliência dos webhooks | `3` / `10` |
+| `SPED_HUB_WEBHOOK_ALLOW_HTTP` | Aceita destino `http://` (só em dev) | `false` |
 | `SPED_HUB_RATE_LIMIT_DEFAULT` / `SPED_HUB_RATE_LIMIT_WINDOW` | Limite de taxa padrão | `100` / `60` |
+
+Aliases legados ainda aceitos, para não quebrar deploys existentes:
+`SMTP_PASS` → `SMTP_PASSWORD` e `SMTP_FROM` → `EMAIL_FROM`.  Quando os dois
+estiverem definidos, o nome documentado vence.
+
+> `SPED_HUB_SECRET_KEY` existe em `Settings`, mas **nenhum componente a
+> consome hoje** — sessões e tokens usam CSPRNG e o webhook assina com o
+> segredo do próprio registro.  Não conte com ela como proteção.
 
 > **Não versione o `.env`.**  O arquivo já é ignorado pelo `.gitignore`.
 
@@ -141,7 +156,8 @@ sped-hub-watchdog --dir ./uploads --db sped_hub.db --interval 30
 
 ```bash
 pytest tests/ -v
-# 372 testes — 100% passando (Fases 1-17 etapa 1)
+# 371 passando + 1 skip (engine Postgres, exige psycopg instalado)
+# Os E2E de Playwright pulam sozinhos quando não há Chromium no sistema.
 ```
 
 > Rodar a suíte completa leva ~2 min. Em CI, recomenda-se dividir por fase

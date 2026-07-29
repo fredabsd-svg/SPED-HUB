@@ -3,19 +3,14 @@
 Operações CRUD e consultas agregadas sobre os modelos SQLAlchemy.
 """
 
-import datetime
-import hashlib
-from pathlib import Path
-from typing import Iterator
-
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
+    ECD,
     Aglutinacao,
     CentroCusto,
     ContaReferencial,
-    ECD,
     Empresa,
     FilterView,
     HistoricoPadrao,
@@ -83,10 +78,7 @@ class Repository:
 
     def inserir_plano_contas(self, ecd_id: int, contas: list[dict]) -> int:
         """Inserção em lote do plano de contas."""
-        objetos = [
-            PlanoConta(ecd_id=ecd_id, **c)
-            for c in contas
-        ]
+        objetos = [PlanoConta(ecd_id=ecd_id, **c) for c in contas]
         self.session.add_all(objetos)
         self.session.flush()
         return len(objetos)
@@ -94,9 +86,7 @@ class Repository:
     def get_plano_contas(self, ecd_id: int) -> list[PlanoConta]:
         return list(
             self.session.execute(
-                select(PlanoConta)
-                .where(PlanoConta.ecd_id == ecd_id)
-                .order_by(PlanoConta.cod_cta)
+                select(PlanoConta).where(PlanoConta.ecd_id == ecd_id).order_by(PlanoConta.cod_cta)
             ).scalars()
         )
 
@@ -189,9 +179,7 @@ class Repository:
         self.session.flush()
         return len(objetos)
 
-    def get_saldos_periodicos(
-        self, ecd_id: int, dt_ini=None, dt_fin=None
-    ) -> list[SaldoPeriodico]:
+    def get_saldos_periodicos(self, ecd_id: int, dt_ini=None, dt_fin=None) -> list[SaldoPeriodico]:
         stmt = select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecd_id)
         if dt_ini:
             stmt = stmt.where(SaldoPeriodico.dt_ini >= dt_ini)
@@ -220,7 +208,7 @@ class Repository:
     # ── Lançamentos ─────────────────────────────────────────────────────
 
     def inserir_lancamentos(self, ecd_id: int, lancs: list[dict]) -> int:
-        objetos = [Lancamento(ecd_id=ecd_id, **l) for l in lancs]
+        objetos = [Lancamento(ecd_id=ecd_id, **ln) for ln in lancs]
         self.session.add_all(objetos)
         self.session.flush()
         return len(objetos)
@@ -239,11 +227,11 @@ class Repository:
     def inserir_partidas(self, ecd_id: int, partidas: list[dict]) -> int:
         # Precisa resolver lancamento_id via (num_lcto, dt_lcto)
         lancs_map = {}
-        for l in self.session.execute(
+        for ln in self.session.execute(
             select(Lancamento).where(Lancamento.ecd_id == ecd_id)
         ).scalars():
-            key = (l.num_lcto, l.dt_lcto.isoformat())
-            lancs_map[key] = l.id
+            key = (ln.num_lcto, ln.dt_lcto.isoformat())
+            lancs_map[key] = ln.id
 
         objetos = []
         for p in partidas:
@@ -290,11 +278,7 @@ class Repository:
         return fv
 
     def get_filter_views(self) -> list[FilterView]:
-        return list(
-            self.session.execute(
-                select(FilterView).order_by(FilterView.nome)
-            ).scalars()
-        )
+        return list(self.session.execute(select(FilterView).order_by(FilterView.nome)).scalars())
 
     def get_filter_view(self, nome: str) -> FilterView | None:
         return self.session.execute(
@@ -303,8 +287,9 @@ class Repository:
 
     # ── Mapeamentos ─────────────────────────────────────────────────────
 
-    def upsert_mapeamento(self, empresa_id: int, tipo: str, cod_cta: str,
-                          categoria: str, ordem: int = 0) -> Mapeamento:
+    def upsert_mapeamento(
+        self, empresa_id: int, tipo: str, cod_cta: str, categoria: str, ordem: int = 0
+    ) -> Mapeamento:
         m = self.session.execute(
             select(Mapeamento).where(
                 Mapeamento.empresa_id == empresa_id,
@@ -318,8 +303,11 @@ class Repository:
             m.ordem = ordem
         else:
             m = Mapeamento(
-                empresa_id=empresa_id, tipo=tipo,
-                cod_cta=cod_cta, categoria=categoria, ordem=ordem,
+                empresa_id=empresa_id,
+                tipo=tipo,
+                cod_cta=cod_cta,
+                categoria=categoria,
+                ordem=ordem,
             )
             self.session.add(m)
 

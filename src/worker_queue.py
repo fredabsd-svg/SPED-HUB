@@ -19,25 +19,42 @@ Uso:
 
 import datetime
 import logging
-import os
 import signal
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from enum import Enum
+from enum import StrEnum
 from multiprocessing import Process, Queue, Value
 from queue import Empty
-from typing import Callable
+
+from src.settings import database_reference
 
 logger = logging.getLogger("sped-hub.worker_queue")
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     RETRYING = "retrying"
+
+
+def _make_progress_callback(task, result_queue):
+    """Cria o callback de progresso com ``task`` fixado no escopo da factory.
+
+    Definir a closure dentro do laço capturaria a variável de iteração, e não
+    o valor — o callback passaria a enxergar a tarefa errada se o handler o
+    guardasse para chamar depois.
+    """
+
+    def update_progress(pct: float, msg: str = ""):
+        task.progresso = min(100.0, max(0.0, pct))
+        task.mensagem = msg
+        result_queue.put(("update", replace(task)))
+
+    return update_progress
 
 
 @dataclass
@@ -73,16 +90,12 @@ class Task:
                 self.criado_em, tz=datetime.UTC
             ).isoformat(),
             "iniciado_em": (
-                datetime.datetime.fromtimestamp(
-                    self.iniciado_em, tz=datetime.UTC
-                ).isoformat()
+                datetime.datetime.fromtimestamp(self.iniciado_em, tz=datetime.UTC).isoformat()
                 if self.iniciado_em
                 else None
             ),
             "concluido_em": (
-                datetime.datetime.fromtimestamp(
-                    self.concluido_em, tz=datetime.UTC
-                ).isoformat()
+                datetime.datetime.fromtimestamp(self.concluido_em, tz=datetime.UTC).isoformat()
                 if self.concluido_em
                 else None
             ),
@@ -108,7 +121,7 @@ class WorkerQueue:
     ):
         self._num_workers = num_workers
         self._max_queue_size = max_queue_size
-        self._db_path = db_path or os.environ.get("SPED_HUB_DB", "sped_hub.db")
+        self._db_path = db_path or database_reference()
 
         # Comunicação entre processos
         self._task_queue: Queue | None = None
@@ -160,9 +173,7 @@ class WorkerQueue:
             p.start()
             self._workers.append(p)
 
-        logger.info(
-            "Worker queue iniciada com %d workers", self._num_workers
-        )
+        logger.info("Worker queue iniciada com %d workers", self._num_workers)
 
     def shutdown(self, wait: bool = True, timeout: float = 10.0):
         """Desliga gracefulmente todos os workers."""
@@ -221,15 +232,11 @@ class WorkerQueue:
 
     def pending_count(self) -> int:
         """Número de tasks pendentes."""
-        return sum(
-            1 for t in self._tasks.values() if t.status == TaskStatus.QUEUED.value
-        )
+        return sum(1 for t in self._tasks.values() if t.status == TaskStatus.QUEUED.value)
 
     def active_count(self) -> int:
         """Número de tasks em execução."""
-        return sum(
-            1 for t in self._tasks.values() if t.status == TaskStatus.RUNNING.value
-        )
+        return sum(1 for t in self._tasks.values() if t.status == TaskStatus.RUNNING.value)
 
     def _worker_loop(
         self,
@@ -268,12 +275,7 @@ class WorkerQueue:
                 continue
 
             try:
-                def update_progress(pct: float, msg: str = ""):
-                    task.progresso = min(100.0, max(0.0, pct))
-                    task.mensagem = msg
-                    result_queue.put(("update", replace(task)))
-
-                resultado = handler(task.payload, update_progress)
+                resultado = handler(task.payload, _make_progress_callback(task, result_queue))
                 task.status = TaskStatus.COMPLETED.value
                 task.progresso = 100.0
                 task.resultado = resultado
@@ -342,9 +344,7 @@ class WorkerQueue:
 _worker_queue: WorkerQueue | None = None
 
 
-def init_worker_queue(
-    num_workers: int = 4, db_path: str | None = None
-) -> WorkerQueue:
+def init_worker_queue(num_workers: int = 4, db_path: str | None = None) -> WorkerQueue:
     global _worker_queue
     _worker_queue = WorkerQueue(num_workers=num_workers, db_path=db_path)
     return _worker_queue

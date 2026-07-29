@@ -9,16 +9,16 @@ também de :mod:`src.settings`.
 
 import datetime
 import hashlib
+import hmac
 import json
+import os
 import secrets
+import threading
+import weakref
 
 from sqlalchemy import (
-    Boolean,
-    Column,
     DateTime,
-    Float,
     ForeignKey,
-    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -89,8 +89,12 @@ class Usuario(Base):
 
     # Relacionamentos
     escritorio: Mapped["Escritorio | None"] = relationship(back_populates="usuarios")
-    sessoes: Mapped[list["Sessao"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
-    empresas: Mapped[list["UsuarioEmpresa"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
+    sessoes: Mapped[list["Sessao"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
+    empresas: Mapped[list["UsuarioEmpresa"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
 
     @staticmethod
     def hash_senha(senha: str, salt: str | None = None) -> tuple[str, str]:
@@ -101,9 +105,14 @@ class Usuario(Base):
         return hash_bytes.hex(), salt
 
     def verificar_senha(self, senha: str) -> bool:
-        """Verifica se a senha confere."""
+        """Verifica se a senha confere, em tempo constante.
+
+        `==` entre strings sai no primeiro byte diferente, o que vaza por
+        tempo quantos caracteres do hash foram acertados.  `verificar_api_key`
+        já usava `compare_digest`; aqui tinha ficado de fora.
+        """
         hash_bytes, _ = self.hash_senha(senha, self.salt)
-        return hash_bytes == self.senha_hash
+        return hmac.compare_digest(hash_bytes, self.senha_hash)
 
     def __repr__(self):
         return f"<Usuario {self.email}>"
@@ -152,9 +161,7 @@ class UsuarioEmpresa(Base):
     usuario: Mapped["Usuario"] = relationship(back_populates="empresas")
     empresa: Mapped["Empresa"] = relationship(back_populates="usuarios")
 
-    __table_args__ = (
-        UniqueConstraint("usuario_id", "empresa_id", name="uq_usuario_empresa"),
-    )
+    __table_args__ = (UniqueConstraint("usuario_id", "empresa_id", name="uq_usuario_empresa"),)
 
 
 # ── Cadastros ──────────────────────────────────────────────────────────────
@@ -184,7 +191,9 @@ class Empresa(Base):
     # Relacionamentos
     escritorio: Mapped["Escritorio | None"] = relationship(back_populates="empresas")
     ecds: Mapped[list["ECD"]] = relationship(back_populates="empresa", cascade="all, delete-orphan")
-    usuarios: Mapped[list["UsuarioEmpresa"]] = relationship(back_populates="empresa", cascade="all, delete-orphan")
+    usuarios: Mapped[list["UsuarioEmpresa"]] = relationship(
+        back_populates="empresa", cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<Empresa {_hash_sensivel(self.cnpj)}>"
@@ -263,9 +272,7 @@ class PlanoConta(Base):
         back_populates="conta", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_cta", name="uq_plano_conta_ecd"),
-    )
+    __table_args__ = (UniqueConstraint("ecd_id", "cod_cta", name="uq_plano_conta_ecd"),)
 
     def __repr__(self):
         return f"<PlanoConta {self.cod_cta} {self.nome_cta[:30]}>"
@@ -275,7 +282,9 @@ class ContaReferencial(Base):
     __tablename__ = "contas_referenciais"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plano_conta_id: Mapped[int] = mapped_column(ForeignKey("plano_contas.id"), nullable=False, index=True)
+    plano_conta_id: Mapped[int] = mapped_column(
+        ForeignKey("plano_contas.id"), nullable=False, index=True
+    )
     cod_ccus: Mapped[str | None] = mapped_column(String(255))
     cod_cta_ref: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -286,7 +295,9 @@ class Aglutinacao(Base):
     __tablename__ = "aglutinacoes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plano_conta_id: Mapped[int] = mapped_column(ForeignKey("plano_contas.id"), nullable=False, index=True)
+    plano_conta_id: Mapped[int] = mapped_column(
+        ForeignKey("plano_contas.id"), nullable=False, index=True
+    )
     cod_ccus: Mapped[str | None] = mapped_column(String(255))
     cod_agl: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
@@ -307,9 +318,7 @@ class CentroCusto(Base):
 
     ecd: Mapped["ECD"] = relationship(back_populates="centros_custo")
 
-    __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_ccus", name="uq_centro_custo_ecd"),
-    )
+    __table_args__ = (UniqueConstraint("ecd_id", "cod_ccus", name="uq_centro_custo_ecd"),)
 
 
 # ── Participantes ──────────────────────────────────────────────────────────
@@ -327,9 +336,7 @@ class Participante(Base):
 
     ecd: Mapped["ECD"] = relationship(back_populates="participantes")
 
-    __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_part", name="uq_participante_ecd"),
-    )
+    __table_args__ = (UniqueConstraint("ecd_id", "cod_part", name="uq_participante_ecd"),)
 
 
 # ── Históricos Padronizados ────────────────────────────────────────────────
@@ -370,8 +377,9 @@ class SaldoPeriodico(Base):
     ecd: Mapped["ECD"] = relationship(back_populates="saldos_periodicos")
 
     __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_cta", "cod_ccus", "dt_ini", "dt_fin",
-                         name="uq_saldo_periodico"),
+        UniqueConstraint(
+            "ecd_id", "cod_cta", "cod_ccus", "dt_ini", "dt_fin", name="uq_saldo_periodico"
+        ),
     )
 
 
@@ -391,8 +399,7 @@ class SaldoResultado(Base):
     ecd: Mapped["ECD"] = relationship(back_populates="saldos_resultado")
 
     __table_args__ = (
-        UniqueConstraint("ecd_id", "cod_cta", "cod_ccus", "dt_res",
-                         name="uq_saldo_resultado"),
+        UniqueConstraint("ecd_id", "cod_cta", "cod_ccus", "dt_res", name="uq_saldo_resultado"),
     )
 
 
@@ -417,9 +424,7 @@ class Lancamento(Base):
         back_populates="lancamento", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (
-        UniqueConstraint("ecd_id", "num_lcto", "dt_lcto", name="uq_lancamento_ecd"),
-    )
+    __table_args__ = (UniqueConstraint("ecd_id", "num_lcto", "dt_lcto", name="uq_lancamento_ecd"),)
 
 
 class Partida(Base):
@@ -428,7 +433,9 @@ class Partida(Base):
     __tablename__ = "partidas"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    lancamento_id: Mapped[int] = mapped_column(ForeignKey("lancamentos.id"), nullable=False, index=True)
+    lancamento_id: Mapped[int] = mapped_column(
+        ForeignKey("lancamentos.id"), nullable=False, index=True
+    )
     cod_cta: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     cod_ccus: Mapped[str | None] = mapped_column(String(255))
     vl_dc: Mapped[float] = mapped_column(nullable=False, default=0.0)
@@ -451,14 +458,14 @@ class Mapeamento(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), nullable=False, index=True)
-    tipo: Mapped[str] = mapped_column(String(20), nullable=False)  # dre/dfc/disponibilidades/depreciacao
+    tipo: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # dre/dfc/disponibilidades/depreciacao
     cod_cta: Mapped[str] = mapped_column(String(255), nullable=False)
     categoria: Mapped[str] = mapped_column(String(100), nullable=False)
     ordem: Mapped[int] = mapped_column(default=0)
 
-    __table_args__ = (
-        UniqueConstraint("empresa_id", "tipo", "cod_cta", name="uq_mapeamento"),
-    )
+    __table_args__ = (UniqueConstraint("empresa_id", "tipo", "cod_cta", name="uq_mapeamento"),)
 
 
 # ── Visões de Filtro ───────────────────────────────────────────────────────
@@ -614,11 +621,11 @@ class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    webhook_id: Mapped[int] = mapped_column(
-        ForeignKey("webhooks.id"), nullable=False, index=True
-    )
+    webhook_id: Mapped[int] = mapped_column(ForeignKey("webhooks.id"), nullable=False, index=True)
     evento: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")  # pending, success, failed, retrying
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )  # pending, success, failed, retrying
     status_code: Mapped[int | None] = mapped_column()
     request_body: Mapped[str | None] = mapped_column(Text)
     response_body: Mapped[str | None] = mapped_column(Text)
@@ -648,8 +655,12 @@ class AsyncJob(Base):
     __tablename__ = "async_jobs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tipo: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # ecd_import, export_lote, etc.
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)  # pending, processing, completed, failed
+    tipo: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # ecd_import, export_lote, etc.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", index=True
+    )  # pending, processing, completed, failed
     progresso: Mapped[float] = mapped_column(default=0.0)  # 0-100
     parametros: Mapped[str | None] = mapped_column(Text)  # JSON
     resultado: Mapped[str | None] = mapped_column(Text)  # JSON
@@ -732,6 +743,7 @@ def criar_engine(
     engine = create_engine(final_url, echo=echo, future=True)
 
     if is_sqlite and not is_sqlite_memory:
+
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
@@ -745,6 +757,62 @@ def criar_engine(
     return engine
 
 
+_ENGINES: dict[tuple[str, bool], Engine] = {}
+_ENGINES_LOCK = threading.Lock()
+# Engines cujo schema já foi criado.  A chave é o *objeto* engine, não a URL:
+# uma engine nova (banco novo, arquivo temporário de teste) nunca é confundida
+# com uma anterior que apontava para o mesmo caminho.
+_SCHEMA_PRONTO: weakref.WeakSet = weakref.WeakSet()
+
+
+def obter_engine(
+    caminho: str | None = None,
+    *,
+    url: str | None = None,
+    echo: bool | None = None,
+) -> Engine:
+    """Engine reutilizada por processo — mesma assinatura de :func:`criar_engine`.
+
+    ``criar_engine`` devolve uma engine nova a cada chamada, o que significa um
+    pool de conexões descartável por uso.  Nos caminhos quentes (validação de
+    sessão, resolução de tenant, cada request do dashboard) isso custa uma
+    conexão nova por request; em Postgres, um handshake de rede por request.
+
+    Bancos ``:memory:`` nunca são reaproveitados: cada engine em memória é um
+    banco distinto, e compartilhá-las mudaria o comportamento de quem espera
+    isolamento (as fixtures de teste, entre outros).
+    """
+    final_url = url or _normalizar_database_url(caminho) or get_settings().database_url
+    if final_url == "sqlite:///:memory:":
+        return criar_engine(caminho, url=url, echo=echo)
+
+    chave = (final_url, bool(get_settings().database_echo if echo is None else echo))
+    engine = _ENGINES.get(chave)
+    if engine is not None:
+        return engine
+    with _ENGINES_LOCK:
+        engine = _ENGINES.get(chave)
+        if engine is None:
+            engine = criar_engine(caminho, url=url, echo=echo)
+            _ENGINES[chave] = engine
+    return engine
+
+
+def _descartar_engines_apos_fork() -> None:
+    """Zera o cache no processo filho após ``fork``.
+
+    Conexões e pools do SQLAlchemy não podem ser compartilhados entre
+    processos: herdar o socket/handle do pai corrompe o estado dos dois.  O
+    worker de fila usa ``multiprocessing``, então este hook não é teórico.
+    """
+    _ENGINES.clear()
+    _SCHEMA_PRONTO.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_descartar_engines_apos_fork)
+
+
 def init_db(engine: Engine | None = None) -> None:
     """Cria todas as tabelas.
 
@@ -755,6 +823,19 @@ def init_db(engine: Engine | None = None) -> None:
     if engine is None:
         engine = criar_engine()
     Base.metadata.create_all(engine)
+    _SCHEMA_PRONTO.add(engine)
+
+
+def init_db_once(engine: Engine) -> None:
+    """``init_db`` idempotente por engine, para os caminhos quentes.
+
+    ``create_all`` é idempotente no resultado, mas não no custo: ele reflete as
+    24 tabelas no banco a cada chamada.  Rodando por request, era ~2,9 ms dos
+    ~3,1 ms gastos só para validar um token de sessão.
+    """
+    if engine in _SCHEMA_PRONTO:
+        return
+    init_db(engine)
 
 
 def get_session(engine: Engine | None = None) -> Session:

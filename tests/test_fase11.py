@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from src.db.models import (
-    ECD,
     Empresa,
     Escritorio,
     WebhookDelivery,
@@ -19,10 +18,7 @@ from src.db.models import (
     get_session,
     init_db,
 )
-from src.db.repository import Repository
-from src.parsers.ecd import ECDParser
 from src.webhooks import EVENTOS_DISPONIVEIS, WebhookEvent, WebhookService
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -333,8 +329,9 @@ class TestMultiTenancy:
 class TestAPIWebhookDashboard:
 
     def test_dashboard_stats_endpoint(self, db_fase11):
-        from src.api.routes import webhook_dashboard_stats
         import asyncio
+
+        from src.api.routes import webhook_dashboard_stats
 
         svc = WebhookService(db_fase11)
         svc.registrar(url="https://a.com/hook", eventos=["ecd.importada"])
@@ -344,8 +341,9 @@ class TestAPIWebhookDashboard:
         assert result["total_webhooks"] == 1
 
     def test_deliveries_endpoint(self, db_fase11):
-        from src.api.routes import listar_deliveries
         import asyncio
+
+        from src.api.routes import listar_deliveries
 
         svc = WebhookService(db_fase11)
         wh = svc.registrar(url="https://a.com/hook", eventos=["ecd.importada"])
@@ -406,25 +404,20 @@ class TestTemplatesFase11:
 
     def test_webhooks_template_existe(self):
         template = (
-            Path(__file__).parent.parent
-            / "src" / "dashboard" / "templates" / "webhooks.html"
+            Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "webhooks.html"
         )
         assert template.exists()
 
     def test_webhooks_template_tem_chartjs(self):
         template = (
-            Path(__file__).parent.parent
-            / "src" / "dashboard" / "templates" / "webhooks.html"
+            Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "webhooks.html"
         )
         content = template.read_text()
         assert "chart.js" in content.lower()
         assert "alpinejs" in content.lower()
 
     def test_layout_template_tem_sortablejs(self):
-        template = (
-            Path(__file__).parent.parent
-            / "src" / "dashboard" / "templates" / "layout.html"
-        )
+        template = Path(__file__).parent.parent / "src" / "dashboard" / "templates" / "layout.html"
         content = template.read_text()
         assert "sortablejs" in content.lower()
         assert "Sortable(" in content
@@ -435,10 +428,7 @@ class TestTemplatesFase11:
         # dashboard.html e upload.html estendem base.html — verificar base.html + templates standalone
         templates_to_check = ["base.html", "comparar.html", "layout.html"]
         for tpl_name in templates_to_check:
-            template = (
-                Path(__file__).parent.parent
-                / "src" / "dashboard" / "templates" / tpl_name
-            )
+            template = Path(__file__).parent.parent / "src" / "dashboard" / "templates" / tpl_name
             content = template.read_text()
             assert "/webhooks" in content, f"{tpl_name} não tem link para /webhooks"
 

@@ -13,33 +13,30 @@ import time
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 
+from src.api import ApiKeyService, _hash_key, gerar_api_key
+from src.auth import (
+    AuthService,
+    MultiTenantMiddleware,
+    TenantFilter,
+    get_tenant_id,
+    set_tenant_id,
+)
 from src.db.models import (
     ECD,
     Empresa,
     Escritorio,
-    Usuario,
-    ApiKey,
-    PlanoConta,
     Lancamento,
     Partida,
-    SaldoPeriodico,
+    PlanoConta,
+    Usuario,
     criar_engine,
     get_session,
     init_db,
 )
 from src.db.repository import Repository
-from src.auth import (
-    AuthService,
-    TenantFilter,
-    MultiTenantMiddleware,
-    get_tenant_id,
-    set_tenant_id,
-)
-from src.api import ApiKeyService, gerar_api_key, _hash_key
 from src.parsers.ecd import ECDParser
-
 
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -151,7 +148,9 @@ class TestTenantFilter:
         # A query deve ser a mesma (sem where clauses adicionais)
         assert result is not None
 
-    def test_filter_empresa_com_tenant(self, session, escritorio, empresa_com_tenant, empresa_sem_tenant):
+    def test_filter_empresa_com_tenant(
+        self, session, escritorio, empresa_com_tenant, empresa_sem_tenant
+    ):
         """Filtra empresas por escritorio_id."""
         set_tenant_id(escritorio.id)
         stmt = TenantFilter.aplicar(select(Empresa), Empresa)
@@ -256,11 +255,13 @@ class TestAuthServiceTenant:
         assert len(token) == 128  # 64 bytes hex
         # auth.login() fecha a sessão interna — consultamos direto no banco
         from src.db.models import criar_engine, get_session, init_db
+
         engine2 = criar_engine(db_path)
         init_db(engine2)
         sess2 = get_session(engine2)
         try:
             from sqlalchemy import select
+
             u = sess2.execute(
                 select(Usuario).where(Usuario.email == "contador@teste.com")
             ).scalar_one()
@@ -423,17 +424,17 @@ class TestCargaSyntheticECD:
             )
 
         # I200 + I250 — lançamentos
-        for l in range(1, n_lancamentos + 1):
-            num_lcto = f"LCTO{l:06d}"
-            dt_lcto = f"{15 + (l % 28):02d}{(l % 12) + 1:02d}2025"
-            vl = round(1000.0 + l * 10.0, 2)
+        for ln in range(1, n_lancamentos + 1):
+            num_lcto = f"LCTO{ln:06d}"
+            dt_lcto = f"{15 + (ln % 28):02d}{(ln % 12) + 1:02d}2025"
+            vl = round(1000.0 + ln * 10.0, 2)
             linhas.append(f"|I200|{num_lcto}|{dt_lcto}|{vl}|N|1|")
 
             # Duas partidas (débito e crédito)
-            conta_deb = f"1.{((l % (n_contas // 2)) + 1):04d}"
-            conta_cred = f"1.{((l % (n_contas // 2)) + n_contas // 2 + 1):04d}"
-            linhas.append(f"|I250|{num_lcto}|{conta_deb}||{vl}|D|1|HIST001|LANCAMENTO {l}|")
-            linhas.append(f"|I250|{num_lcto}|{conta_cred}||{vl}|C|1|HIST001|LANCAMENTO {l}|")
+            conta_deb = f"1.{((ln % (n_contas // 2)) + 1):04d}"
+            conta_cred = f"1.{((ln % (n_contas // 2)) + n_contas // 2 + 1):04d}"
+            linhas.append(f"|I250|{num_lcto}|{conta_deb}||{vl}|D|1|HIST001|LANCAMENTO {ln}|")
+            linhas.append(f"|I250|{num_lcto}|{conta_cred}||{vl}|C|1|HIST001|LANCAMENTO {ln}|")
 
         # I355 — saldos resultado (todas as contas)
         for i in range(1, n_contas + 1):
@@ -523,6 +524,7 @@ class TestCargaSyntheticECD:
             registros = parser.parse_todos(Path(ecd_path))
 
             from collections import defaultdict
+
             grupos = defaultdict(list)
             for r in registros:
                 grupos[r["_reg"]].append(r)
@@ -533,54 +535,65 @@ class TestCargaSyntheticECD:
 
             cnpj_raw = r0000.get("CNPJ", "")
             cnpj_str = str(int(float(cnpj_raw))).zfill(14) if cnpj_raw else "00000000000000"
-            empresa = repo.upsert_empresa({
-                "cnpj": cnpj_str,
-                "nome": r0000.get("NOME", ""),
-                "uf": r0000.get("UF", ""),
-            })
+            empresa = repo.upsert_empresa(
+                {
+                    "cnpj": cnpj_str,
+                    "nome": r0000.get("NOME", ""),
+                    "uf": r0000.get("UF", ""),
+                }
+            )
 
-            ecd = repo.criar_ecd(empresa.id, {
-                "leiaute": "009",
-                "dt_ini": datetime.date(2025, 1, 1),
-                "dt_fin": datetime.date(2025, 12, 31),
-                "nome_arquivo": "benchmark.ecd",
-            })
+            ecd = repo.criar_ecd(
+                empresa.id,
+                {
+                    "leiaute": "009",
+                    "dt_ini": datetime.date(2025, 1, 1),
+                    "dt_fin": datetime.date(2025, 12, 31),
+                    "nome_arquivo": "benchmark.ecd",
+                },
+            )
 
             # Plano de contas
             contas = []
             for r in grupos.get("I050", []):
-                contas.append({
-                    "cod_cta": r.get("COD_CTA", ""),
-                    "cod_cta_sup": r.get("COD_CTA_SUP", ""),
-                    "nome_cta": r.get("NOME_CTA", ""),
-                    "cod_nat": r.get("COD_NAT", "01"),
-                    "ind_cta": r.get("IND_CTA", "A"),
-                    "nivel": int(r.get("NIVEL") or 0),
-                })
+                contas.append(
+                    {
+                        "cod_cta": r.get("COD_CTA", ""),
+                        "cod_cta_sup": r.get("COD_CTA_SUP", ""),
+                        "nome_cta": r.get("NOME_CTA", ""),
+                        "cod_nat": r.get("COD_NAT", "01"),
+                        "ind_cta": r.get("IND_CTA", "A"),
+                        "nivel": int(r.get("NIVEL") or 0),
+                    }
+                )
             repo.inserir_plano_contas(ecd.id, contas)
 
             # Lançamentos
             lancs = []
             for r in grupos.get("I200", []):
-                lancs.append({
-                    "num_lcto": r.get("NUM_LCTO", ""),
-                    "dt_lcto": datetime.date(2025, 1, 15),
-                    "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
-                    "ind_lcto": r.get("IND_LCTO", "N"),
-                })
+                lancs.append(
+                    {
+                        "num_lcto": r.get("NUM_LCTO", ""),
+                        "dt_lcto": datetime.date(2025, 1, 15),
+                        "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
+                        "ind_lcto": r.get("IND_LCTO", "N"),
+                    }
+                )
             repo.inserir_lancamentos(ecd.id, lancs)
 
             # Partidas
             partidas = []
             for r in grupos.get("I250", []):
-                partidas.append({
-                    "num_lcto": r.get("NUM_LCTO", ""),
-                    "dt_lcto": "2025-01-15",
-                    "cod_cta": r.get("COD_CTA", ""),
-                    "cod_ccus": r.get("COD_CCUS", ""),
-                    "vl_dc": r.get("VL_DC", 0.0) or 0.0,
-                    "ind_dc": r.get("IND_DC", "D"),
-                })
+                partidas.append(
+                    {
+                        "num_lcto": r.get("NUM_LCTO", ""),
+                        "dt_lcto": "2025-01-15",
+                        "cod_cta": r.get("COD_CTA", ""),
+                        "cod_ccus": r.get("COD_CCUS", ""),
+                        "vl_dc": r.get("VL_DC", 0.0) or 0.0,
+                        "ind_dc": r.get("IND_DC", "D"),
+                    }
+                )
             repo.inserir_partidas(ecd.id, partidas)
 
             repo.commit()
@@ -594,9 +607,7 @@ class TestCargaSyntheticECD:
                 select(func.count(Lancamento.id)).where(Lancamento.ecd_id == ecd.id)
             ).scalar()
             n_partidas_db = session.execute(
-                select(func.count(Partida.id))
-                .join(Lancamento)
-                .where(Lancamento.ecd_id == ecd.id)
+                select(func.count(Partida.id)).join(Lancamento).where(Lancamento.ecd_id == ecd.id)
             ).scalar()
 
             assert n_contas_db == len(contas)

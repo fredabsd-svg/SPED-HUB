@@ -19,15 +19,41 @@ import pytest
 
 # Skip se Playwright não estiver disponível
 try:
-    from playwright.sync_api import sync_playwright, TimeoutError as PwTimeout
+    from playwright.sync_api import sync_playwright
+
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
-pytestmark = pytest.mark.skipif(
-    not PLAYWRIGHT_AVAILABLE,
-    reason="Playwright não instalado",
-)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _chromium_executable() -> str | None:
+    """Localiza um Chromium utilizável, ou ``None`` se não houver nenhum.
+
+    Ordem: variável explícita, browsers do Playwright, Chromium do sistema.
+    Sem isto os testes ERRAM na coleta em qualquer máquina sem Chromium —
+    incluindo o CI —, em vez de simplesmente pularem.
+    """
+    candidatos = []
+    if os.environ.get("SPED_HUB_CHROMIUM"):
+        candidatos.append(os.environ["SPED_HUB_CHROMIUM"])
+    browsers_path = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if browsers_path:
+        candidatos.append(str(Path(browsers_path) / "chromium"))
+    candidatos += ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"]
+    for caminho in candidatos:
+        if caminho and Path(caminho).exists():
+            return caminho
+    return None
+
+
+CHROMIUM = _chromium_executable()
+
+pytestmark = [
+    pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright não instalado"),
+    pytest.mark.skipif(CHROMIUM is None, reason="Chromium não encontrado no sistema"),
+]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -95,13 +121,18 @@ def live_server(db_path):
     # Inicia servidor em processo separado
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "uvicorn",
+            sys.executable,
+            "-m",
+            "uvicorn",
             "src.dashboard.app:app",
-            "--host", "127.0.0.1",
-            "--port", "8765",
-            "--log-level", "error",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8765",
+            "--log-level",
+            "error",
         ],
-        cwd="/workspace/repo/SPED-HUB",
+        cwd=str(REPO_ROOT),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -109,6 +140,7 @@ def live_server(db_path):
     # Aguarda servidor iniciar
     deadline = time.time() + 10
     import urllib.request
+
     while time.time() < deadline:
         try:
             urllib.request.urlopen("http://127.0.0.1:8765/api/v1/health")
@@ -135,7 +167,7 @@ class TestE2ELogin:
         """Página de login carrega corretamente."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="/usr/bin/chromium",
+                executable_path=CHROMIUM,
                 headless=True,
             )
             page = browser.new_page()
@@ -149,7 +181,7 @@ class TestE2ELogin:
         """Fluxo completo: registro → login → dashboard."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="/usr/bin/chromium",
+                executable_path=CHROMIUM,
                 headless=True,
             )
             context = browser.new_context()
@@ -180,7 +212,7 @@ class TestE2ELogin:
         """Login com credenciais inválidas mostra erro."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="/usr/bin/chromium",
+                executable_path=CHROMIUM,
                 headless=True,
             )
             page = browser.new_page()
@@ -202,7 +234,7 @@ class TestE2EUpload:
         """Upload redireciona para login sem autenticação."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="/usr/bin/chromium",
+                executable_path=CHROMIUM,
                 headless=True,
             )
             page = browser.new_page()
@@ -214,7 +246,7 @@ class TestE2EUpload:
         """Upload de ECD via interface web."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="/usr/bin/chromium",
+                executable_path=CHROMIUM,
                 headless=True,
             )
             context = browser.new_context()
@@ -259,7 +291,7 @@ class TestE2EDashboard:
         """Dashboard mostra dados após upload."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="/usr/bin/chromium",
+                executable_path=CHROMIUM,
                 headless=True,
             )
             context = browser.new_context()
@@ -280,6 +312,7 @@ class TestE2EDashboard:
 
             # Faz upload via API (mais rápido)
             import requests
+
             cookies = {cookie["name"]: cookie["value"] for cookie in context.cookies()}
             with open(ecd_file, "rb") as f:
                 resp = requests.post(
@@ -307,6 +340,7 @@ class TestE2EAPI:
     def test_api_health(self, live_server):
         """Health check da API."""
         import requests
+
         resp = requests.get(f"{live_server}/api/v1/health")
         assert resp.status_code == 200
         data = resp.json()
@@ -315,6 +349,7 @@ class TestE2EAPI:
     def test_api_ecds_vazia(self, live_server):
         """Lista ECDs vazia."""
         import requests
+
         resp = requests.get(f"{live_server}/api/v1/ecds", timeout=10)
         assert resp.status_code == 401
         assert "X-API-Key" in resp.json()["detail"]
@@ -327,7 +362,7 @@ class TestE2EScreenshots:
         """Screenshot da página de login."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="/usr/bin/chromium",
+                executable_path=CHROMIUM,
                 headless=True,
             )
             page = browser.new_page(viewport={"width": 1280, "height": 800})
@@ -345,7 +380,7 @@ class TestE2EScreenshots:
         """Screenshot da página de registro."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                executable_path="/usr/bin/chromium",
+                executable_path=CHROMIUM,
                 headless=True,
             )
             page = browser.new_page(viewport={"width": 1280, "height": 800})
