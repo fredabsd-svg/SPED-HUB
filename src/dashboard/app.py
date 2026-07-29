@@ -46,6 +46,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 
@@ -94,6 +95,12 @@ app.include_router(api_v1_router)
 app.include_router(graphql_router)
 
 # Templates
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+# htmx, Alpine, Chart.js e SortableJS são servidos daqui, não de CDN: sem
+# acesso externo a aplicação degradava em silêncio, e cada página carregava
+# uma versão diferente.  Ver src/dashboard/static/vendor/README.md.
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 jinja_env = Environment(
     loader=FileSystemLoader(str(TEMPLATES_DIR)),

@@ -37,6 +37,8 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **Deploy produção** — nginx + SSL (Let's Encrypt) + docker-compose pronto
 - **Navegação entre múltiplas ECDs** importadas
 - **Design responsivo** com tema profissional
+- **Sem dependência de CDN** — htmx, Alpine, Chart.js e SortableJS são
+  servidos pela própria aplicação em `/static/vendor/`
 - **Configuração por ambiente** — Toda a aplicação lê de `src/settings.py` (`DATABASE_URL`, SMTP, Redis, uploads, etc.)
 
 ### Docker
@@ -57,10 +59,8 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 pip install -e ".[dev]"
 ```
 
-> **Versão atual:** 0.16.0 — Fase 17 (Fundação de Produção) concluída:
-> configuração por ambiente ligada a toda a aplicação, PostgreSQL validado
-> de ponta a ponta, migrações Alembic, importação de ECDs grandes 2x mais
-> rápida com cancelamento, hardening e CI/CD de release preparado.
+> **Versão atual:** 0.16.1 — bibliotecas de front-end servidas pela própria
+> aplicação, sem dependência de CDN em runtime (Fase 18).
 
 ### Docker
 ```bash
