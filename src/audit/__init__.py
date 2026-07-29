@@ -28,7 +28,13 @@ import logging
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from src.db.models import AuditLog, criar_engine, get_session, init_db
+from src.db.models import (
+    AuditLog,
+    criar_engine,
+    get_session,
+    init_db,
+    truncar_para_coluna,
+)
 
 logger = logging.getLogger("sped-hub.audit")
 
@@ -74,14 +80,19 @@ class AuditService:
         """
         session = self._get_session()
         try:
+            # Todos estes campos chegam de fora: `usuario_email` vem cru do
+            # formulário de login (inclusive em tentativas falhas) e `recurso`
+            # carrega caminhos de URL.  Em Postgres, um valor acima do limite
+            # da coluna derruba a gravação — e perder a trilha de auditoria
+            # justamente na tentativa suspeita é o pior resultado possível.
             log = AuditLog(
                 usuario_id=usuario_id,
-                usuario_email=usuario_email,
+                usuario_email=truncar_para_coluna(AuditLog, "usuario_email", usuario_email),
                 api_key_id=api_key_id,
-                acao=acao,
-                recurso=recurso,
-                metodo=metodo,
-                ip=ip,
+                acao=truncar_para_coluna(AuditLog, "acao", acao),
+                recurso=truncar_para_coluna(AuditLog, "recurso", recurso),
+                metodo=truncar_para_coluna(AuditLog, "metodo", metodo),
+                ip=truncar_para_coluna(AuditLog, "ip", ip),
                 status_code=status_code,
             )
             if detalhes:

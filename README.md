@@ -112,12 +112,30 @@ estiverem definidos, o nome documentado vence.
 
 > **Não versione o `.env`.**  O arquivo já é ignorado pelo `.gitignore`.
 
-Para usar PostgreSQL:
+### PostgreSQL
 
 ```bash
-# pip install psycopg[binary]   # se ainda não estiver instalado
+pip install -e ".[postgres]"
 DATABASE_URL=postgresql+psycopg://user:pass@host:5432/sped_hub sped-hub-dashboard
 ```
+
+O schema completo (24 tabelas) e toda a camada de relatórios foram
+exercitados contra um PostgreSQL 16 real.  Duas divergências entre os
+backends precisaram de correção e estão cobertas por teste — ambas eram
+silenciosas em SQLite:
+
+| Divergência | Efeito ao migrar |
+|---|---|
+| `LIKE` é case-insensitive no SQLite e case-sensitive no Postgres | A busca por histórico devolvia resultados em um banco e nada no outro.  Uniformizado com `ilike`. |
+| `String(n)` é ignorado pelo SQLite e imposto pelo Postgres | Um `User-Agent` acima de 512 caracteres — que qualquer cliente pode enviar — derrubava o login.  Campos de telemetria passaram a ser truncados no limite da coluna. |
+
+Para rodar a suíte contra os dois backends:
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/sped_hub_test pytest tests/test_multibackend.py
+```
+
+Sem a variável, os casos de Postgres pulam.
 
 ## Uso
 
