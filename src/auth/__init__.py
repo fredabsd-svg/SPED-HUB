@@ -14,7 +14,14 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.db.models import Sessao, Usuario, UsuarioEmpresa, criar_engine, get_session, init_db
+from src.db.models import (
+    Sessao,
+    Usuario,
+    UsuarioEmpresa,
+    get_session,
+    init_db_once,
+    obter_engine,
+)
 
 logger = logging.getLogger("sped-hub.auth")
 
@@ -136,8 +143,8 @@ class MultiTenantMiddleware:
     def _resolve_tenant(self, token: str) -> int | None:
         """Resolve o escritorio_id a partir do token de sessão."""
         try:
-            engine = criar_engine(self.db_path)
-            init_db(engine)
+            engine = obter_engine(self.db_path)
+            init_db_once(engine)
             session = get_session(engine)
             try:
                 sessao = session.execute(
@@ -161,8 +168,11 @@ class AuthService:
         self._ensure_admin_for_existing_installation()
 
     def _get_session(self) -> Session:
-        engine = criar_engine(self.db_path)
-        init_db(engine)
+        # Engine reutilizada e schema criado uma vez: este método roda em todo
+        # request autenticado, e `criar_engine` + `create_all` a cada chamada
+        # custavam ~3 ms por request só para validar um token.
+        engine = obter_engine(self.db_path)
+        init_db_once(engine)
         return get_session(engine)
 
     def _ensure_admin_for_existing_installation(self) -> None:

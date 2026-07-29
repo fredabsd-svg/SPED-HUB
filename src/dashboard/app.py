@@ -63,7 +63,7 @@ from src.auth import (
 )
 from src.cache.redis_cache import RedisCacheService
 from src.dashboard.services import DashboardService
-from src.db.models import ECD, Empresa, criar_engine, get_session, init_db
+from src.db.models import ECD, Empresa, criar_engine, get_session, init_db, obter_engine
 from src.ecd_importer import ECDImportError, ECDImportService
 from src.email_service import get_email_service
 from src.filters.engine import FilterCriteria
@@ -119,7 +119,7 @@ def _db_reference() -> str:
 
 
 def _get_engine():
-    return criar_engine(_db_reference())
+    return obter_engine(_db_reference())
 
 
 _PUBLIC_API_PATHS = {
@@ -762,7 +762,7 @@ async def api_upload_async(request: Request, file: UploadFile = File(...)):
     import threading
 
     def process_upload():
-        session = get_session(criar_engine(db_path))
+        session = get_session(obter_engine(db_path))
         try:
             result = ECDImportService(session).importar(
                 saved.path,

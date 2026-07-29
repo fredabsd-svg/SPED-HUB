@@ -6,7 +6,13 @@ import importlib
 
 import pytest
 
-from src.db.models import _normalizar_database_url, criar_engine, get_session, init_db
+from src.db.models import (
+    _normalizar_database_url,
+    criar_engine,
+    get_session,
+    init_db,
+    obter_engine,
+)
 from src.settings import (
     database_reference,
     get_settings,
@@ -399,3 +405,86 @@ class TestDatabaseReferenceNosServicos:
     def test_sped_hub_db_continua_funcionando(self, monkeypatch):
         monkeypatch.setenv("SPED_HUB_DB", "/tmp/legado.db")
         assert database_reference() == "sqlite:////tmp/legado.db"
+
+
+class TestCacheDeEngine:
+    """``obter_engine`` reaproveita o pool; ``criar_engine`` continua criando novo.
+
+    O caminho quente (validar sessão, resolver tenant, cada request do
+    dashboard) criava uma engine e rodava ``create_all`` — reflexão das 24
+    tabelas — a cada chamada.
+    """
+
+    def test_mesma_url_devolve_a_mesma_engine(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'cache.db'}"
+        assert obter_engine(url=url) is obter_engine(url=url)
+
+    def test_urls_distintas_nao_se_misturam(self, tmp_path):
+        a = obter_engine(url=f"sqlite:///{tmp_path / 'a.db'}")
+        b = obter_engine(url=f"sqlite:///{tmp_path / 'b.db'}")
+        assert a is not b
+
+    def test_criar_engine_continua_sem_cache(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'sem_cache.db'}"
+        primeira = criar_engine(url=url)
+        try:
+            assert primeira is not criar_engine(url=url)
+        finally:
+            primeira.dispose()
+
+    def test_memory_nunca_e_compartilhada(self):
+        # Cada engine `:memory:` é um banco próprio; compartilhá-las faria
+        # bancos de teste independentes enxergarem os dados uns dos outros.
+        assert obter_engine(":memory:") is not obter_engine(":memory:")
+
+    def test_init_db_once_roda_uma_vez_por_engine(self, tmp_path, monkeypatch):
+        from src.db import models
+
+        chamadas = []
+        original = models.Base.metadata.create_all
+        monkeypatch.setattr(
+            models.Base.metadata,
+            "create_all",
+            lambda *a, **k: (chamadas.append(1), original(*a, **k))[1],
+        )
+        engine = obter_engine(url=f"sqlite:///{tmp_path / 'once.db'}")
+        for _ in range(5):
+            models.init_db_once(engine)
+        assert len(chamadas) == 1
+
+    def test_init_db_once_roda_de_novo_para_engine_nova(self, tmp_path):
+        from src.db import models
+
+        engine = criar_engine(url=f"sqlite:///{tmp_path / 'nova.db'}")
+        try:
+            models.init_db_once(engine)
+            with engine.connect() as conn:
+                conn.exec_driver_sql("SELECT 1 FROM usuarios LIMIT 1")
+        finally:
+            engine.dispose()
+
+    def test_cache_e_zerado_no_processo_filho(self, tmp_path):
+        """Pools do SQLAlchemy não sobrevivem a ``fork`` — o worker usa multiprocessing."""
+        import multiprocessing
+        import os
+
+        if not hasattr(os, "fork"):
+            pytest.skip("plataforma sem fork")
+
+        from src.db import models
+
+        obter_engine(url=f"sqlite:///{tmp_path / 'fork.db'}")
+        assert models._ENGINES, "pré-condição: cache populado no pai"
+
+        ctx = multiprocessing.get_context("fork")
+        fila = ctx.Queue()
+        processo = ctx.Process(target=_reportar_tamanho_do_cache, args=(fila,))
+        processo.start()
+        processo.join(timeout=30)
+        assert fila.get(timeout=5) == 0, "o filho herdou engines do pai"
+
+
+def _reportar_tamanho_do_cache(fila):
+    from src.db import models
+
+    fila.put(len(models._ENGINES))

@@ -10,7 +10,10 @@ também de :mod:`src.settings`.
 import datetime
 import hashlib
 import json
+import os
 import secrets
+import threading
+import weakref
 
 from sqlalchemy import (
     DateTime,
@@ -748,6 +751,62 @@ def criar_engine(
     return engine
 
 
+_ENGINES: dict[tuple[str, bool], Engine] = {}
+_ENGINES_LOCK = threading.Lock()
+# Engines cujo schema já foi criado.  A chave é o *objeto* engine, não a URL:
+# uma engine nova (banco novo, arquivo temporário de teste) nunca é confundida
+# com uma anterior que apontava para o mesmo caminho.
+_SCHEMA_PRONTO: weakref.WeakSet = weakref.WeakSet()
+
+
+def obter_engine(
+    caminho: str | None = None,
+    *,
+    url: str | None = None,
+    echo: bool | None = None,
+) -> Engine:
+    """Engine reutilizada por processo — mesma assinatura de :func:`criar_engine`.
+
+    ``criar_engine`` devolve uma engine nova a cada chamada, o que significa um
+    pool de conexões descartável por uso.  Nos caminhos quentes (validação de
+    sessão, resolução de tenant, cada request do dashboard) isso custa uma
+    conexão nova por request; em Postgres, um handshake de rede por request.
+
+    Bancos ``:memory:`` nunca são reaproveitados: cada engine em memória é um
+    banco distinto, e compartilhá-las mudaria o comportamento de quem espera
+    isolamento (as fixtures de teste, entre outros).
+    """
+    final_url = url or _normalizar_database_url(caminho) or get_settings().database_url
+    if final_url == "sqlite:///:memory:":
+        return criar_engine(caminho, url=url, echo=echo)
+
+    chave = (final_url, bool(get_settings().database_echo if echo is None else echo))
+    engine = _ENGINES.get(chave)
+    if engine is not None:
+        return engine
+    with _ENGINES_LOCK:
+        engine = _ENGINES.get(chave)
+        if engine is None:
+            engine = criar_engine(caminho, url=url, echo=echo)
+            _ENGINES[chave] = engine
+    return engine
+
+
+def _descartar_engines_apos_fork() -> None:
+    """Zera o cache no processo filho após ``fork``.
+
+    Conexões e pools do SQLAlchemy não podem ser compartilhados entre
+    processos: herdar o socket/handle do pai corrompe o estado dos dois.  O
+    worker de fila usa ``multiprocessing``, então este hook não é teórico.
+    """
+    _ENGINES.clear()
+    _SCHEMA_PRONTO.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_descartar_engines_apos_fork)
+
+
 def init_db(engine: Engine | None = None) -> None:
     """Cria todas as tabelas.
 
@@ -758,6 +817,19 @@ def init_db(engine: Engine | None = None) -> None:
     if engine is None:
         engine = criar_engine()
     Base.metadata.create_all(engine)
+    _SCHEMA_PRONTO.add(engine)
+
+
+def init_db_once(engine: Engine) -> None:
+    """``init_db`` idempotente por engine, para os caminhos quentes.
+
+    ``create_all`` é idempotente no resultado, mas não no custo: ele reflete as
+    24 tabelas no banco a cada chamada.  Rodando por request, era ~2,9 ms dos
+    ~3,1 ms gastos só para validar um token de sessão.
+    """
+    if engine in _SCHEMA_PRONTO:
+        return
+    init_db(engine)
 
 
 def get_session(engine: Engine | None = None) -> Session:
