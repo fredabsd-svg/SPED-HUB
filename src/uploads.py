@@ -54,6 +54,33 @@ def max_upload_bytes() -> int:
     return get_settings().max_upload_bytes
 
 
+# Um arquivo SPED começa com o registro 0000 delimitado por pipes.  Conferir a
+# extensão não diz nada sobre o conteúdo: qualquer coisa renomeada para .txt
+# passava, era gravada em disco e só quebrava lá adiante no parser — depois de
+# já ter consumido o limite inteiro de upload.
+_ASSINATURA_SPED = b"|0000|"
+_BYTES_DE_ASSINATURA = 512
+
+
+def _validar_assinatura(inicio: bytes, formatos: tuple[str, ...]) -> None:
+    """Confere que o começo do arquivo parece um SPED.
+
+    Aceita BOM UTF-8 e linhas em branco à frente, que aparecem em arquivos
+    gerados por alguns sistemas contábeis.
+    """
+    amostra = inicio.lstrip(b"\xef\xbb\xbf").lstrip(b"\r\n \t")
+    if amostra.startswith(_ASSINATURA_SPED):
+        return
+    formatos_txt = ", ".join(formatos)
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"Conteúdo não parece um arquivo SPED ({formatos_txt}). "
+            "O arquivo deve começar com o registro |0000|."
+        ),
+    )
+
+
 async def save_upload(
     upload: UploadFile,
     allowed_extensions: tuple[str, ...],
@@ -83,9 +110,16 @@ async def save_upload(
     total = 0
     limit = max_upload_bytes()
 
+    primeiro_bloco = True
     try:
         with os.fdopen(fd, "wb") as destination:
             while chunk := await upload.read(_CHUNK_SIZE):
+                if primeiro_bloco:
+                    # Valida antes de gravar: um arquivo que não é SPED é
+                    # recusado no primeiro bloco, sem ocupar disco nem
+                    # consumir o limite inteiro de upload.
+                    _validar_assinatura(chunk[:_BYTES_DE_ASSINATURA], allowed)
+                    primeiro_bloco = False
                 total += len(chunk)
                 if total > limit:
                     raise HTTPException(
@@ -94,6 +128,8 @@ async def save_upload(
                     )
                 digest.update(chunk)
                 destination.write(chunk)
+        if primeiro_bloco:
+            raise HTTPException(status_code=400, detail="Arquivo vazio")
     except BaseException:
         path.unlink(missing_ok=True)
         raise

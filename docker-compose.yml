@@ -54,6 +54,10 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - EMAIL_FROM=${EMAIL_FROM:-noreply@sped-hub.local}
       - SPED_HUB_MAX_UPLOAD_MB=${SPED_HUB_MAX_UPLOAD_MB:-200}
+      # Há nginx na frente sobrescrevendo X-Forwarded-For, então aqui
+      # o cabeçalho é confiável e o limite por IP vê o cliente real.
+      - SPED_HUB_TRUST_PROXY=true
+      - SPED_HUB_LOG_JSON=${SPED_HUB_LOG_JSON:-true}
     depends_on:
       redis:
         condition: service_healthy

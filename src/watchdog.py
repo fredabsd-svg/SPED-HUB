@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.db.models import criar_engine, get_session, init_db
 from src.ecd_importer import DuplicateECDImportError, ECDImportService, hash_file
+from src.logging_config import configurar_logging
 
 logger = logging.getLogger("sped-hub.watchdog")
 
@@ -92,11 +93,7 @@ def main():
 
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.StreamHandler(sys.stderr)],
-    )
+    configurar_logging()
 
     watch_dir = Path(args.dir)
     logger.info("Watchdog iniciado — diretório: %s, intervalo: %ds", watch_dir, args.interval)

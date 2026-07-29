@@ -100,7 +100,11 @@ desenvolvimento):
 | `REDIS_URL` | Cache/fila (opcional) | `redis://localhost:6379/0` quando acionado |
 | `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` / `SPED_HUB_WEBHOOK_TIMEOUT` | Resiliência dos webhooks | `3` / `10` |
 | `SPED_HUB_WEBHOOK_ALLOW_HTTP` | Aceita destino `http://` (só em dev) | `false` |
-| `SPED_HUB_RATE_LIMIT_DEFAULT` / `SPED_HUB_RATE_LIMIT_WINDOW` | Limite de taxa padrão | `100` / `60` |
+| `SPED_HUB_RATE_LIMIT_DEFAULT` / `SPED_HUB_RATE_LIMIT_WINDOW` | Limite por API Key | `100` / `60` |
+| `SPED_HUB_RATE_LIMIT_IP` / `SPED_HUB_RATE_LIMIT_IP_WINDOW` | Limite por IP na API | `300` / `60` |
+| `SPED_HUB_RATE_LIMIT_LOGIN` / `SPED_HUB_RATE_LIMIT_LOGIN_WINDOW` | Limite por IP em login/registro | `10` / `60` |
+| `SPED_HUB_TRUST_PROXY` | Ler IP de `X-Forwarded-For` (só com proxy confiável) | `false` |
+| `SPED_HUB_LOG_JSON` | Uma linha JSON por evento de log | `false` |
 
 Aliases legados ainda aceitos, para não quebrar deploys existentes:
 `SMTP_PASS` → `SMTP_PASSWORD` e `SMTP_FROM` → `EMAIL_FROM`.  Quando os dois

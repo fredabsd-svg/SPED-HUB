@@ -19,6 +19,7 @@ from src.db.models import criar_engine, get_session, init_db
 from src.db.repository import Repository
 from src.ecd_importer import ECDImportService
 from src.filters.engine import FilterCriteria
+from src.logging_config import configurar_logging
 from src.reports.balancete import Balancete
 from src.reports.balanco import BalancoPatrimonial
 from src.reports.diario import LivroDiario
@@ -27,11 +28,7 @@ from src.reports.export_engine import ExportEngine, WhiteLabel
 from src.reports.razao import Razao
 from src.validators.integridade import ValidadorIntegridade
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("sped-hub.log"), logging.StreamHandler(sys.stderr)],
-)
+configurar_logging()
 logger = logging.getLogger("sped-hub")
 
 

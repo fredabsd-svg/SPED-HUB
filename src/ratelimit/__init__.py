@@ -337,3 +337,96 @@ class RateLimitService:
             ]
         finally:
             session.close()
+
+
+# ── Rate limit por IP (Fase 17, Etapa 5) ───────────────────────────────────
+#
+# O limitador acima é por API Key, o que deixa de fora justamente o que mais
+# precisa de proteção: `/api/login` e `/api/register` são públicos por
+# definição e não têm chave.  Sem limite por IP, tentar senhas em sequência
+# custa nada ao atacante.
+
+
+@dataclass
+class IPRateLimitInfo:
+    limite: int
+    janela: int
+    restantes: int
+    reset_em: int
+
+
+class IPRateLimiter:
+    """Janela deslizante em memória, por endereço de origem.
+
+    Escopos separados (`login`, `api`) para que uma rajada legítima de
+    requisições autenticadas não consuma a cota de tentativas de senha.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._counters: dict[tuple[str, str], dict] = {}
+
+    def verificar(
+        self, ip: str, escopo: str, limite: int, janela: int
+    ) -> tuple[bool, IPRateLimitInfo]:
+        agora = time.monotonic()
+        chave = (escopo, ip)
+        with self._lock:
+            estado = self._counters.get(chave)
+            if estado is None or agora - estado["inicio"] >= janela:
+                self._counters[chave] = {"count": 1, "inicio": agora}
+                return True, IPRateLimitInfo(limite, janela, limite - 1, janela)
+
+            decorrido = agora - estado["inicio"]
+            reset_em = max(1, int(janela - decorrido))
+            if estado["count"] >= limite:
+                return False, IPRateLimitInfo(limite, janela, 0, reset_em)
+
+            estado["count"] += 1
+            return True, IPRateLimitInfo(limite, janela, limite - estado["count"], reset_em)
+
+    def reset(self, ip: str | None = None) -> None:
+        with self._lock:
+            if ip is None:
+                self._counters.clear()
+            else:
+                for chave in [c for c in self._counters if c[1] == ip]:
+                    del self._counters[chave]
+
+    def limpar_expirados(self, janela_maxima: int = 3600) -> int:
+        """Descarta janelas velhas — sem isto o dicionário cresce com os IPs vistos."""
+        agora = time.monotonic()
+        with self._lock:
+            velhas = [c for c, e in self._counters.items() if agora - e["inicio"] > janela_maxima]
+            for chave in velhas:
+                del self._counters[chave]
+        return len(velhas)
+
+
+_ip_limiter = IPRateLimiter()
+
+
+def get_ip_limiter() -> IPRateLimiter:
+    return _ip_limiter
+
+
+def ip_do_request(request) -> str:
+    """Endereço de origem, respeitando proxy reverso **apenas se confiável**.
+
+    `X-Forwarded-For` é escrito pelo cliente quando não há proxy à frente:
+    confiar nele sem condição transforma o limite por IP em decoração, porque
+    o atacante troca o cabeçalho a cada tentativa.  Por isso o cabeçalho só é
+    lido quando `SPED_HUB_TRUST_PROXY` está ligado — o que só faz sentido com
+    um nginx na frente sobrescrevendo o valor, como no docker-compose.
+    """
+    from src.settings import get_settings
+
+    direto = request.client.host if request.client else "desconhecido"
+    if not get_settings().trust_proxy:
+        return direto
+
+    encaminhado = request.headers.get("X-Forwarded-For", "")
+    if encaminhado:
+        # O primeiro da lista é o cliente original.
+        return encaminhado.split(",")[0].strip() or direto
+    return request.headers.get("X-Real-IP", "").strip() or direto

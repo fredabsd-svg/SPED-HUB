@@ -18,13 +18,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.cache.redis_cache import RedisCacheService
+from src.logging_config import configurar_logging
 from src.settings import get_settings
 from src.worker_queue import init_worker_queue
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
+configurar_logging()
 logger = logging.getLogger("sped-hub.worker_runner")
 
 # Config

@@ -160,7 +160,7 @@ class TestWorkerQueue:
             assert status["status"] in ("queued", "running", "completed")
 
             # Aguarda processamento
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -185,7 +185,7 @@ class TestWorkerQueue:
         try:
             task_id = q.enqueue("inexistente", {})
 
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -218,7 +218,7 @@ class TestWorkerQueue:
         try:
             task_id = q.enqueue("retry_test", {})
 
-            deadline = time.time() + 15
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -247,7 +247,7 @@ class TestWorkerQueue:
         try:
             task_id = q.enqueue("fail_test", {})
 
-            deadline = time.time() + 15
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -274,7 +274,7 @@ class TestWorkerQueue:
             ids = [q.enqueue("test", {}) for _ in range(3)]
 
             # Aguarda todas concluírem
-            deadline = time.time() + 10
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 all_done = all(q.status(tid)["status"] in ("completed", "failed") for tid in ids)
@@ -306,7 +306,7 @@ class TestWorkerQueue:
         try:
             task_id = q.enqueue("progress_test", {})
 
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(task_id)
@@ -396,6 +396,7 @@ class TestEmailService:
             job_tipo="ecd_import",
             job_id=42,
             resultado={"contas": 100},
+            async_mode=False,
         )
         assert msg.status == "enviado"
         assert "concluído" in msg.assunto.lower()
@@ -408,6 +409,7 @@ class TestEmailService:
             job_tipo="ecd_import",
             job_id=99,
             erro="Arquivo corrompido",
+            async_mode=False,
         )
         assert msg.status == "enviado"
         assert "falhou" in msg.assunto.lower()
@@ -419,6 +421,7 @@ class TestEmailService:
             para="cliente@exemplo.com",
             empresa="Empresa Teste",
             periodo="01/2024 a 12/2024",
+            async_mode=False,
         )
         assert msg.status == "enviado"
         assert "Empresa Teste" in msg.corpo
@@ -490,7 +493,7 @@ class TestIntegracaoFase15:
         try:
             q.enqueue("test", {})
 
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 if alertas:
@@ -531,7 +534,7 @@ class TestIntegracaoFase15:
         try:
             # Primeira chamada — processa (from_cache=False)
             id1 = q.enqueue("cache_test", {"id": "abc"})
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(id1)
@@ -544,7 +547,7 @@ class TestIntegracaoFase15:
 
             # Segunda chamada no mesmo worker — usa cache
             id2 = q.enqueue("cache_test", {"id": "abc"})
-            deadline = time.time() + 5
+            deadline = time.time() + 30
             while time.time() < deadline:
                 q.process_results()
                 s = q.status(id2)

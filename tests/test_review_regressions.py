@@ -103,8 +103,12 @@ class TestUploadSecurityRegression:
     def test_filename_traversal_is_never_used_as_path(self, tmp_path: Path, monkeypatch):
         monkeypatch.setenv("SPED_HUB_UPLOAD_DIR", str(tmp_path / "uploads"))
         sentinel = tmp_path / "escape.txt"
+        # Conteúdo precisa ser SPED válido: desde a Etapa 5 o upload recusa
+        # arquivo com assinatura errada.  O que este teste verifica é o
+        # tratamento do *nome*, então o conteúdo só precisa passar.
+        conteudo = b"|0000|LECD|01012024|31122024|EMPRESA|00123456000199|\n"
         upload = UploadFile(
-            file=__import__("io").BytesIO(b"conteudo seguro"),
+            file=__import__("io").BytesIO(conteudo),
             filename="../escape.txt",
             headers=Headers({"content-type": "text/plain"}),
         )
@@ -115,7 +119,7 @@ class TestUploadSecurityRegression:
             assert saved.path.parent == tmp_path / "uploads"
             assert saved.path.name != "escape.txt"
             assert not sentinel.exists()
-            assert saved.path.read_bytes() == b"conteudo seguro"
+            assert saved.path.read_bytes() == conteudo
         finally:
             saved.path.unlink(missing_ok=True)
 
@@ -123,8 +127,10 @@ class TestUploadSecurityRegression:
         upload_dir = tmp_path / "uploads"
         monkeypatch.setenv("SPED_HUB_UPLOAD_DIR", str(upload_dir))
         monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_BYTES", "4")
+        # Assinatura válida e tamanho acima do limite: o que se testa aqui é
+        # o 413 e a remoção do arquivo parcial, não a validação de conteúdo.
         upload = UploadFile(
-            file=__import__("io").BytesIO(b"12345"),
+            file=__import__("io").BytesIO(b"|0000|LECD|01012024|"),
             filename="grande.txt",
         )
 
