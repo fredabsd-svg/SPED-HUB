@@ -36,6 +36,7 @@ from src.db.models import (
     init_db,
     truncar_para_coluna,
 )
+from tests.conftest import url_com_senha
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ecd_sample.txt"
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -171,7 +172,7 @@ class TestLimitesDeColuna:
         """Qualquer cliente pode mandar um User-Agent de 1 KB."""
         from src.auth import AuthService
 
-        auth = AuthService(str(backend.url))
+        auth = AuthService(url_com_senha(backend))
         auth.registrar("limite@teste.com", "L", "senha123456")
         _, token, _, _ = auth.login(
             "limite@teste.com", "senha123456", ip="1" * 80, user_agent="M" * 1000
@@ -182,7 +183,7 @@ class TestLimitesDeColuna:
         """Perder a trilha justamente na tentativa suspeita é o pior resultado."""
         from src.audit import AuditService
 
-        servico = AuditService(str(backend.url))
+        servico = AuditService(url_com_senha(backend))
         servico.registrar(
             acao="auth.login",
             recurso="/api/" + "x" * 900,

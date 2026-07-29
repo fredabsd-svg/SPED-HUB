@@ -262,3 +262,74 @@ class TestCabecalhosDeSeguranca:
         for linha in nginx.split("\n"):
             if linha.strip().startswith("add_header") and "Cache-Control" not in linha:
                 assert linha.rstrip().endswith("always;"), linha.strip()
+
+
+class TestFormulariosDeCredencial:
+    """Degradação segura quando o JavaScript não carrega.
+
+    Os formulários de login e registro são enviados por HTMX.  Sem `method`
+    declarado, o navegador cai no default — **GET** — quando o htmx não
+    carrega (CDN bloqueado por firewall corporativo, por exemplo), e a senha
+    vai parar na query string: histórico do navegador, log de acesso do
+    servidor e cabeçalho `Referer`.
+    """
+
+    TEMPLATES = REPO_ROOT / "src" / "dashboard" / "templates"
+
+    @pytest.mark.parametrize(
+        "arquivo,endpoint", [("login.html", "/api/login"), ("register.html", "/api/register")]
+    )
+    def test_formulario_declara_post(self, arquivo, endpoint):
+        html = (self.TEMPLATES / arquivo).read_text(encoding="utf-8")
+        formulario = html[html.index("<form") : html.index(">", html.index("<form"))]
+        assert (
+            'method="post"' in formulario
+        ), f"{arquivo}: sem method, o fallback sem JS é GET e a senha vai na URL"
+        assert f'action="{endpoint}"' in formulario
+
+    def test_base_trata_o_redirect_das_respostas_json(self):
+        """A API devolve `{"status":"ok","redirect":...}` e algo precisa consumir.
+
+        Sem isso, o htmx injetava o JSON cru na página: o usuário registrava a
+        conta e ficava parado olhando para `{"status": "ok", ...}`.
+        """
+        base = (self.TEMPLATES / "base.html").read_text(encoding="utf-8")
+        assert "htmx:beforeSwap" in base
+        assert "corpo.redirect" in base
+        assert "window.location.href" in base
+
+
+class TestRespostasDeAutenticacao:
+    """As respostas que o handler acima consome."""
+
+    @pytest.fixture
+    def cliente(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'auth.db'}")
+        reset_settings_cache()
+        import importlib
+
+        import src.dashboard.app as modulo
+
+        importlib.reload(modulo)
+        from fastapi.testclient import TestClient
+
+        yield TestClient(modulo.app)
+        reset_settings_cache()
+
+    def test_registro_devolve_redirect(self, cliente):
+        resposta = cliente.post(
+            "/api/register", data={"email": "n@x.com", "nome": "N", "senha": "senha123"}
+        )
+        assert resposta.status_code == 200
+        assert resposta.json()["redirect"] == "/login"
+
+    def test_login_devolve_redirect(self, cliente):
+        cliente.post("/api/register", data={"email": "n@x.com", "nome": "N", "senha": "senha123"})
+        resposta = cliente.post("/api/login", data={"email": "n@x.com", "senha": "senha123"})
+        assert resposta.status_code == 200
+        assert resposta.json()["redirect"] == "/"
+
+    def test_login_invalido_nao_devolve_redirect(self, cliente):
+        resposta = cliente.post("/api/login", data={"email": "n@x.com", "senha": "errada"})
+        assert resposta.status_code == 401
+        assert "redirect" not in resposta.json()

@@ -18,3 +18,13 @@ def _zerar_rate_limit_por_ip():
     get_ip_limiter().reset()
     yield
     get_ip_limiter().reset()
+
+
+def url_com_senha(engine) -> str:
+    """URL da engine **incluindo** a senha, para serviços que recebem `db_path`.
+
+    `str(engine.url)` mascara a senha como `***`.  Isso passa despercebido em
+    SQLite (não tem senha) e em Postgres com autenticação `trust`, e falha com
+    autenticação por senha — que é o caso do CI e de qualquer produção.
+    """
+    return engine.url.render_as_string(hide_password=False)

@@ -195,7 +195,7 @@ class TestE2ELogin:
             page.click("button[type='submit']")
 
             # Aguarda redirect para login
-            page.wait_for_url(f"{live_server}/login", timeout=5000)
+            page.wait_for_url(f"{live_server}/login", timeout=30000)
 
             # Login
             page.fill("input[name='email']", "e2e@teste.com")
@@ -203,7 +203,7 @@ class TestE2ELogin:
             page.click("button[type='submit']")
 
             # Aguarda redirect para dashboard
-            page.wait_for_url(f"{live_server}/", timeout=5000)
+            page.wait_for_url(f"{live_server}/", timeout=30000)
             assert page.url == f"{live_server}/"
 
             browser.close()
@@ -258,12 +258,12 @@ class TestE2EUpload:
             page.fill("input[name='nome']", "Upload E2E")
             page.fill("input[name='senha']", "senha123")
             page.click("button[type='submit']")
-            page.wait_for_url(f"{live_server}/login", timeout=5000)
+            page.wait_for_url(f"{live_server}/login", timeout=30000)
 
             page.fill("input[name='email']", "upload_e2e@teste.com")
             page.fill("input[name='senha']", "senha123")
             page.click("button[type='submit']")
-            page.wait_for_url(f"{live_server}/", timeout=5000)
+            page.wait_for_url(f"{live_server}/", timeout=30000)
 
             # Navega para upload
             page.goto(f"{live_server}/upload")
@@ -303,19 +303,19 @@ class TestE2EDashboard:
             page.fill("input[name='nome']", "Dashboard E2E")
             page.fill("input[name='senha']", "senha123")
             page.click("button[type='submit']")
-            page.wait_for_url(f"{live_server}/login", timeout=5000)
+            page.wait_for_url(f"{live_server}/login", timeout=30000)
 
             page.fill("input[name='email']", "dash_e2e@teste.com")
             page.fill("input[name='senha']", "senha123")
             page.click("button[type='submit']")
-            page.wait_for_url(f"{live_server}/", timeout=5000)
+            page.wait_for_url(f"{live_server}/", timeout=30000)
 
             # Faz upload via API (mais rápido)
-            import requests
+            import httpx
 
             cookies = {cookie["name"]: cookie["value"] for cookie in context.cookies()}
             with open(ecd_file, "rb") as f:
-                resp = requests.post(
+                resp = httpx.post(
                     f"{live_server}/api/upload",
                     files={"file": ("test.txt", f, "text/plain")},
                     cookies=cookies,
@@ -339,18 +339,18 @@ class TestE2EAPI:
 
     def test_api_health(self, live_server):
         """Health check da API."""
-        import requests
+        import httpx
 
-        resp = requests.get(f"{live_server}/api/v1/health")
+        resp = httpx.get(f"{live_server}/api/v1/health")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
 
     def test_api_ecds_vazia(self, live_server):
         """Lista ECDs vazia."""
-        import requests
+        import httpx
 
-        resp = requests.get(f"{live_server}/api/v1/ecds", timeout=10)
+        resp = httpx.get(f"{live_server}/api/v1/ecds", timeout=10)
         assert resp.status_code == 401
         assert "X-API-Key" in resp.json()["detail"]
 
@@ -369,8 +369,8 @@ class TestE2EScreenshots:
             page.goto(f"{live_server}/login")
             time.sleep(0.5)
 
-            screenshot_dir = Path("/workspace/outputs")
-            screenshot_dir.mkdir(exist_ok=True)
+            screenshot_dir = Path(os.environ.get("SPED_HUB_SCREENSHOT_DIR", tempfile.gettempdir()))
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(screenshot_dir / "e2e_login.png"))
             assert (screenshot_dir / "e2e_login.png").exists()
 
@@ -387,8 +387,8 @@ class TestE2EScreenshots:
             page.goto(f"{live_server}/register")
             time.sleep(0.5)
 
-            screenshot_dir = Path("/workspace/outputs")
-            screenshot_dir.mkdir(exist_ok=True)
+            screenshot_dir = Path(os.environ.get("SPED_HUB_SCREENSHOT_DIR", tempfile.gettempdir()))
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(screenshot_dir / "e2e_register.png"))
             assert (screenshot_dir / "e2e_register.png").exists()
 

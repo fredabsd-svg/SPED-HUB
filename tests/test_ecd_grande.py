@@ -23,6 +23,7 @@ from src.ecd_importer import (
     hash_file,
 )
 from src.settings import reset_settings_cache
+from tests.conftest import url_com_senha
 from tests.fixtures.sintetico import gerar_ecd, registros_esperados
 
 
@@ -234,7 +235,7 @@ class TestCancelamentoPelaAPI:
 
         engine = criar_engine(url=f"sqlite:///{tmp_path / 'jobs.db'}")
         init_db(engine)
-        servico = AsyncJobService(str(engine.url))
+        servico = AsyncJobService(url_com_senha(engine))
         job = servico.criar(tipo="ecd_import", parametros={"arquivo": "x.txt"})
 
         token = CancelToken()
@@ -255,7 +256,7 @@ class TestCancelamentoPelaAPI:
 
         engine = criar_engine(url=f"sqlite:///{tmp_path / 'jobs2.db'}")
         init_db(engine)
-        servico = AsyncJobService(str(engine.url))
+        servico = AsyncJobService(url_com_senha(engine))
         job = servico.criar(tipo="ecd_import", parametros={})
         # Sem token registrado: não há o que cancelar neste processo.
         assert servico.cancelar(job.id) is False
@@ -267,7 +268,7 @@ class TestCancelamentoPelaAPI:
 
         engine = criar_engine(url=f"sqlite:///{tmp_path / 'jobs3.db'}")
         init_db(engine)
-        servico = AsyncJobService(str(engine.url))
+        servico = AsyncJobService(url_com_senha(engine))
         job = servico.criar(tipo="ecd_import", parametros={})
         servico.registrar_token(job.id, CancelToken())
         servico.esquecer_token(job.id)
