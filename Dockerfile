@@ -23,8 +23,13 @@ RUN poetry config virtualenvs.create false \
 
 FROM python:3.11-slim AS runtime
 
+# O nome do pacote gdk-pixbuf mudou de `libgdk-pixbuf2.0-0` para
+# `libgdk-pixbuf-2.0-0` quando o `python:3.11-slim` passou a ser baseado em
+# Debian trixie.  O nome antigo não tem candidato a instalação lá, e o
+# `apt-get install` sai com 100 — build impossível.  Os runners do CI usam
+# Ubuntu, onde o nome antigo ainda existe, então eles seguem como estão.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 \
+    libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
     libffi-dev libcairo2 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 

@@ -30,6 +30,11 @@ interno da implementação.
   configurasse acreditaria ter ligado algo.
 
 ### Corrigido
+- A imagem Docker voltou a construir. O `python:3.11-slim` migrou para
+  Debian trixie, onde o pacote `libgdk-pixbuf2.0-0` deixou de existir com
+  esse nome — a construção falhava por completo.
+- O build da imagem passa a ser verificado em cada PR, e não só depois do
+  merge. Era por isso que a quebra acima chegou ao `main` sem aviso.
 - O README informava 17 modelos de banco; são 24.
 
 ## [0.16.1] — 2026-07-29
