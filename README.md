@@ -243,7 +243,7 @@ src/
 │   ├── efd.py          # Parser EFD-Contribuições (Fase 4)
 │   └── ecf.py          # Parser ECF (Fase 4)
 ├── db/                 # Modelos e repositório
-│   ├── models.py       # 17 modelos SQLAlchemy (inclui auth) + criar_engine configurável (Fase 17)
+│   ├── models.py       # 24 modelos SQLAlchemy + engine configurável e cacheada (Fase 17)
 │   └── repository.py   # CRUD + consultas
 ├── filters/            # Motor de filtros
 │   └── engine.py       # 16 tipos de filtro
@@ -299,3 +299,27 @@ tests/
 ├── test_validators.py  # Validações (9 testes)
 └── test_integracao.py  # Integração + Fase 6 (14 testes)
 ```
+
+## Documentação
+
+Ordem de leitura para quem chega agora:
+
+1. [`REGRAS-DO-PROJETO.md`](REGRAS-DO-PROJETO.md) — como se trabalha neste
+   repositório. Cada regra diz se é cobrada pelo CI ou pela revisão.
+2. [`docs/status.md`](docs/status.md) — estado real por fase, com o teste que
+   prova cada uma, e o que está em aberto.
+3. [`docs/roadmap.md`](docs/roadmap.md) — o que ainda **não** existe.
+
+Referência:
+
+| Onde | O quê |
+|---|---|
+| [`CHANGELOG.md`](CHANGELOG.md) | Histórico por versão, pelo efeito para quem usa. |
+| [`docs/modules/`](docs/modules/) | Um documento por módulo: o que faz, o que expõe, armadilhas, o que **não** faz. |
+| [`docs/decisions/`](docs/decisions/) | ADRs — por que cada decisão estrutural foi tomada e o que ela custou. |
+| [`docs/deploy.md`](docs/deploy.md) | Checklist manual de produção. |
+| [`docs/migrations.md`](docs/migrations.md) | Política de schema e adoção de banco pré-existente. |
+
+Os documentos de módulo cobrem hoje 6 dos 24 módulos. O passivo está listado
+em [`docs/status.md`](docs/status.md) e diminui a cada PR que toca nos
+pendentes (§1.4) — não é uma promessa de cobertura total.
