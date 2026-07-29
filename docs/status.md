@@ -22,10 +22,11 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 16 | Observabilidade e monitoramento | concluída | `tests/test_fase16.py`, `tests/test_review_regressions.py` | — |
 | 17 | Fundação de produção | concluída | `tests/test_settings.py`, `tests/test_multibackend.py`, `tests/test_migrations.py`, `tests/test_ecd_grande.py`, `tests/test_hardening.py`, `tests/test_deploy_config.py`, `tests/test_cli.py` | ver "Em aberto" |
 | 18 | Front-end sem CDN | concluída | `tests/test_vendor_assets.py` | testes de navegador seguem opt-in (§3.5) |
-| 19 | Regras do projeto verificáveis | concluída | `tests/test_regras_projeto.py` | 18 dos 24 módulos ainda sem documento (§1.4, por adoção) |
+| 19 | Regras do projeto verificáveis | concluída | `tests/test_regras_projeto.py` | — |
 | 20 | Testes de navegador | concluída | `tests/test_e2e_playwright.py`, `tests/test_hierarquia_ciclica.py` | seguem opt-in sob o marcador `e2e` (ADR 0004) |
 | 21 | Validação de hierarquia cíclica | concluída | `tests/test_validators.py` | recusar o arquivo na importação segue como decisão de produto |
 | 22 | Identidade "Tinta & Latão" nos exportados | concluída | `tests/test_identidade_export.py`, `tests/test_cli.py` | dashboard web mantém a identidade própria |
+| 23 | Documentação de módulo completa (24/24) | concluída | `tests/test_regras_projeto.py` | conteúdo × código é item de revisão (§1.12) |
 
 ## Em aberto — decisões de produto
 
@@ -38,18 +39,24 @@ Ver `docs/roadmap.md` para o que ainda não existe.
 | `SPED_HUB_SECRET_KEY` sem consumidor | Documentada como reservada (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. |
 | `SPED_HUB_DEBUG` sem consumidor | Documentada como reservada (§2.2). O campo é lido e coagido, mas nenhum componente muda de comportamento por causa dele. Remover exige decidir se o projeto quer um modo de diagnóstico. |
 | Ciclo na hierarquia do plano de contas | Detectado: o dashboard se protege (PR #7) e a validação (h) acusa o ciclo como erro, com o caminho completo. A importação continua aceitando o arquivo — recusar na entrada é decisão de produto pendente. |
+| `SPED_HUB_WEBHOOK_TIMEOUT` e `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` sem efeito | Encontradas na Fase 23: o módulo de webhooks usa timeout de 10 s e 3 tentativas fixos no código. Marcadas como reservadas até serem ligadas (§2.2). |
+| `EMAIL_ENABLED` sem efeito | O modo do e-mail é decidido pela presença de credenciais SMTP, não pela flag. Marcada como reservada até ser ligada (§2.2). |
+| `SPED_HUB_MONITORING_RETENTION_HOURS` sem efeito | A retenção real é 24 h de janela + teto de 20.000 eventos, fixos no código. Marcada como reservada até ser ligada (§2.2). |
+| Webhooks nunca disparam | O CRUD e a entrega com retry funcionam, mas nenhum ponto do código emite `dispatch()` ao importar ou validar. Os eventos documentados só saem via retry manual. Ligar a emissão é decisão de produto. |
 
 ## Passivo de documentação de módulo (§1.4)
 
 A regra vale por adoção: módulo novo ou alterado exige o documento. A lista
 abaixo diminui a cada PR que toca nesses módulos.
 
-**Documentados:** `settings`, `db`, `ecd_importer`, `uploads`, `ratelimit`,
-`logging_config`, `validators`.
+**Documentados:** `api`, `async_jobs`, `audit`, `auth`, `cache`, `cli`,
+`dashboard`, `db`, `ecd_importer`, `email_service`, `filters`,
+`logging_config`, `monitoring`, `parsers`, `ratelimit`, `reports`,
+`settings`, `uploads`, `validators`, `version`, `watchdog`, `webhooks`,
+`worker_queue`, `worker_runner`.
 
-**Pendentes:** `api`, `async_jobs`, `audit`, `auth`, `cache`, `cli`,
-`dashboard`, `email_service`, `filters`, `monitoring`, `parsers`, `reports`,
-`version`, `watchdog`, `webhooks`, `worker_queue`, `worker_runner`.
+**Pendentes:** nenhum — o passivo foi zerado na Fase 23. Módulo novo entra
+com documento no mesmo PR (§1.4).
 
 `src/layouts/` não entra na conta: é diretório de dados (YAML de layout de
 ECD), sem código e sem `__init__.py`.

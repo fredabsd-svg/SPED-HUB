@@ -320,6 +320,5 @@ Referência:
 | [`docs/deploy.md`](docs/deploy.md) | Checklist manual de produção. |
 | [`docs/migrations.md`](docs/migrations.md) | Política de schema e adoção de banco pré-existente. |
 
-Os documentos de módulo cobrem hoje 6 dos 24 módulos. O passivo está listado
-em [`docs/status.md`](docs/status.md) e diminui a cada PR que toca nos
-pendentes (§1.4) — não é uma promessa de cobertura total.
+Todos os 24 módulos têm documento em [`docs/modules/`](docs/modules/).
+Módulo novo entra com o documento no mesmo PR (§1.4).

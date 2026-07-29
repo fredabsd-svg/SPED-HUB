@@ -94,14 +94,12 @@ Cada pacote ou módulo de topo em `src/` tem um arquivo em
 5. como testá-lo isoladamente;
 6. o que ele **não** faz (limites explícitos).
 
-**Adoção:** o projeto tem 24 módulos e começou esta regra com 6 documentados.
-Exigir os 24 de uma vez faria o repositório nascer com 18 violações — e regra
-violada no primeiro dia é regra morta. Vale assim:
+**Adoção:** a regra nasceu com 6 dos 24 módulos documentados — exigir tudo
+de uma vez faria o repositório nascer com 18 violações, e regra violada no
+primeiro dia é regra morta. O passivo foi zerado na Fase 23; daqui em diante:
 
 - **Módulo novo sem o documento não é entregue.** [REVISÃO]
-- **Módulo existente alterado ganha o documento no mesmo PR.** [REVISÃO]
-- O passivo está listado em `docs/status.md` e diminui a cada PR que toca
-  nos módulos pendentes.
+- **Módulo existente alterado atualiza o documento no mesmo PR.** [REVISÃO]
 
 O que o CI cobra aqui é o que ele sabe cobrar: todo módulo de `src/` aparece
 em uma das duas listas do `docs/status.md` (módulo novo não passa

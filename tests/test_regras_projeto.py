@@ -224,6 +224,26 @@ class TestDocumentacao:
         orfaos = sorted(d.stem for d in MODULES.glob("*.md") if d.stem not in reais)
         assert not orfaos, f"docs/modules descreve módulo que não existe: {orfaos}"
 
+    def test_documento_existente_esta_na_lista_de_documentados(self):
+        """O caminho inverso da §1.4: documento escrito e não contabilizado.
+
+        Aconteceu de verdade: o PR #9 criou `docs/modules/reports.md`, mas a
+        edição que movia `reports` para a lista de documentados não casou com
+        o texto e falhou em silêncio — o documento existia e o status.md
+        seguia dizendo que não. Nenhuma verificação pegava, porque ter
+        documento "a mais" não violava nada.
+        """
+        documentados, _ = _listas_do_status()
+        fora_da_lista = sorted(
+            d.stem
+            for d in MODULES.glob("*.md")
+            if d.stem in _modulos_reais() and d.stem not in documentados
+        )
+        assert not fora_da_lista, (
+            f"documento existe e o status.md não o lista como documentado: "
+            f"{fora_da_lista} — a contabilidade da §1.4 está mentindo para menos"
+        )
+
     def test_estado_de_fase_usa_vocabulario_declarado(self):
         """§1.8 — estado fora da lista impede qualquer verificação posterior.
 
