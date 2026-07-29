@@ -37,6 +37,10 @@ Consumido por: `cli`, `watchdog`, `worker_runner` e `dashboard.app`.
   faltam lançamentos. Por isso não existe retomada por offset.
 - **Deduplicação por hash do arquivo**, não por nome nem por período. Reenviar
   o mesmo arquivo levanta `DuplicateECDImportError` com o `ecd_id` anterior.
+- **Hierarquia cíclica é recusada antes do commit** (ADR 0006):
+  `ECDImportError` com o caminho do ciclo na mensagem, nada gravado. A
+  detecção é a `encontrar_ciclos` de `validators.integridade` — o mesmo fato
+  num lugar só.
 - **Nada de flush por registro.** A versão anterior chamava `flush()` a cada
   linha — 20.267 flushes num arquivo de 8,6 MB. Removê-los levou a importação
   de 59 s para 27 s. A medição veio antes: o palpite inicial era limite de

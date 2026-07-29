@@ -31,6 +31,7 @@ from src.db.models import (
 )
 from src.parsers.ecd import ECDParser
 from src.settings import get_settings
+from src.validators.integridade import encontrar_ciclos
 
 ProgressCallback = Callable[[float, str], None]
 
@@ -453,6 +454,21 @@ class ECDImportService:
                     since_flush = 0
 
             company, current_ecd, start_date, end_date = ensure_context()
+
+            # Hierarquia cíclica é recusada ANTES do commit (ADR 0006): uma
+            # conta que é a própria sintética — ou A→B→A — não tem leitura
+            # contábil possível, já travou o dashboard inteiro (PR #7) e a
+            # transação única (§6.1) garante que nada desta importação fica.
+            ciclos = encontrar_ciclos({c.cod_cta: c.cod_cta_sup for c in contas_pendentes.values()})
+            if ciclos:
+                caminho = " → ".join(ciclos[0] + [ciclos[0][0]])
+                raise ECDImportError(
+                    f"Hierarquia do plano de contas tem ciclo ({caminho}): "
+                    f"{len(ciclos)} ciclo(s) encontrado(s). Arquivo recusado; "
+                    "nada foi importado. Corrija o COD_CTA_SUP no sistema de "
+                    "origem e gere a ECD novamente."
+                )
+
             self.session.commit()
             callback(100.0, "Importação concluída")
             return ECDImportResult(

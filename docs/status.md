@@ -28,6 +28,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 22 | Identidade "Tinta & Latão" nos exportados | concluída | `tests/test_identidade_export.py`, `tests/test_cli.py` | — (o dashboard aderiu na Fase 24) |
 | 23 | Documentação de módulo completa (24/24) | concluída | `tests/test_regras_projeto.py` | conteúdo × código é item de revisão (§1.12) |
 | 24 | Identidade "Tinta & Latão" no dashboard web | concluída | `tests/test_identidade_dashboard.py`, `tests/test_e2e_playwright.py` | — |
+| 25 | Recusa de ECD com hierarquia cíclica (ADR 0006) | concluída | `tests/test_hierarquia_ciclica.py` | bancos legados seguem cobertos pela validação (h) |
 
 ## Em aberto — decisões de produto
 
@@ -39,7 +40,6 @@ Ver `docs/roadmap.md` para o que ainda não existe.
 | Retomada de importação a partir de offset | Exigiria commits parciais, o que viola a §6.1. Precisaria vir com estado explícito de "importação incompleta" que os relatórios respeitem. |
 | `SPED_HUB_SECRET_KEY` sem consumidor | Documentada como reservada (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. |
 | `SPED_HUB_DEBUG` sem consumidor | Documentada como reservada (§2.2). O campo é lido e coagido, mas nenhum componente muda de comportamento por causa dele. Remover exige decidir se o projeto quer um modo de diagnóstico. |
-| Ciclo na hierarquia do plano de contas | Detectado: o dashboard se protege (PR #7) e a validação (h) acusa o ciclo como erro, com o caminho completo. A importação continua aceitando o arquivo — recusar na entrada é decisão de produto pendente. |
 | `SPED_HUB_WEBHOOK_TIMEOUT` e `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` sem efeito | Encontradas na Fase 23: o módulo de webhooks usa timeout de 10 s e 3 tentativas fixos no código. Marcadas como reservadas até serem ligadas (§2.2). |
 | `EMAIL_ENABLED` sem efeito | O modo do e-mail é decidido pela presença de credenciais SMTP, não pela flag. Marcada como reservada até ser ligada (§2.2). |
 | `SPED_HUB_MONITORING_RETENTION_HOURS` sem efeito | A retenção real é 24 h de janela + teto de 20.000 eventos, fixos no código. Marcada como reservada até ser ligada (§2.2). |

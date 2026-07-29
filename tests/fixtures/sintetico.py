@@ -33,7 +33,10 @@ def gerar_ecd(
         escrever("|I030|01012024|31122024|A|\n")
 
         for i in range(contas):
-            escrever(f"|I050|01012024|01|A|3|{i + 1}|1|CONTA SINTETICA {i + 1}|\n")
+            # Conta 1 é topo; as demais apontam para ela. O sup=1 na
+            # própria conta 1 era auto-ciclo, hoje recusado na importação.
+            sup = "" if i == 0 else "1"
+            escrever(f"|I050|01012024|01|A|3|{i + 1}|{sup}|CONTA SINTETICA {i + 1}|\n")
 
         escrever("|I150|01012024|31122024|\n")
         for i in range(contas):

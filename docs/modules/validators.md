@@ -40,10 +40,11 @@ Consumido por: `cli` (comando `validar`), `api.routes` (REST) e
   lançamento perdido.
 - **A validação (h) existe por causa de um travamento real.** Uma ECD com
   conta que era a própria sintética derrubava o dashboard para todos os
-  usuários (laço infinito, PR #7). O dashboard hoje se protege, mas é aqui
-  que quem recebe o arquivo descobre que a hierarquia veio inválida. A
-  detecção percorre o grafo funcional `COD_CTA → COD_CTA_SUP` com
-  memoização (O(n)) e reporta cada ciclo uma única vez.
+  usuários (laço infinito, PR #7). Desde o ADR 0006 a importação recusa
+  arquivo com ciclo; a (h) continua para bancos que importaram antes. A
+  detecção vive na função pura `encontrar_ciclos` (exportada), percorre o
+  grafo funcional `COD_CTA → COD_CTA_SUP` com memoização (O(n)) e reporta
+  cada ciclo uma única vez — é a mesma função que o importador usa.
 - **(f) e (h) são disjuntas de propósito:** sintética inexistente é órfã,
   não ciclo. Um arquivo pode ter as duas.
 - **Validar não bloqueia importar.** A importação aceita o arquivo mesmo com

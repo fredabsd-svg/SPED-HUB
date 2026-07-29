@@ -9,6 +9,11 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- A importação passou a recusar ECD com hierarquia de plano de contas em
+  ciclo (uma conta que é a própria sintética, ou A→B→A), com o caminho do
+  ciclo na mensagem de erro. Antes o arquivo entrava no banco com a
+  hierarquia inválida e o problema só aparecia se alguém rodasse a
+  validação. Nada da importação recusada é gravado (ADR 0006).
 - O dashboard web adotou a identidade "Tinta & Latão" dos relatórios:
   navbar e botões em verde-tinta, destaques em latão, títulos em Source
   Serif 4 sobre corpo em Source Sans 3. As fontes são servidas pela própria
