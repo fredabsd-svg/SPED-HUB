@@ -6,6 +6,27 @@ Atualizado ao fim de cada fase, não só em release (§1.7).
 As entradas descrevem o efeito para quem usa o sistema, não o detalhe
 interno da implementação.
 
+## [Não publicado]
+
+### Adicionado
+- **Os webhooks passaram a disparar.** O cadastro de endpoints, a proteção
+  contra SSRF e a entrega com retry já existiam, mas nenhum ponto do sistema
+  emitia os eventos: o cliente cadastrava a integração e nada chegava nela.
+  Agora `ecd.importada` sai depois de cada importação concluída,
+  `ecd.validada` a cada validação de integridade e `relatorio.gerado` a cada
+  PDF ou planilha gerada em arquivo.
+- `SPED_HUB_WEBHOOK_TIMEOUT` e `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` passaram
+  a ter efeito — antes eram documentadas e ignoradas.
+
+### Corrigido
+- Um webhook com a lista de eventos corrompida no banco impedia a entrega
+  para **todos** os outros webhooks.
+
+### Segurança
+- O evento de relatório informa formato, nome do arquivo, empresa e período —
+  nunca os valores da escrituração, que não devem sair para endpoint de
+  terceiro.
+
 ## [0.17.0] — 2026-07-29
 
 ### Adicionado

@@ -20,6 +20,7 @@ import ipaddress
 import json
 import logging
 import socket
+import threading
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -125,10 +126,19 @@ class WebhookService:
         secret: str | None = None,
         descricao: str = "",
         ativo: bool = True,
-        max_retries: int = 3,
+        max_retries: int | None = None,
     ) -> WebhookRegistration:
-        """Registra um novo webhook."""
+        """Registra um novo webhook.
+
+        `max_retries=None` usa `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES`. A
+        setting é o default para registro NOVO, não um teto aplicado na
+        entrega: a coluna é `NOT NULL` e cada registro carrega o próprio
+        valor, então mudar a variável de ambiente depois não reescreve o que
+        já está no banco — reescrever seria surpresa, não configuração.
+        """
         url = validate_webhook_url(url)
+        if max_retries is None:
+            max_retries = get_settings().webhook_default_max_retries
         session = self._get_session()
         try:
             wh = WebhookRegistration(
@@ -321,7 +331,16 @@ class WebhookService:
         falhas = 0
 
         for wh in webhooks:
-            eventos_inscritos = json.loads(wh.eventos)
+            # Um registro com `eventos` ilegível não pode impedir os demais de
+            # receber: antes, o `json.loads` estourava e o dispatch inteiro
+            # morria no primeiro registro corrompido.
+            try:
+                eventos_inscritos = json.loads(wh.eventos or "[]")
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Webhook %s tem lista de eventos ilegível; ignorado nesta entrega", wh.id
+                )
+                continue
             if evento.tipo not in eventos_inscritos:
                 continue
 
@@ -353,7 +372,15 @@ class WebhookService:
             headers["X-SPED-HUB-Signature"] = signature
 
         target_url = validate_webhook_url(wh.url, resolve=True)
-        max_tentativas = max(1, wh.max_retries or 3)
+        # `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` e `SPED_HUB_WEBHOOK_TIMEOUT`
+        # existiam nas settings sem nenhum consumidor: quem as configurava
+        # não mudava nada (§2.2).  O registro do webhook continua vencendo o
+        # default quando declara o próprio `max_retries`.
+        settings = get_settings()
+        # O registro manda: `max_retries` é NOT NULL e vem do default da
+        # setting no momento do cadastro. O `or` cobre linha legada com 0.
+        max_tentativas = max(1, wh.max_retries or settings.webhook_default_max_retries)
+        timeout = max(1, settings.webhook_timeout_seconds)
 
         last_error = "Max retries exceeded"
         for tentativa in range(1, max_tentativas + 1):
@@ -361,7 +388,7 @@ class WebhookService:
             delivery = self._criar_delivery(wh.id, evento.tipo, json.dumps(payload), tentativa)
 
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=float(timeout)) as client:
                     response = await client.post(target_url, json=payload, headers=headers)
 
                 if 200 <= response.status_code < 300:
@@ -525,3 +552,119 @@ class WebhookService:
             return session.get(WebhookRegistration, webhook_id)
         finally:
             session.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Emissão de eventos
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Até a versão 0.17.0 este módulo tinha CRUD, proteção contra SSRF, assinatura
+# HMAC e entrega com retry — e nenhum ponto do código chamava `dispatch()`.
+# Os três eventos de `EVENTOS_DISPONIVEIS` estavam documentados, o cliente
+# cadastrava o endpoint e nada chegava nele.
+#
+# `emitir` é a entrada que faltava.  Três invariantes:
+#
+# 1. **Nunca quebra a operação de negócio.**  Importação que deu certo não
+#    pode virar erro porque o endpoint do cliente está fora do ar.  Toda
+#    exceção é logada e engolida.
+# 2. **Nunca bloqueia quem chamou.**  A entrega é sequencial e faz backoff
+#    de até 60 s por tentativa; fazer isso no caminho da requisição
+#    penalizaria o usuário pela lentidão de um terceiro.
+# 3. **Custo zero sem assinante.**  Uma consulta indexada decide se há
+#    webhook ativo inscrito; sem nenhum, não se cria thread nem event loop.
+
+
+def _em_segundo_plano(alvo, nome: str) -> None:
+    """Executa `alvo` fora do caminho de quem chamou.
+
+    Existe como função própria para ser a costura de teste: entrega em
+    thread é o comportamento certo em produção e o errado num teste, que
+    precisa afirmar o resultado logo depois de emitir. Teste substitui esta
+    função por execução inline em vez de dormir esperando a thread.
+    """
+    threading.Thread(target=alvo, name=nome, daemon=True).start()
+
+
+def _ha_assinante(db_path: str, tipo: str) -> bool:
+    """Existe webhook ativo inscrito neste tipo de evento?
+
+    A coluna `eventos` guarda JSON, então o filtro fino é em Python — mas a
+    consulta já elimina os inativos, que é o caso comum de quem desligou a
+    integração sem apagar o registro.
+    """
+    engine = criar_engine(db_path)
+    try:
+        init_db(engine)
+        with get_session(engine) as session:
+            inscricoes = (
+                session.execute(
+                    select(WebhookRegistration.eventos).where(WebhookRegistration.ativo.is_(True))
+                )
+                .scalars()
+                .all()
+            )
+    finally:
+        engine.dispose()
+
+    for bruto in inscricoes:
+        try:
+            if tipo in json.loads(bruto or "[]"):
+                return True
+        except (TypeError, ValueError):
+            # Registro com JSON corrompido não impede os demais de receber.
+            logger.warning("Webhook com lista de eventos ilegível: %r", bruto)
+    return False
+
+
+def emitir(
+    tipo: str,
+    dados: dict,
+    *,
+    db_path: str | None = None,
+    aguardar: bool = False,
+) -> dict[str, int] | None:
+    """Dispara um evento para os webhooks inscritos.
+
+    Args:
+        tipo: um de :data:`EVENTOS_DISPONIVEIS`.
+        dados: corpo do evento, serializável em JSON.
+        db_path: banco a consultar; sem valor, usa a configuração corrente.
+        aguardar: entrega no mesmo thread e devolve o resultado. Use em
+            teste e em processo que vai encerrar — em caminho de requisição,
+            deixe ``False``.
+
+    Returns:
+        O resultado de :meth:`WebhookService.dispatch` quando ``aguardar``;
+        ``None`` quando a entrega foi para segundo plano ou não havia
+        assinante.
+    """
+    if tipo not in EVENTOS_DISPONIVEIS:
+        raise ValueError(f"Evento desconhecido: {tipo!r}. Conhecidos: {EVENTOS_DISPONIVEIS}")
+
+    from src.settings import database_reference
+
+    destino = db_path or database_reference()
+
+    try:
+        if not _ha_assinante(destino, tipo):
+            return None
+    except Exception:
+        # Banco indisponível ou schema ausente não pode derrubar quem emitiu.
+        logger.exception("Falha ao procurar assinantes de %s", tipo)
+        return None
+
+    evento = WebhookEvent(tipo=tipo, dados=dados)
+
+    def entregar() -> dict[str, int] | None:
+        try:
+            return asyncio.run(WebhookService(destino).dispatch(evento))
+        except Exception:
+            logger.exception("Falha ao entregar webhook %s", tipo)
+            return None
+
+    if aguardar:
+        return entregar()
+
+    _em_segundo_plano(entregar, f"webhook-{tipo}")
+    return None

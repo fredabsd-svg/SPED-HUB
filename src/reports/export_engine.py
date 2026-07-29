@@ -90,6 +90,7 @@ class ExportEngine:
             base_url = str(Path(__file__).resolve().parent / "templates")
             HTML(string=html, base_url=base_url).write_pdf(output_path)
             logger.info("PDF gerado: %s", output_path)
+            self._emitir_relatorio_gerado("pdf", template_name, output_path, ctx)
             return output_path
         except ImportError:
             logger.error("WeasyPrint não instalado")
@@ -227,6 +228,7 @@ class ExportEngine:
 
             wb.save(output_path)
             logger.info("XLSX gerado: %s", output_path)
+            self._emitir_relatorio_gerado("xlsx", titulo, output_path, ctx)
             return output_path
 
         except ImportError:
@@ -235,6 +237,32 @@ class ExportEngine:
         except Exception as e:
             logger.error("Erro ao gerar XLSX: %s", e)
             raise
+
+    @staticmethod
+    def _emitir_relatorio_gerado(formato: str, origem: str, caminho: str, ctx) -> None:
+        """Emite `relatorio.gerado`.
+
+        O evento sai daqui porque CLI, dashboard e API convergem no
+        `ExportEngine`: emitir em cada chamador seria o mesmo fato em três
+        lugares. Só para arquivo em disco — `export_xlsx_to_buffer` serve
+        download em memória, onde não há caminho a informar.
+
+        O nome do arquivo vai no evento; o conteúdo, não. Escrituração é
+        dado do cliente e webhook sai para endpoint de terceiro.
+        """
+        from src.webhooks import emitir
+
+        emitir(
+            "relatorio.gerado",
+            {
+                "formato": formato,
+                "origem": origem,
+                "arquivo": Path(caminho).name,
+                "titulo": getattr(ctx, "titulo", "") if ctx else "",
+                "empresa": getattr(ctx, "empresa_nome", "") if ctx else "",
+                "periodo": getattr(ctx, "periodo_ref", "") if ctx else "",
+            },
+        )
 
     def export_xlsx_to_buffer(
         self,

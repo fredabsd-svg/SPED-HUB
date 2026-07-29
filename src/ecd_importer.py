@@ -32,6 +32,7 @@ from src.db.models import (
 from src.parsers.ecd import ECDParser
 from src.settings import get_settings
 from src.validators.integridade import encontrar_ciclos
+from src.webhooks import emitir
 
 ProgressCallback = Callable[[float, str], None]
 
@@ -471,7 +472,8 @@ class ECDImportService:
 
             self.session.commit()
             callback(100.0, "Importação concluída")
-            return ECDImportResult(
+
+            resultado = ECDImportResult(
                 ecd_id=current_ecd.id,
                 empresa_id=company.id,
                 empresa=company.nome,
@@ -485,6 +487,17 @@ class ECDImportService:
                 hash_arquivo=file_hash,
                 nome_arquivo=original_name,
             )
+
+            # Evento DEPOIS do commit, nunca antes: webhook de escrituração
+            # que a transação ainda pode reverter é notificação de algo que
+            # não aconteceu.  Emitir aqui — e não em cada chamador — cobre os
+            # quatro caminhos de entrada de uma vez (CLI, dashboard síncrono,
+            # dashboard assíncrono e watchdog), que convergem neste método.
+            #
+            # `emitir` não bloqueia e engole as próprias falhas: importação
+            # concluída não vira erro porque o endpoint do cliente caiu.
+            emitir("ecd.importada", resultado.to_dict())
+            return resultado
         except Exception:
             self.session.rollback()
             raise

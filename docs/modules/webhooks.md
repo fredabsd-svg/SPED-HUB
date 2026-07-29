@@ -20,6 +20,7 @@ entregas falhas.
 | `WebhookService.dispatch(evento)` | Envia para os webhooks ativos inscritos, com retry; retorna `{"sucessos", "falhas"}`. |
 | `WebhookService.get_deliveries / get_dashboard_stats` | Histórico e agregados. |
 | `WebhookService.retry_failed(webhook_id=None)` | Reenvia até 100 entregas `failed`. |
+| `emitir(tipo, dados, *, db_path=None, aguardar=False)` | Entrada síncrona que dispara um evento. Não bloqueia e não propaga falha. |
 | `BACKOFF_BASE`, `BACKOFF_MAX` | Constantes do backoff (2 s .. cap 60 s). |
 
 ## Depende de / quem depende
@@ -51,15 +52,29 @@ consome via essas rotas, não importa o módulo diretamente.
   `request_body` persistido (preservando o timestamp original) e passa pelo
   mesmo caminho de envio — há teste garantindo que o payload chega ao envio,
   não só muda status.
-- **`SPED_HUB_WEBHOOK_TIMEOUT` e `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` não
-  têm efeito aqui**: o módulo usa timeout fixo de 10 s e 3 tentativas
-  hardcoded. As variáveis existem em `settings` sem consumidor — violação da
-  §2.2, registrada em `docs/status.md`.
-- **Ninguém em `src/` chama `dispatch()` hoje.** O CRUD funciona e os
-  eventos estão documentados, mas nenhum ponto do importador/relatórios
-  dispara o envio; entregas reais só ocorrem via `retry_failed` (rota de
-  retry) ou chamadas externas ao serviço. Também registrado em
-  `docs/status.md`.
+- **`SPED_HUB_WEBHOOK_TIMEOUT` vale no cliente HTTP de cada tentativa.**
+  `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` é o default **para registro novo**:
+  a coluna `max_retries` é `NOT NULL` e cada registro carrega o próprio
+  valor, então mudar a variável depois não reescreve o que está no banco —
+  reescrever seria surpresa, não configuração.
+- **`emitir` é o que faz os eventos saírem.** Três invariantes: nunca quebra
+  a operação de negócio (toda exceção é logada e engolida), nunca bloqueia
+  quem chamou (entrega vai para thread; o backoff chega a 60 s por
+  tentativa), e custa uma consulta indexada quando não há assinante — ela
+  está no caminho de toda importação. `aguardar=True` entrega no mesmo
+  thread, para teste e processo que vai encerrar.
+- **Os eventos saem dos pontos de convergência**, não dos chamadores:
+  `ecd.importada` de `ECDImportService.importar` (depois do commit — evento
+  antes do commit notificaria algo que a transação ainda pode reverter),
+  `ecd.validada` de `ValidadorIntegridade.validar_todas`, `relatorio.gerado`
+  de `ExportEngine.export_pdf`/`export_xlsx`. Emitir em cada chamador seria
+  o mesmo fato em três lugares, e um deles esqueceria.
+- **O evento leva metadado, nunca escrituração.** `relatorio.gerado` informa
+  formato, nome do arquivo, empresa e período — não os saldos. Webhook sai
+  para endpoint de terceiro.
+- **Um registro com `eventos` ilegível não bloqueia os demais.** O
+  `json.loads` sem guarda derrubava a entrega inteira no primeiro registro
+  corrompido.
 
 ## Como testar isoladamente
 
@@ -71,10 +86,11 @@ pytest tests/test_review_regressions.py -k Webhook -q    # SSRF e retry real
 
 ## O que não faz
 
-- Não entrega em background: `dispatch` é sequencial e bloqueia o chamador
-  durante retries.
-- Não dispara eventos sozinho — a emissão é responsabilidade de quem importa
-  o serviço, e hoje ninguém emite.
+- `dispatch` em si é sequencial e bloqueia quem o chama durante os retries —
+  quem não quer isso usa `emitir`, que o joga para thread.
+- Não garante entrega: sem assinante o evento é descartado, e falha após
+  todas as tentativas fica só no histórico de `WebhookDelivery`. Não há fila
+  persistente nem dead-letter.
 - Não faz expurgo de `WebhookDelivery`: o histórico cresce sem limite.
 - Não suporta mTLS nem validação de certificado customizada.
 - Não deduplica eventos nem garante ordem de entrega.

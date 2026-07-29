@@ -80,6 +80,15 @@ class ValidadorIntegridade:
         self.ecd_id = ecd_id
 
     def validar_todas(self) -> list[Inconsistencia]:
+        """Roda as oito validações e emite `ecd.validada`.
+
+        O evento sai daqui, e não de cada chamador, porque os três — CLI,
+        REST e GraphQL — passam por este método: emitir em cada um seria o
+        mesmo fato em três lugares, e um deles esqueceria (§1.9).
+
+        `emitir` não bloqueia e engole as próprias falhas; sem webhook ativo
+        inscrito, custa uma consulta indexada.
+        """
         resultados = []
         resultados.extend(self._validar_partidas_dobradas())
         resultados.extend(self._validar_saldo_si_d_c_sf())
@@ -89,6 +98,19 @@ class ValidadorIntegridade:
         resultados.extend(self._validar_analiticas_orfas())
         resultados.extend(self._validar_lancamentos_sinteticas())
         resultados.extend(self._validar_hierarquia_ciclica())
+
+        from src.webhooks import emitir
+
+        emitir(
+            "ecd.validada",
+            {
+                "ecd_id": self.ecd_id,
+                "total_inconsistencias": len(resultados),
+                "erros": sum(1 for i in resultados if i.severidade == "erro"),
+                "alertas": sum(1 for i in resultados if i.severidade == "alerta"),
+                "status": "OK" if not any(i.severidade == "erro" for i in resultados) else "ERROS",
+            },
+        )
         return resultados
 
     def _validar_partidas_dobradas(self) -> list[Inconsistencia]:
