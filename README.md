@@ -59,8 +59,9 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 pip install -e ".[dev]"
 ```
 
-> **Versão atual:** 0.16.1 — bibliotecas de front-end servidas pela própria
-> aplicação, sem dependência de CDN em runtime (Fase 18).
+> **Versão atual:** 0.17.0 — identidade "Tinta & Latão" nos relatórios e no
+> dashboard, PDF do balancete, recusa de hierarquia cíclica na importação e
+> documentação de módulo completa (Fases 18–25).
 
 ### Docker
 ```bash

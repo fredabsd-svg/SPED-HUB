@@ -5,7 +5,7 @@ Primeiro arquivo a ler depois de `REGRAS-DO-PROJETO.md`.
 Regra §1.8: nada é marcado como concluído sem os testes daquela fase
 passando. A coluna "Evidência" aponta o teste que prova.
 
-**Última atualização:** 2026-07-29 · **Versão:** 0.16.1
+**Última atualização:** 2026-07-29 · **Versão:** 0.17.0
 
 ## Fases
 
