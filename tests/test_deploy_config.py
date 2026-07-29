@@ -145,3 +145,36 @@ def _env(compose: dict, servico: str) -> dict[str, str]:
         chave, _, valor = entrada.partition("=")
         resultado[chave] = valor
     return resultado
+
+
+class TestMigracaoNoCompose:
+    """Migração precisa acontecer antes de web e worker subirem.
+
+    Ver docs/migrations.md: o advisory lock protege contra a corrida, mas o
+    serviço dedicado é o que dá um log legível quando a migração falha.
+    """
+
+    def test_existe_servico_de_migracao(self, compose):
+        assert "migrate" in compose["services"]
+        comando = compose["services"]["migrate"]["command"]
+        assert "migrar" in comando and "aplicar" in comando
+
+    @pytest.mark.parametrize("servico", ["web", "worker"])
+    def test_web_e_worker_esperam_a_migracao(self, compose, servico):
+        deps = compose["services"][servico].get("depends_on", {})
+        assert "migrate" in deps, f"{servico} pode subir antes do schema existir"
+        assert deps["migrate"]["condition"] == "service_completed_successfully"
+
+    def test_migracao_usa_o_mesmo_banco_dos_servicos(self, compose):
+        assert _env(compose, "migrate")["DATABASE_URL"] == _env(compose, "web")["DATABASE_URL"]
+
+    def test_url_do_alembic_vem_das_settings(self):
+        """`alembic.ini` não pode ter URL própria — seria um segundo lugar de config."""
+        import configparser
+
+        parser = configparser.ConfigParser()
+        parser.read(REPO_ROOT / "alembic.ini")
+        assert not parser.get("alembic", "sqlalchemy.url", fallback="").strip()
+        assert "database_reference" in (REPO_ROOT / "alembic" / "env.py").read_text(
+            encoding="utf-8"
+        )

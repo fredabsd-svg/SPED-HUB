@@ -572,6 +572,51 @@ def cmd_info(args):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# migrar
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def cmd_migrar(args):
+    """Aplica migrações de schema (Alembic)."""
+    from src.db.migrations import revisao_atual, revisao_head, stamp_head, upgrade_head
+
+    # `--db` aceita caminho de arquivo ou URL; sem `--db`, vale DATABASE_URL.
+    url = args.db if args.db != "sped_hub.db" else None
+    engine = criar_engine(url) if url else criar_engine()
+    try:
+        atual = revisao_atual(engine)
+    finally:
+        engine.dispose()
+    head = revisao_head()
+
+    if args.acao == "status":
+        print(f"\nRevisão do banco: {atual or '(nenhuma — nunca migrado)'}")
+        print(f"Revisão disponível: {head}")
+        if atual == head:
+            print("Schema em dia.")
+        elif atual is None:
+            print("Rode `sped-hub migrar aplicar` (banco novo) ou")
+            print("`sped-hub migrar adotar` (banco já criado por versões anteriores).")
+        else:
+            print("Há migrações pendentes: rode `sped-hub migrar aplicar`.")
+        return
+
+    if args.acao == "adotar":
+        if atual is not None:
+            print(f"Banco já está sob controle do Alembic (revisão {atual}).")
+            return
+        stamp_head(url)
+        print(f"Banco adotado na revisão {head}, sem executar migrações.")
+        return
+
+    nova = upgrade_head(url)
+    if atual == nova:
+        print(f"Nada a fazer — schema já estava em {nova}.")
+    else:
+        print(f"Schema migrado de {atual or '(vazio)'} para {nova}.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # main
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -651,6 +696,17 @@ def main():
     p_info = sub.add_parser("info", help="Informações do banco")
     p_info.add_argument("--db", default="sped_hub.db", help="Banco SQLite")
 
+    # migrar
+    p_mig = sub.add_parser("migrar", help="Aplicar migrações de schema (Alembic)")
+    p_mig.add_argument(
+        "acao",
+        nargs="?",
+        default="status",
+        choices=["status", "aplicar", "adotar"],
+        help="status (default) | aplicar | adotar (banco pré-existente)",
+    )
+    p_mig.add_argument("--db", default="sped_hub.db", help="Banco (URL ou caminho SQLite)")
+
     args = parser.parse_args()
 
     if args.comando == "importar-ecd":
@@ -665,6 +721,8 @@ def main():
         cmd_filtros(args)
     elif args.comando == "info":
         cmd_info(args)
+    elif args.comando == "migrar":
+        cmd_migrar(args)
     else:
         parser.print_help()
 

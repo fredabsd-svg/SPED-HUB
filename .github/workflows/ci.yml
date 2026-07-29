@@ -77,10 +77,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,postgres]"
 
-      - name: Run portability suite against PostgreSQL
+      - name: Run portability and migration suites against PostgreSQL
         env:
           TEST_DATABASE_URL: postgresql+psycopg://sped:sped@localhost:5432/sped_hub_test
-        run: pytest tests/test_multibackend.py -v --tb=short
+        run: pytest tests/test_multibackend.py tests/test_migrations.py -v --tb=short
 
   docker:
     runs-on: ubuntu-latest

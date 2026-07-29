@@ -137,6 +137,19 @@ TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/sped_hub_test pytest tests
 
 Sem a variável, os casos de Postgres pulam.
 
+### Migrações de schema
+
+Em PostgreSQL o schema é versionado por migração (Alembic); em SQLite
+continua nascendo de `create_all`.  A política completa, incluindo como
+adotar um banco criado antes da Etapa 3, está em
+[`docs/migrations.md`](docs/migrations.md).
+
+```bash
+sped-hub migrar status     # onde o banco está vs. o que existe de migração
+sped-hub migrar aplicar    # leva o banco até a revisão mais recente
+sped-hub migrar adotar     # adota um banco que já tem o schema
+```
+
 ## Uso
 
 ### CLI
