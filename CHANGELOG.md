@@ -9,6 +9,15 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- Documento de módulo para os 16 módulos que faltavam — os 24 agora têm
+  (`docs/modules/`): o que cada um faz, expõe, armadilhas conhecidas e o que
+  explicitamente não faz. O levantamento expôs promessas falsas na própria
+  documentação interna, registradas em `docs/status.md`: quatro variáveis de
+  ambiente documentadas que nenhum componente lê (`EMAIL_ENABLED`,
+  `SPED_HUB_WEBHOOK_TIMEOUT`, `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES`,
+  `SPED_HUB_MONITORING_RETENTION_HOURS` — agora marcadas como reservadas),
+  um `AuditMiddleware` citado em docstring que não existe, e webhooks que
+  nunca disparam: nenhum ponto do código emite os eventos documentados.
 - A validação de integridade passou a detectar ciclo na hierarquia do plano
   de contas (`sped-hub validar` e endpoints de validação). Era a origem do
   travamento do dashboard: o arquivo entrava no banco com hierarquia
