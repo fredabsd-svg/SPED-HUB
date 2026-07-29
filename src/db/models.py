@@ -9,6 +9,7 @@ também de :mod:`src.settings`.
 
 import datetime
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -104,9 +105,14 @@ class Usuario(Base):
         return hash_bytes.hex(), salt
 
     def verificar_senha(self, senha: str) -> bool:
-        """Verifica se a senha confere."""
+        """Verifica se a senha confere, em tempo constante.
+
+        `==` entre strings sai no primeiro byte diferente, o que vaza por
+        tempo quantos caracteres do hash foram acertados.  `verificar_api_key`
+        já usava `compare_digest`; aqui tinha ficado de fora.
+        """
         hash_bytes, _ = self.hash_senha(senha, self.salt)
-        return hash_bytes == self.senha_hash
+        return hmac.compare_digest(hash_bytes, self.senha_hash)
 
     def __repr__(self):
         return f"<Usuario {self.email}>"

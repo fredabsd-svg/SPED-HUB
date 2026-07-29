@@ -1,6 +1,73 @@
 # SPED-HUB — Continuidade do Projeto
 
-**Última atualização:** 2026-07-27
+**Última atualização:** 2026-07-29
+
+## Etapa 1.1 — Saneamento da fundação (2026-07-29)
+
+> Uma análise do projeto mostrou que a Etapa 1 tinha sido entregue apenas
+> pela metade e que o CI nunca havia passado.  Esta etapa fecha as duas
+> lacunas antes de seguir para a Etapa 2 (PostgreSQL), que dependeria de
+> uma fundação que não estava ligada.
+
+### O que estava errado
+
+- **CI vermelho em 14 de 14 execuções**, desde a criação do workflow.
+  Falhava sempre no `ruff check`, e como ele vem antes, o `pytest` nunca
+  chegou a rodar no CI.  As afirmações de "372 testes 100% passando" no
+  README e neste arquivo nunca foram verificadas automaticamente.
+  Causa raiz: `ruff>=0.4` e `black>=24.0` sem pin — o CI instalava a
+  versão do dia e passou a falhar sozinho no salto para ruff 0.16.
+- **`src/settings.py` era código morto.**  Só `src/db/models.py` o
+  importava; o resto da aplicação seguia lendo `os.environ` (33 pontos).
+  Das 20 variáveis documentadas, apenas `REDIS_URL` e `SMTP_HOST` eram de
+  fato consumidas.  O exemplo de PostgreSQL do README subia em SQLite.
+- **Nomes divergentes entre doc e código**: `SMTP_PASSWORD` vs `SMTP_PASS`,
+  `EMAIL_FROM` vs `SMTP_FROM`, `SPED_HUB_MAX_UPLOAD_MB` vs
+  `SPED_HUB_MAX_UPLOAD_BYTES` — configuração documentada era ignorada em
+  silêncio.
+- **Deploy Docker quebrado** em três pontos (uploads em diretório não
+  montado, healthcheck em rota autenticada, constraints do pip sem aspas).
+- **`src/cli.py` com 0% de cobertura** — 386 statements na funcionalidade
+  que abre o README.
+
+### Bugs encontrados ao ligar a configuração
+
+1. Coerção booleana só existia para `debug`: `SPED_HUB_DB_ECHO=false`
+   virava a string `"false"`, verdadeira em Python — desligar o echo do
+   SQLAlchemy o **ligava**.  Valia também para `SMTP_USE_TLS` e
+   `EMAIL_ENABLED`.
+2. Caminho SQLite absoluto era corrompido: `lstrip("./")` comia a barra
+   inicial e `/tmp/x.db` virava o relativo `sqlite:///./tmp/x.db`.
+3. `verificar_senha` comparava hashes com `==`, vazando por tempo quantos
+   bytes foram acertados (`verificar_api_key` já fazia certo).
+4. `exportar balancete --formato pdf` gera XLSX, em caminho diferente do
+   `--saida`, avisando só em log INFO.  **Ainda em aberto** — ver abaixo.
+
+### Entregue
+
+| Commit | Tema |
+|---|---|
+| `d61c65d` | CI verde: pin de ruff/black, `[tool.ruff.lint]` explícito, 497 achados → 0, `httpx` nas deps, 2 testes de Postgres reescritos, E2E do Playwright pulando limpo |
+| `2485a4f` | settings ligado a toda a aplicação; 33 leituras de `os.environ` eliminadas; aliases legados; 3 bugs acima |
+| `7f924ce` | Docker: uploads no volume compartilhado, healthcheck público, constraints com aspas; `tests/test_deploy_config.py` |
+| `faf1c3e` | `obter_engine` + `init_db_once`: 4,3 ms → 0,87 ms por request autenticado |
+| `c59a8ed` | CLI de 0% → 95% de cobertura (33 testes) |
+
+**Estado:** 465 testes passando, 11 skips.  `ruff`, `black` e `pytest`
+verificados localmente com os comandos exatos do workflow.
+
+### Em aberto (decisão de produto)
+
+- `exportar balancete --formato pdf` precisa de um template PDF **ou** de
+  recusa explícita da combinação.  Hoje entrega um XLSX em caminho
+  diferente do pedido e reporta sucesso.
+- 3 testes E2E do Playwright falham por timeout de navegação quando há
+  Chromium disponível.  Eles nunca chegaram a rodar antes (erravam na
+  fixture, por causa de um caminho absoluto de outra máquina), então são
+  falhas recém-expostas, não regressões.  Em CI seguem pulando.
+- `SPED_HUB_SECRET_KEY` continua sem consumidor.  Documentada como
+  reservada; quando surgir necessidade real de assinatura global, ela vira
+  a chave — até lá, ninguém deve contar com ela.
 
 ## Fase 17 — Fundação de Produção (em andamento)
 
@@ -86,8 +153,8 @@
 
 | Componente | Status |
 |---|---|
-| `pyproject.toml` | ✅ v0.15.0 (Fase 17 etapa 1) |
-| `src/version.py` | ✅ `APP_VERSION = "0.15.0"` |
+| `pyproject.toml` | ✅ v0.15.1 (Fase 17 etapa 1.1) |
+| `src/version.py` | ✅ `APP_VERSION = "0.15.1"` (fonte única; settings deriva daqui) |
 | `src/settings.py` | ✅ Configuração centralizada por env (Fase 17 et1) |
 | `src/db/models.py` | ✅ 24 modelos + `criar_engine` configurável (Fase 17 et1) |
 | `.env.example` | ✅ Lista de variáveis com defaults comentados (Fase 17 et1) |
@@ -95,7 +162,7 @@
 | `README.md` | ✅ Seção "Configuração" + tabela de env vars (Fase 17 et1) |
 | `tests/test_settings.py` | ✅ 27 testes novos (Fase 17 et1) |
 | Demais componentes (Fases 1-16) | ✅ Estáveis |
-| **Total** | **372 testes — 100% passando** |
+| **Total** | **465 testes passando, 11 skips — CI verde** |
 
 ## Próximos Passos (visão de longo prazo)
 
@@ -106,27 +173,15 @@
 5. ⏳ Migração completa para PostgreSQL em produção (Etapas 2-3 da Fase 17)
 6. ⏳ CI/CD com deploy automático (Etapa 6 da Fase 17 — apenas preparação)
 
-## Push pendente — ambiente sem credencial Git (2026-07-28)
-
-- Tentativa de push em 2026-07-28 falhou com `fatal: could not read
-  Username for 'https://github.com': No such device or address`.
-  O sandbox desta conversa não tem credencial Git configurada e
-  `git push` via bash exige autenticação em https. Pela política,
-  não se tenta contornar nem armazenar token em runtime; o push
-  deve ser feito localmente ou em nova conversa com `github_push`.
-- Commits locais prontos no `main` (à frente de `origin/main`):
-  - `1ad08ef` — Fase 17 Etapa 1: Settings + criar_engine multi-dialeto
-  - `a2f8607` — README + continuidade.MD
-  - (a ser criado) registro deste pendente de push
-- A Etapa 2 (PostgreSQL) e demais permanecem pausadas até o push
-  ser resolvido para preservar a ordem cronológica do repositório.
-
 ## Pendências
 
-- Postgres não roda no sandbox de testes (sem psycopg/psycopg2 pré-instalado).
-  Cobertura multi-backend fica para a Etapa 2; enquanto isso,
-  `criar_engine(url="postgresql+psycopg://...")` é exercitado apenas na
-  construção da `Engine`, não na conexão.
-- Playwright E2E requer Chromium do sistema (não roda em CI padrão).
+- Postgres não roda no sandbox de testes (sem psycopg/psycopg2 instalado).
+  Cobertura multi-backend fica para a Etapa 2.  O teste que constrói a
+  `Engine` Postgres usa `importorskip` — nota: o SQLAlchemy 2.x importa o
+  DBAPI já dentro de `create_engine`, então não há como exercitar a
+  construção sem o driver.  A validação da URL, essa sim, roda sempre.
+- Playwright E2E requer Chromium (procurado em `SPED_HUB_CHROMIUM`,
+  `PLAYWRIGHT_BROWSERS_PATH` e nos caminhos do sistema).  Sem ele, os
+  testes pulam — antes erravam na coleta.
 - Rate limiting em memória não persiste entre restarts (aceitável para v1).
 - Redis server não disponível no CI — fallback para memória funciona.

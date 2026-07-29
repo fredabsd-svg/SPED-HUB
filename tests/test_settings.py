@@ -488,3 +488,24 @@ def _reportar_tamanho_do_cache(fila):
     from src.db import models
 
     fila.put(len(models._ENGINES))
+
+
+class TestComparacaoDeSenha:
+    def test_usa_comparacao_em_tempo_constante(self):
+        """`==` entre hashes vaza, por tempo, quantos bytes foram acertados."""
+        import inspect
+
+        from src.db.models import Usuario
+
+        fonte = inspect.getsource(Usuario.verificar_senha)
+        assert "compare_digest" in fonte
+        assert "== self.senha_hash" not in fonte
+
+    def test_senha_correta_e_incorreta(self):
+        from src.db.models import Usuario
+
+        senha_hash, salt = Usuario.hash_senha("senha-correta")
+        usuario = Usuario(email="a@b.c", nome="A", senha_hash=senha_hash, salt=salt)
+        assert usuario.verificar_senha("senha-correta") is True
+        assert usuario.verificar_senha("senha-errada") is False
+        assert usuario.verificar_senha("") is False
