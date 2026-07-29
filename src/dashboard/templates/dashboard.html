@@ -204,8 +204,8 @@
         data: {
             labels: evolucao.labels,
             datasets: [
-                { label: 'Ativo Total', data: evolucao.ativo, borderColor: '#0B4F6C', backgroundColor: 'rgba(11,79,108,.1)', fill: true, tension: .3, pointRadius: 4 },
-                { label: 'Passivo + PL', data: evolucao.passivo_pl, borderColor: '#16A34A', backgroundColor: 'rgba(22,163,74,.1)', fill: true, tension: .3, pointRadius: 4 }
+                { label: 'Ativo Total', data: evolucao.ativo, borderColor: '#0C3A30', backgroundColor: 'rgba(12,58,48,.1)', fill: true, tension: .3, pointRadius: 4 },
+                { label: 'Passivo + PL', data: evolucao.passivo_pl, borderColor: '#A9812F', backgroundColor: 'rgba(169,129,47,.1)', fill: true, tension: .3, pointRadius: 4 }
             ]
         },
         options: {
@@ -222,7 +222,7 @@
     if (!comp || !comp.labels || comp.labels.length === 0) return;
     const ctx = document.getElementById('chart-composicao');
     if (!ctx) return;
-    const colors = ['#0B4F6C','#0E7490','#0891B2','#06B6D4','#22D3EE','#67E8F9','#A5F3FC','#CFFAFE'];
+    const colors = ['#0C3A30','#1F5546','#33705C','#578C78','#A9812F','#C9A75B','#7EA995','#E2DCCB'];
     new Chart(ctx, {
         type: 'doughnut',
         data: { labels: comp.labels, datasets: [{ data: comp.valores, backgroundColor: colors.slice(0, comp.labels.length), borderWidth: 2, borderColor: '#fff' }] },
@@ -262,7 +262,7 @@
             const backgrounds = data.dfc.valores.map((v, i) => {
                 const label = data.dfc.labels[i];
                 if (label.startsWith('= ')) return 'rgba(11,79,108,.3)';
-                if (label.startsWith('Fluxo')) return '#0B4F6C';
+                if (label.startsWith('Fluxo')) return '#0C3A30';
                 return v >= 0 ? '#16A34A' : '#DC2626';
             });
             new Chart(ctx, {
@@ -289,8 +289,8 @@
         data: {
             labels: comp.labels,
             datasets: [
-                { label: 'Ativo Total', data: comp.ativos, backgroundColor: '#0B4F6C', borderRadius: 4 },
-                { label: 'Patrimônio Líquido', data: comp.pls, backgroundColor: '#16A34A', borderRadius: 4 },
+                { label: 'Ativo Total', data: comp.ativos, backgroundColor: '#0C3A30', borderRadius: 4 },
+                { label: 'Patrimônio Líquido', data: comp.pls, backgroundColor: '#33705C', borderRadius: 4 },
                 { label: 'Resultado', data: comp.resultados, backgroundColor: '#D97706', borderRadius: 4 }
             ]
         },

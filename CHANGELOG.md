@@ -9,6 +9,11 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- O dashboard web adotou a identidade "Tinta & Latão" dos relatórios:
+  navbar e botões em verde-tinta, destaques em latão, títulos em Source
+  Serif 4 sobre corpo em Source Sans 3. As fontes são servidas pela própria
+  aplicação — nenhuma requisição externa — e os gráficos passaram a usar a
+  paleta da identidade.
 - Documento de módulo para os 16 módulos que faltavam — os 24 agora têm
   (`docs/modules/`): o que cada um faz, expõe, armadilhas conhecidas e o que
   explicitamente não faz. O levantamento expôs promessas falsas na própria
