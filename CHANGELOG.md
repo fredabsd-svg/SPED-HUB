@@ -8,6 +8,13 @@ interno da implementação.
 
 ## [Não publicado]
 
+### Adicionado
+- A validação de integridade passou a detectar ciclo na hierarquia do plano
+  de contas (`sped-hub validar` e endpoints de validação). Era a origem do
+  travamento do dashboard: o arquivo entrava no banco com hierarquia
+  inválida e ninguém era avisado. Ciclo é reportado como erro, com o
+  caminho completo (`1 → 2 → 1`).
+
 ### Corrigido
 - **O dashboard travava o servidor inteiro** quando a ECD importada tinha
   hierarquia de plano de contas em ciclo (uma conta que é a própria
