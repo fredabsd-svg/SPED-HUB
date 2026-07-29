@@ -92,3 +92,55 @@ class TestPaletaUnica:
             if "--primary: #0C3A30;" not in (TEMPLATES / nome).read_text("utf-8")
         ]
         assert not fora, f"páginas fora da paleta da identidade: {fora}"
+
+
+class TestNavbarAnonima:
+    """Tela de login não mostra navegação de área logada.
+
+    Apontado em revisão: a navbar completa (Dashboard, Upload, …, Auditoria)
+    aparecia para o visitante anônimo. Nenhum link funcionava — todos
+    redirecionavam de volta ao /login — mas a tela de entrada anunciava o
+    mapa inteiro da aplicação para quem ainda não provou quem é.
+    """
+
+    @staticmethod
+    def _cliente():
+        from fastapi.testclient import TestClient
+
+        from src.dashboard.app import app
+
+        return TestClient(app)
+
+    def test_login_sem_links_de_navegacao(self):
+        html = self._cliente().get("/login").text
+        for rotulo in ("Auditoria", "API Keys", "Webhooks", "Comparar"):
+            assert (
+                rotulo not in html
+            ), f"tela de login expõe o link '{rotulo}' para visitante anônimo"
+        assert "SPED" in html, "a marca sumiu junto — o condicional cortou demais"
+
+    def test_register_sem_links_de_navegacao(self):
+        html = self._cliente().get("/register").text
+        assert "Auditoria" not in html and "Webhooks" not in html
+
+    def test_pagina_logada_mostra_navegacao(self, tmp_path, monkeypatch):
+        """O outro lado: logado, a navegação inteira volta."""
+        caminho = str(tmp_path / "nav.db")
+        monkeypatch.setenv("SPED_HUB_DB", caminho)
+        from src.db.models import criar_engine, init_db
+        from src.settings import reset_settings_cache
+
+        reset_settings_cache()
+        # O schema precisa existir antes do primeiro request: em execução de
+        # suíte o serviço de auth já foi inicializado por outro teste e não
+        # vai criar as tabelas deste banco novo.
+        init_db(criar_engine(caminho))
+        cliente = self._cliente()
+        cliente.post(
+            "/api/register",
+            data={"email": "nav@teste.com", "nome": "Nav", "senha": "senha123"},
+        )
+        cliente.post("/api/login", data={"email": "nav@teste.com", "senha": "senha123"})
+        html = cliente.get("/").text
+        for rotulo in ("Dashboard", "Upload", "Auditoria", "Sair"):
+            assert rotulo in html, f"logado e sem o link '{rotulo}' na navegação"
