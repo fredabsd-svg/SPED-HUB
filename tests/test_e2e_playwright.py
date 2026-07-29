@@ -11,15 +11,17 @@ Requer: Chromium do sistema em /usr/bin/chromium
 """
 
 import os
+import subprocess
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 import pytest
 
 # Skip se Playwright não estiver disponível
 try:
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import expect, sync_playwright
 
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
@@ -51,10 +53,11 @@ def _chromium_executable() -> str | None:
 CHROMIUM = _chromium_executable()
 
 pytestmark = [
-    # Tier separado: precisa de navegador real E de acesso ao cdn.jsdelivr.net,
-    # de onde a aplicação carrega htmx/Alpine/Chart.js.  Sem o CDN os
-    # formulários não funcionam e os testes falham por um motivo que não é
-    # defeito do código.  Rode com `pytest -m e2e`.
+    # Tier separado: precisa de navegador real, e o harness ainda tem
+    # defeitos próprios (ADR 0004).  Rode com `pytest -m e2e`.
+    #
+    # Rede externa não é mais requisito: desde a Fase 18 htmx, Alpine,
+    # Chart.js e SortableJS são servidos pela própria aplicação.
     pytest.mark.e2e,
     pytest.mark.skipif(not PLAYWRIGHT_AVAILABLE, reason="Playwright não instalado"),
     pytest.mark.skipif(CHROMIUM is None, reason="Chromium não encontrado no sistema"),
@@ -66,10 +69,17 @@ pytestmark = [
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _criar_ecd_teste() -> str:
-    """Cria arquivo ECD de teste."""
+def _criar_ecd_teste(cnpj: str = "00123456000199", empresa: str = "EMPRESA E2E LTDA") -> str:
+    """Cria arquivo ECD de teste.
+
+    O CNPJ é parâmetro porque cada teste precisa da própria escrituração: a
+    importação recusa arquivo repetido (dedup por hash) e o banco tem
+    unicidade em (empresa, período). Com um arquivo único compartilhado, o
+    segundo teste a subir recebia 400 — e isso ficou escondido enquanto o
+    servidor travava antes de chegar lá.
+    """
     linhas = [
-        "|0000|LECD|01012024|31122024|EMPRESA E2E LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||",
+        f"|0000|LECD|01012024|31122024|{empresa}|{cnpj}|SP||1234567||0|0|1|0|0|E||1|0||",
         "|I001|0|",
         "|I010|G|009|",
         "|I030|01012024|31122024|A|",
@@ -91,16 +101,39 @@ def _criar_ecd_teste() -> str:
 
 
 @pytest.fixture(scope="module")
-def ecd_file():
-    """Arquivo ECD para upload nos testes."""
-    fd, path = tempfile.mkstemp(suffix=".txt", prefix="e2e_ecd_")
-    os.close(fd)
-    Path(path).write_text(_criar_ecd_teste(), encoding="utf-8")
-    yield path
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+def ecd_factory():
+    """Gera uma ECD nova a cada chamada, com empresa própria.
+
+    Devolve uma função `(sufixo) -> caminho`. Cada teste que sobe arquivo
+    pede o seu: escrituração repetida é recusada com 400, e testes que
+    dependem da ordem em que rodam são testes que mentem.
+    """
+    criados: list[str] = []
+
+    def criar(sufixo: str) -> str:
+        fd, path = tempfile.mkstemp(suffix=".txt", prefix=f"e2e_ecd_{sufixo}_")
+        os.close(fd)
+        # CNPJ distinto por teste: dedup é por hash do arquivo, e o banco
+        # ainda tem unicidade em (empresa, dt_ini, dt_fin).
+        #
+        # `hash()` de string é aleatorizado por processo (PYTHONHASHSEED):
+        # daria um CNPJ diferente a cada execução, e teste que muda de dado
+        # sozinho é teste que um dia falha sem ninguém ter mexido em nada.
+        digitos = f"{zlib.crc32(sufixo.encode()) % 10**9:09d}"
+        Path(path).write_text(
+            _criar_ecd_teste(cnpj=f"00{digitos}999", empresa=f"EMPRESA {sufixo.upper()} LTDA"),
+            encoding="utf-8",
+        )
+        criados.append(path)
+        return path
+
+    yield criar
+
+    for path in criados:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 @pytest.fixture(scope="module")
@@ -115,49 +148,123 @@ def db_path():
         pass
 
 
+def _porta_livre() -> int:
+    """Porta efêmera concedida pelo sistema.
+
+    A porta era fixa (8765). Duas execuções simultâneas — ou uma execução
+    anterior cujo uvicorn não morreu — davam `address already in use`, e o
+    servidor novo simplesmente não subia. Como a saída dele ia para
+    `DEVNULL`, o sintoma que sobrava era um teste falhando por conexão
+    recusada, sem nada explicando o porquê.
+    """
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class ServidorNaoSubiu(RuntimeError):
+    """O servidor de teste não respondeu no prazo. Traz o log dele junto."""
+
+
 @pytest.fixture(scope="module")
-def live_server(db_path):
-    """Servidor FastAPI para testes E2E."""
-    import subprocess
+def live_server(db_path, tmp_path_factory):
+    """Servidor FastAPI para os testes E2E.
+
+    Três defeitos deste fixture escondiam as falhas da suíte:
+
+    1. **A saída do servidor ia para `DEVNULL`.** Quando ele quebrava no meio
+       da suíte, não sobrava rastro nenhum — era literalmente impossível
+       diagnosticar. Agora vai para arquivo, e o conteúdo entra na mensagem
+       de erro.
+    2. **A espera de readiness não falhava.** O laço tentava por 10 s e, no
+       estouro, seguia em frente e entregava a URL assim mesmo. Os testes
+       então falhavam com erro de conexão em vez de dizer "o servidor não
+       subiu".
+    3. **Porta fixa**, ver :func:`_porta_livre`.
+    """
     import sys
-
-    os.environ["SPED_HUB_DB"] = db_path
-
-    # Inicia servidor em processo separado
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "src.dashboard.app:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "8765",
-            "--log-level",
-            "error",
-        ],
-        cwd=str(REPO_ROOT),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    # Aguarda servidor iniciar
-    deadline = time.time() + 10
     import urllib.request
 
-    while time.time() < deadline:
+    porta = _porta_livre()
+    base_url = f"http://127.0.0.1:{porta}"
+    log = tmp_path_factory.mktemp("e2e") / "uvicorn.log"
+
+    ambiente = {**os.environ, "SPED_HUB_DB": db_path}
+
+    with log.open("wb") as saida:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "src.dashboard.app:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(porta),
+                "--log-level",
+                "info",
+            ],
+            cwd=str(REPO_ROOT),
+            env=ambiente,
+            stdout=saida,
+            stderr=subprocess.STDOUT,
+        )
+
         try:
-            urllib.request.urlopen("http://127.0.0.1:8765/api/v1/health")
-            break
-        except Exception:
-            time.sleep(0.3)
+            _esperar_servidor(proc, base_url, log, urllib.request)
+            yield base_url
+        finally:
+            _encerrar(proc)
 
-    yield "http://127.0.0.1:8765"
+    # O log só é útil quando algo deu errado; em execução limpa ele some com
+    # o tmp_path do pytest.
 
+
+def _esperar_servidor(proc, base_url: str, log, urllib_request, prazo: float = 30.0) -> None:
+    """Bloqueia até o /health responder, ou levanta com o log do servidor."""
+    deadline = time.time() + prazo
+    ultimo_erro = None
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise ServidorNaoSubiu(
+                f"uvicorn morreu com código {proc.returncode} antes de responder.\n"
+                f"--- log do servidor ---\n{_ler(log)}"
+            )
+        try:
+            with urllib_request.urlopen(f"{base_url}/api/v1/health", timeout=2) as r:
+                if r.status == 200:
+                    return
+        except Exception as exc:  # conexão recusada enquanto ele sobe
+            ultimo_erro = exc
+        time.sleep(0.3)
+
+    raise ServidorNaoSubiu(
+        f"servidor não respondeu em {prazo:.0f}s. Último erro: {ultimo_erro!r}\n"
+        f"--- log do servidor ---\n{_ler(log)}"
+    )
+
+
+def _ler(log) -> str:
+    try:
+        texto = Path(log).read_text("utf-8", errors="replace").strip()
+    except OSError as exc:
+        return f"(não foi possível ler {log}: {exc})"
+    return texto or "(vazio — o servidor não escreveu nada)"
+
+
+def _encerrar(proc) -> None:
+    """Encerra o uvicorn sem deixar processo órfão segurando a porta."""
+    if proc.poll() is not None:
+        return
     proc.terminate()
-    proc.wait(timeout=5)
-    del os.environ["SPED_HUB_DB"]
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -247,7 +354,7 @@ class TestE2EUpload:
             assert "login" in page.url.lower()
             browser.close()
 
-    def test_upload_ecd(self, live_server, ecd_file):
+    def test_upload_ecd(self, live_server, ecd_factory):
         """Upload de ECD via interface web."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -274,17 +381,25 @@ class TestE2EUpload:
             page.goto(f"{live_server}/upload")
             assert page.url == f"{live_server}/upload"
 
-            # Upload do arquivo
-            file_input = page.locator("#file-ecd")
-            file_input.set_input_files(ecd_file)
+            page.locator("#file-ecd").set_input_files(ecd_factory("upload"))
 
-            # Clica no botão de upload
-            upload_btn = page.locator("button[type='submit']")
-            if upload_btn.is_visible():
-                upload_btn.click()
+            # `button[type='submit']` casa com TRÊS botões nesta página
+            # (ECD, EFD e ECF) e viola o modo estrito do Playwright. O
+            # botão certo tem id próprio, e nasce `disabled`: só habilita
+            # quando o `@change` do input de arquivo dispara.
+            botao = page.locator("#btn-ecd")
+            expect(botao).to_be_enabled(timeout=10_000)
+            botao.click()
 
-            # Aguarda resultado
-            time.sleep(2)
+            # O efeito, não a passagem do tempo: a importação precisa
+            # relatar o que gravou. `time.sleep(2)` seguido de nada passava
+            # mesmo com o upload quebrado (§3.1).
+            resultado = page.locator("#upload-result")
+            expect(resultado).to_contain_text("importada com sucesso", timeout=30_000)
+            assert "{" not in resultado.inner_text(), (
+                "JSON cru na tela: o handler de resposta não tratou "
+                f"`status: ok` com mensagem — {resultado.inner_text()[:200]}"
+            )
 
             browser.close()
 
@@ -292,7 +407,7 @@ class TestE2EUpload:
 class TestE2EDashboard:
     """Testes do dashboard com browser real."""
 
-    def test_dashboard_com_dados(self, live_server, ecd_file):
+    def test_dashboard_com_dados(self, live_server, ecd_factory):
         """Dashboard mostra dados após upload."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -319,7 +434,7 @@ class TestE2EDashboard:
             import httpx
 
             cookies = {cookie["name"]: cookie["value"] for cookie in context.cookies()}
-            with open(ecd_file, "rb") as f:
+            with open(ecd_factory("dashboard"), "rb") as f:
                 resp = httpx.post(
                     f"{live_server}/api/upload",
                     files={"file": ("test.txt", f, "text/plain")},

@@ -21,8 +21,9 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 15 | Redis, fila de workers, e-mail | concluída | `tests/test_fase15.py` | Redis não roda no CI; fallback para memória é o que se testa |
 | 16 | Observabilidade e monitoramento | concluída | `tests/test_fase16.py`, `tests/test_review_regressions.py` | — |
 | 17 | Fundação de produção | concluída | `tests/test_settings.py`, `tests/test_multibackend.py`, `tests/test_migrations.py`, `tests/test_ecd_grande.py`, `tests/test_hardening.py`, `tests/test_deploy_config.py`, `tests/test_cli.py` | ver "Em aberto" |
-| 18 | Front-end sem CDN | em andamento | `tests/test_vendor_assets.py` | testes de navegador seguem opt-in (§3.5) |
-| 19 | Regras do projeto verificáveis | em andamento | `tests/test_regras_projeto.py` | 18 dos 24 módulos ainda sem documento (§1.4, por adoção) |
+| 18 | Front-end sem CDN | concluída | `tests/test_vendor_assets.py` | testes de navegador seguem opt-in (§3.5) |
+| 19 | Regras do projeto verificáveis | concluída | `tests/test_regras_projeto.py` | 18 dos 24 módulos ainda sem documento (§1.4, por adoção) |
+| 20 | Testes de navegador | concluída | `tests/test_e2e_playwright.py`, `tests/test_hierarquia_ciclica.py` | seguem opt-in sob o marcador `e2e` (ADR 0004) |
 
 ## Em aberto — decisões de produto
 
@@ -35,7 +36,7 @@ Ver `docs/roadmap.md` para o que ainda não existe.
 | Retomada de importação a partir de offset | Exigiria commits parciais, o que viola a §6.1. Precisaria vir com estado explícito de "importação incompleta" que os relatórios respeitem. |
 | `SPED_HUB_SECRET_KEY` sem consumidor | Documentada como reservada (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. |
 | `SPED_HUB_DEBUG` sem consumidor | Documentada como reservada (§2.2). O campo é lido e coagido, mas nenhum componente muda de comportamento por causa dele. Remover exige decidir se o projeto quer um modo de diagnóstico. |
-| Testes de navegador falhando | Locators ambíguos e servidor de teste que para de responder no meio da suíte. Causa não diagnosticada — a hipótese de vazamento de pool foi medida e refutada. Sob marcador `e2e`, fora da execução padrão. |
+| Ciclo na hierarquia do plano de contas | O dashboard agora para de subir e registra aviso, em vez de travar. A ECD segue importada com a hierarquia inválida, e `validators/integridade.py` ainda não detecta o ciclo — quem recebe o arquivo não é avisado no momento da validação. |
 
 ## Passivo de documentação de módulo (§1.4)
 

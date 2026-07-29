@@ -51,16 +51,19 @@ sped-hub-watchdog = "src.watchdog:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-# Os testes de navegador ficam fora da execução padrão: além do Chromium,
-# eles dependem do cdn.jsdelivr.net (de onde a aplicação carrega htmx,
-# Alpine e Chart.js) estar acessível.  Sem o CDN os formulários não
-# funcionam e a falha não diz nada sobre o código.
+# Os testes de navegador ficam fora da execução padrão: exigem Chromium, e o
+# harness ainda tem defeitos próprios (ADR 0004) que fariam o pipeline ficar
+# vermelho por motivo que não é do código.
+#
+# A dependência do cdn.jsdelivr.net deixou de existir na Fase 18 — htmx,
+# Alpine, Chart.js e SortableJS são servidos pela própria aplicação.  Rede
+# externa não é mais requisito destes testes.
 #   pytest              → suíte normal
 #   pytest -m e2e       → só os de navegador
 #   pytest -m ""        → tudo
 addopts = "-m 'not e2e'"
 markers = [
-    "e2e: fluxo completo em navegador real (requer Chromium e acesso ao CDN)",
+    "e2e: fluxo completo em navegador real (requer Chromium)",
 ]
 
 [tool.ruff]
