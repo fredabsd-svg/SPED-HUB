@@ -27,6 +27,41 @@ from src.db.models import (
 from src.reports.base import valor_sinalizado
 
 
+def encontrar_ciclos(sup: dict[str, str | None]) -> list[list[str]]:
+    """Ciclos no grafo funcional ``cod_cta → cod_cta_sup``.
+
+    Cada conta aponta para no máximo uma sintética, então percorrer com
+    memoização classifica cada nó uma única vez (O(n)). Cada ciclo é
+    devolvido uma única vez. Função pura, compartilhada entre a validação
+    (h) e a recusa na importação — o mesmo fato num lugar só (§1.9).
+    """
+    estado: dict[str, int] = {}
+    ciclos: list[list[str]] = []
+    vistos: set[frozenset] = set()
+
+    for inicio in sup:
+        if estado.get(inicio):
+            continue
+        cadeia: list[str] = []
+        atual: str | None = inicio
+        while atual is not None and atual in sup and estado.get(atual) is None:
+            estado[atual] = 1
+            cadeia.append(atual)
+            atual = sup[atual]
+
+        if atual is not None and estado.get(atual) == 1:
+            ciclo = cadeia[cadeia.index(atual) :]
+            chave = frozenset(ciclo)
+            if chave not in vistos:
+                vistos.add(chave)
+                ciclos.append(ciclo)
+
+        for cod in cadeia:
+            estado[cod] = 2
+
+    return ciclos
+
+
 @dataclass
 class Inconsistencia:
     """Uma inconsistência encontrada."""
@@ -370,22 +405,12 @@ class ValidadorIntegridade:
 
         A cadeia ``COD_CTA → COD_CTA_SUP`` precisa terminar numa conta de
         topo. Uma conta que é a própria sintética — ou ``A→B→A`` — torna a
-        hierarquia impossível de interpretar: qualquer agrupamento que suba
-        por ela não tem resposta definida.
+        hierarquia impossível de interpretar.
 
-        Não é hipótese: uma ECD assim travava o dashboard para todos os
-        usuários (laço infinito em ``get_composicao_ativo``, corrigido no
-        PR #7). O travamento foi resolvido lá; aqui é onde quem recebe o
-        arquivo fica sabendo que a escrituração veio com hierarquia inválida.
-
-        É erro, não alerta: as demais validações comparam números e podem
-        divergir por centavos, mas um ciclo não tem leitura correta possível.
-
-        Cada ciclo é reportado uma única vez, pelo seu menor código de conta,
-        com o caminho completo nos detalhes.
+        Desde a Fase 25 a importação RECUSA arquivo com ciclo; esta
+        validação continua existindo para bancos que importaram antes disso.
+        É erro, não alerta: um ciclo não tem leitura correta possível.
         """
-        inconsistencias = []
-
         sup = {
             c.cod_cta: c.cod_cta_sup
             for c in self.session.execute(
@@ -393,48 +418,22 @@ class ValidadorIntegridade:
             ).scalars()
         }
 
-        # Cada conta tem no máximo um ponteiro para cima, então o grafo é
-        # funcional: percorrer com memoização classifica cada nó uma única
-        # vez (O(n)).  ``estado``: 1 = na cadeia atual, 2 = já resolvido.
-        estado: dict[str, int] = {}
-        ciclos_vistos: set[frozenset] = set()
-
-        for inicio in sup:
-            if estado.get(inicio):
-                continue
-            cadeia: list[str] = []
-            atual: str | None = inicio
-            while atual is not None and atual in sup and estado.get(atual) is None:
-                estado[atual] = 1
-                cadeia.append(atual)
-                atual = sup[atual]
-
-            if atual is not None and estado.get(atual) == 1:
-                # ``atual`` reapareceu dentro da cadeia em construção: tudo
-                # a partir da primeira ocorrência dele é o ciclo.
-                ciclo = cadeia[cadeia.index(atual) :]
-                chave = frozenset(ciclo)
-                if chave not in ciclos_vistos:
-                    ciclos_vistos.add(chave)
-                    ancora = min(ciclo)
-                    inconsistencias.append(
-                        Inconsistencia(
-                            tipo="hierarquia_ciclica",
-                            severidade="erro",
-                            descricao=f"Ciclo na hierarquia do plano de contas: "
-                            f"{' → '.join(ciclo + [ciclo[0]])} — nenhuma dessas contas "
-                            "chega a uma conta de topo",
-                            detalhes={
-                                "cod_cta": ancora,
-                                "ciclo": ciclo,
-                                "tamanho": len(ciclo),
-                            },
-                        )
-                    )
-
-            for cod in cadeia:
-                estado[cod] = 2
-
+        inconsistencias = []
+        for ciclo in encontrar_ciclos(sup):
+            inconsistencias.append(
+                Inconsistencia(
+                    tipo="hierarquia_ciclica",
+                    severidade="erro",
+                    descricao=f"Ciclo na hierarquia do plano de contas: "
+                    f"{' → '.join(ciclo + [ciclo[0]])} — nenhuma dessas contas "
+                    "chega a uma conta de topo",
+                    detalhes={
+                        "cod_cta": min(ciclo),
+                        "ciclo": ciclo,
+                        "tamanho": len(ciclo),
+                    },
+                )
+            )
         return inconsistencias
 
     def relatorio(self, inconsistencias: list[Inconsistencia]) -> dict:

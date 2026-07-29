@@ -143,3 +143,89 @@ def test_ciclo_e_registrado_em_log(sessao, caplog):
         "o ciclo foi contornado em silêncio; ninguém saberia que a ECD do "
         "cliente tem hierarquia inválida"
     )
+
+
+class TestImportacaoRecusaCiclo:
+    """A importação recusa arquivo com hierarquia cíclica (ADR 0006).
+
+    Fecha a origem de verdade: até aqui o arquivo entrava no banco com a
+    hierarquia inválida e só a validação (h) — que roda quando alguém pede —
+    acusava. Agora a escrituração nem entra, e a transação única (§6.1)
+    garante que NADA dela fica: nem empresa, nem ECD, nem plano.
+    """
+
+    @staticmethod
+    def _arquivo_ecd(tmp_path, linhas_i050):
+        linhas = [
+            "|0000|LECD|01012024|31122024|EMPRESA CICLO LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||",
+            "|I001|0|",
+            "|I010|G|009|",
+            "|I030|01012024|31122024|A|",
+            *linhas_i050,
+            "|I990|99|",
+            "|9001|0|",
+            "|9999|10|",
+        ]
+        arq = tmp_path / "ciclo.txt"
+        arq.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+        return arq
+
+    def _importar(self, tmp_path, linhas_i050):
+        from src.ecd_importer import ECDImportService
+
+        engine = criar_engine(f"sqlite:///{tmp_path / 'imp.db'}")
+        init_db(engine)
+        sessao = get_session(engine)
+        arq = self._arquivo_ecd(tmp_path, linhas_i050)
+        try:
+            return sessao, ECDImportService(sessao).importar(arq)
+        except Exception:
+            sessao.rollback()
+            raise
+
+    def test_auto_ciclo_e_recusado_sem_deixar_rastro(self, tmp_path):
+        import pytest as _pytest
+
+        from src.db.models import ECD, Empresa
+        from src.ecd_importer import ECDImportError, ECDImportService
+
+        engine = criar_engine(f"sqlite:///{tmp_path / 'imp.db'}")
+        init_db(engine)
+        sessao = get_session(engine)
+        arq = self._arquivo_ecd(tmp_path, ["|I050|01012024|01|A|3|1|1|CONTA UM|"])
+
+        with _pytest.raises(ECDImportError) as exc:
+            ECDImportService(sessao).importar(arq)
+        assert "ciclo" in str(exc.value).lower()
+        assert "nada foi importado" in str(exc.value).lower()
+
+        sessao.rollback()
+        assert (
+            sessao.execute(select(ECD)).first() is None
+        ), "a ECD recusada deixou rastro no banco — a transação não reverteu (§6.1)"
+        assert sessao.execute(select(Empresa)).first() is None
+        assert sessao.execute(select(PlanoConta)).first() is None
+
+    def test_ciclo_mutuo_recusado_com_caminho_na_mensagem(self, tmp_path):
+        import pytest as _pytest
+
+        from src.ecd_importer import ECDImportError
+
+        with _pytest.raises(ECDImportError) as exc:
+            self._importar(
+                tmp_path,
+                ["|I050|01012024|01|A|3|1|2|CONTA UM|", "|I050|01012024|01|A|3|2|1|CONTA DOIS|"],
+            )
+        # O caminho aparece na mensagem: quem recebe o erro precisa saber
+        # QUAL conta corrigir no sistema de origem.
+        assert "1" in str(exc.value) and "2" in str(exc.value)
+
+    def test_hierarquia_valida_continua_importando(self, tmp_path):
+        sessao, resultado = self._importar(
+            tmp_path,
+            [
+                "|I050|01012024|01|S|1|1||ATIVO|",
+                "|I050|01012024|01|A|2|1.1|1|CAIXA|",
+            ],
+        )
+        assert resultado.contas == 2

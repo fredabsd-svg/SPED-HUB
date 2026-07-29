@@ -64,6 +64,10 @@ O navegador recebe `job_id` e `poll_url` imediatamente e consulta
    `sha256` viaja em `SavedUpload` e o importador não faz segunda passada.
 4. **Deduplicação é por hash**, não por nome nem por período. Reenvio levanta
    `DuplicateECDImportError` com o `ecd_id` anterior.
+4b. **Hierarquia do plano de contas é acíclica por construção** (ADR 0006):
+   arquivo com ciclo é recusado antes do commit, com o caminho do ciclo na
+   mensagem. Vale nos três caminhos de entrada, que convergem no mesmo
+   serviço.
 5. **Cancelamento é cooperativo e não deixa resíduo.** `ECDImportCancelled`
    não é falha: a transação some junto.
 6. **O temporário é sempre removido**, inclusive nos caminhos de erro

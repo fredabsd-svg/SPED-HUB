@@ -85,7 +85,10 @@ def _criar_ecd_teste(cnpj: str = "00123456000199", empresa: str = "EMPRESA E2E L
         "|I030|01012024|31122024|A|",
     ]
     for i in range(10):
-        linhas.append(f"|I050|01012024|01|A|3|{i+1}|1|CONTA_{i+1}|")
+        # Conta 1 é topo (sem sintética): sup=1 para ela mesma era um
+        # auto-ciclo — exatamente o defeito que a importação agora recusa.
+        sup = "" if i == 0 else "1"
+        linhas.append(f"|I050|01012024|01|A|3|{i+1}|{sup}|CONTA_{i+1}|")
     linhas.append("|I150|01012024|31122024|")
     for i in range(10):
         linhas.append(f"|I155|{i+1}||1000.00|D|5000.00|4000.00|2000.00|D|")
