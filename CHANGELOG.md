@@ -16,6 +16,9 @@ interno da implementação.
   caminho completo (`1 → 2 → 1`).
 
 ### Corrigido
+- O repositório carregava 29 MB de fontes órfãs (o zip inteiro do download
+  da Inter e as variáveis que só o PDF usava); saíram na troca de
+  identidade.
 - **O dashboard travava o servidor inteiro** quando a ECD importada tinha
   hierarquia de plano de contas em ciclo (uma conta que é a própria
   sintética, ou A→B→A). Como o servidor atende num único fluxo, ele parava

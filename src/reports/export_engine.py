@@ -21,8 +21,11 @@ class WhiteLabel:
     """Configuração de white-label."""
 
     escritorio_nome: str = "SPED-HUB"
-    cor_primaria: str = "#0B4F6C"
-    cor_primaria_clara: str = "#E8F3F7"
+    # Identidade "Tinta & Latão": verde-tinta como cor institucional e o
+    # creme "suave" como fundo claro.  O white-label continua trocando as
+    # duas para a marca do escritório.
+    cor_primaria: str = "#0C3A30"
+    cor_primaria_clara: str = "#F5F2EA"
     logo_path: str | None = None
     logo_base64: str | None = None
 
@@ -133,18 +136,18 @@ class ExportEngine:
             ws.title = titulo[:31] if titulo else "Relatório"
 
             # ── Estilos ──
-            cor_primaria = white_label.cor_primaria.replace("#", "") if white_label else "0B4F6C"
+            cor_primaria = white_label.cor_primaria.replace("#", "") if white_label else "0C3A30"
 
             header_fill = PatternFill(
                 start_color=cor_primaria, end_color=cor_primaria, fill_type="solid"
             )
             header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-            zebra_fill = PatternFill(start_color="F5F5F7", end_color="F5F5F7", fill_type="solid")
+            zebra_fill = PatternFill(start_color="F5F2EA", end_color="F5F2EA", fill_type="solid")
             thin_border = Border(
-                left=Side(style="thin", color="D4D4DA"),
-                right=Side(style="thin", color="D4D4DA"),
-                top=Side(style="thin", color="D4D4DA"),
-                bottom=Side(style="thin", color="D4D4DA"),
+                left=Side(style="thin", color="E2DCCB"),
+                right=Side(style="thin", color="E2DCCB"),
+                top=Side(style="thin", color="E2DCCB"),
+                bottom=Side(style="thin", color="E2DCCB"),
             )
             data_font = Font(name="Calibri", size=10)
             moeda_format = '#.##0,00;(#.##0,00);"-"'
@@ -163,7 +166,7 @@ class ExportEngine:
                     row=row,
                     column=1,
                     value=f"{ctx.empresa_nome} — CNPJ: {ctx.empresa_cnpj} — Período: {ctx.periodo_ref}",
-                ).font = Font(name="Calibri", size=9, color="6B6B85")
+                ).font = Font(name="Calibri", size=9, color="6B6459")
                 row += 1
 
             row += 1  # blank row
@@ -257,18 +260,18 @@ class ExportEngine:
         ws = wb.active
         ws.title = titulo[:31] if titulo else "Relatorio"
 
-        cor_primaria = white_label.cor_primaria.replace("#", "") if white_label else "0B4F6C"
+        cor_primaria = white_label.cor_primaria.replace("#", "") if white_label else "0C3A30"
 
         header_fill = PatternFill(
             start_color=cor_primaria, end_color=cor_primaria, fill_type="solid"
         )
         header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
-        zebra_fill = PatternFill(start_color="F5F5F7", end_color="F5F5F7", fill_type="solid")
+        zebra_fill = PatternFill(start_color="F5F2EA", end_color="F5F2EA", fill_type="solid")
         thin_border = Border(
-            left=Side(style="thin", color="D4D4DA"),
-            right=Side(style="thin", color="D4D4DA"),
-            top=Side(style="thin", color="D4D4DA"),
-            bottom=Side(style="thin", color="D4D4DA"),
+            left=Side(style="thin", color="E2DCCB"),
+            right=Side(style="thin", color="E2DCCB"),
+            top=Side(style="thin", color="E2DCCB"),
+            bottom=Side(style="thin", color="E2DCCB"),
         )
         data_font = Font(name="Calibri", size=10)
         moeda_format = '#.##0,00;(#.##0,00);"-"'
@@ -286,7 +289,7 @@ class ExportEngine:
                 row=row,
                 column=1,
                 value=f"{ctx.empresa_nome} — CNPJ: {ctx.empresa_cnpj} — Periodo: {ctx.periodo_ref}",
-            ).font = Font(name="Calibri", size=9, color="6B6B85")
+            ).font = Font(name="Calibri", size=9, color="6B6459")
             row += 1
 
         row += 1

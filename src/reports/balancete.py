@@ -154,6 +154,27 @@ class Balancete:
             for ln in linhas
         ]
 
+    def totais(self, linhas: list[LinhaBalancete]) -> dict:
+        """Totais da listagem, somando só as linhas do menor nível presente.
+
+        Somar todas as linhas dobraria cada valor: uma conta sintética já
+        agrega as analíticas abaixo dela. As linhas do menor nível são
+        subárvores disjuntas entre si e cobrem tudo o que está listado —
+        na listagem completa, são as contas de nível 1, e o total bate com
+        a soma das analíticas quando o arquivo é consistente (a divergência
+        é assunto do :meth:`conferir`, linha a linha).
+        """
+        if not linhas:
+            return {"saldo_inicial": 0.0, "debitos": 0.0, "creditos": 0.0, "saldo_final": 0.0}
+        topo = min(ln.nivel for ln in linhas)
+        base = [ln for ln in linhas if ln.nivel == topo]
+        return {
+            "saldo_inicial": round(sum(ln.saldo_inicial for ln in base), 2),
+            "debitos": round(sum(ln.debitos for ln in base), 2),
+            "creditos": round(sum(ln.creditos for ln in base), 2),
+            "saldo_final": round(sum(ln.saldo_final for ln in base), 2),
+        }
+
     def conferir(self, linhas: list[LinhaBalancete]) -> dict:
         """Conferência contra I155: SI + D − C = SF."""
         total_divergencias = sum(1 for ln in linhas if ln.tem_divergencia)
