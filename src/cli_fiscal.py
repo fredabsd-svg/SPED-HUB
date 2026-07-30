@@ -27,15 +27,32 @@ import pathlib
 
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from src.db.models import (
     DocumentoFiscal,
     Empresa,
     Escrituracao,
+    ItemDocumentoFiscal,
     criar_engine,
 )
-from src.documentos import ImportadorDeDocumentos
+from src.documentos import (
+    OPERADORES,
+    Alteracao,
+    AlteracaoInvalida,
+    Filtro,
+    ImportadorDeDocumentos,
+    MotorDeClassificacao,
+    RegraInvalida,
+    Selecao,
+    SelecaoVazia,
+    confirmar,
+    desfazer_lote,
+    novo_lote,
+    simular,
+)
+from src.documentos.ajustes import desserializar
+from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.escrituracoes import (
     TIPOS,
     CampoObrigatorioAusente,
@@ -304,10 +321,199 @@ def _conferir(sessao: Session, args) -> int:
     return DIVERGENTE
 
 
+# ── Classificar e corrigir: o meio do fluxo ────────────────────────────────
+
+
+def _classificar(sessao: Session, args) -> int:
+    """As regras propõem; ninguém aplica em silêncio.
+
+    Sem `--aplicar` isto é só leitura — a etapa "revisar" do fluxo. O motor já
+    trabalha assim por dentro (`avaliar` nunca grava), e a CLI não seria o
+    lugar de inverter isso.
+    """
+    empresa = _empresa(sessao, args.empresa)
+    documentos = _documentos_do_recorte(sessao, empresa, args)
+    if not documentos:
+        print("Nenhum documento no recorte.")
+        return 0
+
+    motor = MotorDeClassificacao(sessao, obrigacao=args.tipo if args.obrigacao else None)
+    sugestoes_por_documento: list[tuple[DocumentoFiscal, list]] = []
+    conflitos = []
+    for documento in documentos:
+        resultado = motor.avaliar(documento)
+        if resultado.sugestoes:
+            sugestoes_por_documento.append((documento, resultado.sugestoes))
+        conflitos.extend((documento, c) for c in resultado.conflitos)
+
+    total = sum(len(s) for _, s in sugestoes_por_documento)
+    print(f"\n{total} sugestões em {len(sugestoes_por_documento)} documentos.")
+
+    for documento, sugestoes in sugestoes_por_documento:
+        print(f"\n  documento #{documento.id} ({documento.modelo}/{documento.numero})")
+        for sugestao in sugestoes:
+            onde = f"item {sugestao.numero_item}" if sugestao.numero_item else "cabeçalho"
+            # A confiança só aparece quando não é total: repeti-la em toda
+            # linha esconderia justamente a que merece atenção.
+            duvida = "" if sugestao.confianca >= 1.0 else f"  (confiança {sugestao.confianca:.0%})"
+            print(
+                f"    {onde:12} {sugestao.campo:16} "
+                f"{sugestao.valor_anterior!r} → {sugestao.valor_sugerido!r}"
+                f"  [{sugestao.regra_nome}]{duvida}"
+            )
+
+    # Conflito é o que o motor se recusa a resolver por sorteio; escondê-lo
+    # faria a classificação parecer completa quando ela parou no meio.
+    if conflitos:
+        print(f"\n  {len(conflitos)} CONFLITOS — regras de mesma prioridade disputando o campo:")
+        for documento, conflito in conflitos:
+            print(f"    documento #{documento.id}: {conflito}")
+
+    if not args.aplicar:
+        print("\n  (nada foi gravado; use --aplicar para gravar num lote reversível)\n")
+        return 0
+
+    if not total:
+        print()
+        return 0
+
+    lote = novo_lote()
+    for documento, sugestoes in sugestoes_por_documento:
+        aplicar_classificacao(sessao, documento, sugestoes, lote=lote)
+    sessao.commit()
+    print(f"\n  {total} ajustes gravados no lote {lote}")
+    print(f"  para desfazer: sped-hub fiscal desfazer --lote {lote}\n")
+    return 0
+
+
+def _filtro(bruto: str) -> Filtro:
+    """`campo:valor`, `campo:operador:valor` ou `campo:operador`.
+
+    Dois-pontos porque valor fiscal — NCM, CFOP, CST, CNPJ — não tem
+    dois-pontos dentro, e o `=` apareceria em descrição de produto.
+    """
+    partes = bruto.split(":")
+    if len(partes) == 2 and partes[1] in OPERADORES:
+        return Filtro(campo=partes[0], operador=partes[1])
+    if len(partes) == 2:
+        return Filtro(campo=partes[0], operador="igual", valor=partes[1])
+    if len(partes) == 3:
+        return Filtro(campo=partes[0], operador=partes[1], valor=partes[2])
+    raise ValueError(
+        f"filtro {bruto!r} não tem forma reconhecida — use campo:valor, "
+        f"campo:operador:valor ou campo:operador (operadores: {', '.join(sorted(OPERADORES))})"
+    )
+
+
+def _valor_tipado(campo: str, bruto: str):
+    """O texto da linha de comando, no tipo que a coluna espera.
+
+    Argumento de terminal é sempre `str`. Sem converter, alterar `base_icms`
+    para `1000` mostraria **impacto R$ 0,00** na simulação — porque a
+    diferença entre `0.0` e `"1000"` não é numérica —, e a simulação existe
+    exatamente para mostrar o impacto financeiro antes de confirmar.
+
+    A conversão é a mesma que a camada efetiva já usa para ler ajustes
+    (`desserializar`): duas conversões diferentes para o mesmo campo acabariam
+    divergindo.
+    """
+    for modelo in (ItemDocumentoFiscal, DocumentoFiscal):
+        colunas = modelo.__table__.columns
+        if campo in colunas:
+            return desserializar(bruto, colunas[campo])
+    raise ValueError(
+        f"campo {campo!r} não existe em documento nem em item — "
+        "alteração em massa com nome errado não alcançaria nada"
+    )
+
+
+def _alterar(sessao: Session, args) -> int:
+    """Simula por padrão; gravar exige `--confirmar`.
+
+    É a mesma separação que o módulo de massa já faz entre `simular` e
+    `confirmar`, e a §16 do pedido: alteração em massa errada estraga o mês
+    inteiro de uma vez, e a simulação é a única chance de perceber antes.
+    """
+    empresa = _empresa(sessao, args.empresa)
+    selecao = Selecao(
+        escritorio_id=empresa.escritorio_id,
+        empresa_id=empresa.id,
+        data_inicio=_data(args.de) if args.de else None,
+        data_fim=_data(args.ate) if args.ate else None,
+        filtros=[_filtro(f) for f in args.filtro or []],
+    )
+    alteracao = Alteracao(
+        campo=args.campo,
+        valor=_valor_tipado(args.campo, args.valor),
+        apenas_vazios=args.apenas_vazios,
+    )
+
+    simulacao = simular(sessao, selecao, [alteracao])
+
+    print(f"\n{simulacao.total_mudancas} mudanças em {simulacao.documentos_afetados} documentos")
+    if simulacao.itens_afetados:
+        print(f"  itens afetados     {simulacao.itens_afetados}")
+    if simulacao.impacto_total:
+        print(f"  impacto em reais   {fmt_moeda(simulacao.impacto_total)}")
+    for campo, quantos in sorted(simulacao.por_campo().items()):
+        print(f"  {campo:18} {quantos}")
+
+    if simulacao.avisos:
+        print("\n  avisos:")
+        for aviso in simulacao.avisos:
+            print(f"    {aviso}")
+
+    if not args.confirmar:
+        print("\n  (nada foi gravado; use --confirmar para gravar)\n")
+        return 0
+
+    if not simulacao.total_mudancas:
+        print()
+        return 0
+
+    lote = confirmar(sessao, simulacao, motivo=args.motivo, forcar=args.forcar)
+    sessao.commit()
+    print(f"\n  gravado no lote {lote}")
+    print(f"  para desfazer: sped-hub fiscal desfazer --lote {lote}\n")
+    return 0
+
+
+def _desfazer(sessao: Session, args) -> int:
+    """Apagar os ajustes do lote basta — o normalizado nunca foi tocado."""
+    quantos = desfazer_lote(sessao, args.lote)
+    sessao.commit()
+    if not quantos:
+        print(f"\nNenhum ajuste no lote {args.lote}.\n")
+        return 0
+    print(f"\n{quantos} ajustes desfeitos do lote {args.lote}.\n")
+    return 0
+
+
+def _documentos_do_recorte(sessao: Session, empresa, args) -> list[DocumentoFiscal]:
+    consulta = (
+        select(DocumentoFiscal)
+        .options(selectinload(DocumentoFiscal.itens))
+        .where(DocumentoFiscal.empresa_id == empresa.id)
+    )
+    if args.de:
+        consulta = consulta.where(DocumentoFiscal.data_emissao >= _data(args.de))
+    if args.ate:
+        consulta = consulta.where(DocumentoFiscal.data_emissao <= _data(args.ate))
+    return list(
+        sessao.execute(consulta.order_by(DocumentoFiscal.data_emissao, DocumentoFiscal.id))
+        .scalars()
+        .unique()
+        .all()
+    )
+
+
 ACOES = {
     "empresas": lambda sessao, args: _empresas(sessao),
     "importar": _importar,
     "documentos": _documentos,
+    "classificar": _classificar,
+    "alterar": _alterar,
+    "desfazer": _desfazer,
     "gerar": _gerar,
     "historico": _historico,
     "conferir": _conferir,
@@ -331,7 +537,18 @@ def cmd_fiscal(args) -> int:
         else:
             print(f"ERRO: falha no banco: {erro.orig}")
         return 1
-    except (CampoObrigatorioAusente, LookupError, ValueError, OSError) as erro:
+    except (
+        AlteracaoInvalida,
+        CampoObrigatorioAusente,
+        LookupError,
+        OSError,
+        RegraInvalida,
+        SelecaoVazia,
+        ValueError,
+    ) as erro:
+        # Todas menos `OSError` já são `ValueError`; estão nomeadas porque a
+        # lista é o que diz quais falhas do domínio a CLI se compromete a
+        # traduzir em mensagem em vez de traceback.
         print(f"ERRO: {erro}")
         return 1
     finally:
@@ -363,6 +580,46 @@ def registrar(sub) -> None:
     p.add_argument("--saida", help="Caminho do arquivo gerado")
     p.add_argument("--escrituracao", type=int, help="ID da escrituração (em `conferir`)")
     p.add_argument("--diff", action="store_true", help="Mostra as linhas divergentes")
+
+    # ── classificar ────────────────────────────────────────────────────────
+    p.add_argument(
+        "--aplicar",
+        action="store_true",
+        help="Em `classificar`: grava as sugestões. Sem ele, só mostra",
+    )
+    p.add_argument(
+        "--obrigacao",
+        action="store_true",
+        help="Em `classificar`: só as regras da obrigação de `--tipo`",
+    )
+
+    # ── alterar ────────────────────────────────────────────────────────────
+    p.add_argument("--campo", help="Campo a alterar (em `alterar`)")
+    p.add_argument("--valor", help="Valor novo (em `alterar`)")
+    p.add_argument(
+        "--filtro",
+        action="append",
+        metavar="CAMPO:[OPERADOR:]VALOR",
+        help=f"Recorte; repetível, todos precisam casar. Operadores: {', '.join(sorted(OPERADORES))}",
+    )
+    p.add_argument(
+        "--apenas-vazios",
+        action="store_true",
+        help="Preenche só o que está vazio, sem tocar no que já tem valor",
+    )
+    p.add_argument(
+        "--confirmar",
+        action="store_true",
+        help="Em `alterar`: grava. Sem ele, só simula",
+    )
+    p.add_argument(
+        "--forcar",
+        action="store_true",
+        help="Grava mesmo com aviso impeditivo — fica registrado no motivo",
+    )
+    p.add_argument("--motivo", help="Por que a alteração foi feita; vai para o histórico")
+    p.add_argument("--lote", help="Lote a desfazer (em `desfazer`)")
+
     p.add_argument("--db", default=None, help="Banco (URL ou caminho SQLite)")
 
 
@@ -371,6 +628,9 @@ def registrar(sub) -> None:
 OBRIGATORIOS = {
     "importar": ("caminhos",),
     "documentos": ("empresa",),
+    "classificar": ("empresa",),
+    "alterar": ("empresa", "campo", "valor"),
+    "desfazer": ("lote",),
     "gerar": ("empresa", "de", "ate"),
     "conferir": ("escrituracao",),
 }

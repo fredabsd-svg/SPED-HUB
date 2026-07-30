@@ -8,7 +8,10 @@ O que estes testes protegem:
     `\\r\\n` como `\\r\\r\\n` no Windows, e o validador recusaria tudo;
   * **os códigos de saída**, porque isto vai para dentro de script de
     fechamento: 0 correu bem, 1 erro, 2 divergiu;
-  * **os avisos aparecem** — são o canal de "leia antes de transmitir".
+  * **os avisos aparecem** — são o canal de "leia antes de transmitir";
+  * **nada grava sem que se peça** — `classificar` e `alterar` mostram por
+    padrão. Inverter isso na CLI seria desfazer, na porta de entrada, a
+    proteção que os motores têm por dentro.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from sqlalchemy import select
 from src import cli_fiscal
 from src.cli import main
 from src.db.models import (
+    AjusteFiscal,
     DocumentoFiscal,
     Empresa,
     Escritorio,
@@ -30,7 +34,8 @@ from src.db.models import (
     get_session,
     init_db,
 )
-from src.documentos import ORIGEM_USUARIO, aplicar_ajuste
+from src.documentos import ORIGEM_USUARIO, aplicar_ajuste, valor_efetivo
+from src.documentos.classificacao import criar_regra
 from tests.fixtures_nfe import nfe_xml
 
 CNPJ = "98765432000198"
@@ -532,3 +537,416 @@ class TestAsDuasEscrituracoes:
         _gerar(importado, tmp_path / "c.txt", "--tipo", "efd_contribuicoes")
 
         assert main(["fiscal", "conferir", "--escrituracao", "1", "--db", importado]) == 0
+
+
+# ── Classificar e corrigir: o meio do fluxo ────────────────────────────────
+
+
+@pytest.fixture
+def com_regra(importado):
+    """Uma regra que casa com todos os itens do fixture (NCM 2203…)."""
+    with _sessao(importado) as sessao:
+        criar_regra(
+            sessao,
+            nome="Bebida vira 2102",
+            condicoes=[{"campo": "ncm", "operador": "comeca_com", "valor": "2203"}],
+            acoes=[{"campo": "cfop", "valor": "2102"}],
+            escritorio_id=1,
+            prioridade=10,
+        )
+        sessao.commit()
+    return importado
+
+
+def _ajustes(url) -> list[AjusteFiscal]:
+    with _sessao(url) as sessao:
+        return sessao.execute(select(AjusteFiscal)).scalars().all()
+
+
+class TestClassificarNaoGravaSozinho:
+    """A regra propõe; ninguém aplica em silêncio."""
+
+    def test_sem_aplicar_nao_grava(self, com_regra, capsys):
+        codigo = main(["fiscal", "classificar", "--empresa", "1", "--db", com_regra])
+
+        saida = capsys.readouterr().out
+        assert codigo == 0
+        assert "sugestões" in saida
+        assert _ajustes(com_regra) == [], "gravou sem --aplicar"
+
+    def test_diz_que_nao_gravou(self, com_regra, capsys):
+        """Silêncio faria parecer que a classificação foi aplicada."""
+        main(["fiscal", "classificar", "--empresa", "1", "--db", com_regra])
+
+        assert "nada foi gravado" in capsys.readouterr().out
+
+    def test_com_aplicar_grava(self, com_regra, capsys):
+        codigo = main(["fiscal", "classificar", "--empresa", "1", "--aplicar", "--db", com_regra])
+
+        assert codigo == 0
+        assert len(_ajustes(com_regra)) == 3, "um item por documento no fixture"
+        assert "gravados no lote" in capsys.readouterr().out
+
+    def test_mostra_o_que_a_regra_propoe(self, com_regra, capsys):
+        main(["fiscal", "classificar", "--empresa", "1", "--db", com_regra])
+
+        saida = capsys.readouterr().out
+        assert "cfop" in saida
+        assert "'6102' → '2102'" in saida
+        assert "Bebida vira 2102" in saida, "sem a regra não dá para revisar"
+
+    def test_sem_regra_nenhuma_nao_inventa_sugestao(self, importado, capsys):
+        codigo = main(["fiscal", "classificar", "--empresa", "1", "--db", importado])
+
+        assert codigo == 0
+        assert "0 sugestões" in capsys.readouterr().out
+        assert _ajustes(importado) == []
+
+    def test_reclassificar_depois_de_aplicar_nao_repropoe(self, com_regra, capsys):
+        """O motor lê o efetivo; repropor faria o lote crescer sem fim."""
+        main(["fiscal", "classificar", "--empresa", "1", "--aplicar", "--db", com_regra])
+        capsys.readouterr()
+
+        main(["fiscal", "classificar", "--empresa", "1", "--db", com_regra])
+
+        assert "0 sugestões" in capsys.readouterr().out
+
+    def test_o_lote_sai_na_tela_para_poder_desfazer(self, com_regra, capsys):
+        main(["fiscal", "classificar", "--empresa", "1", "--aplicar", "--db", com_regra])
+
+        saida = capsys.readouterr().out
+        lote = _ajustes(com_regra)[0].lote
+
+        assert lote in saida
+        assert "fiscal desfazer --lote" in saida
+
+    def test_nao_alcanca_documento_de_outra_empresa(self, com_regra, capsys):
+        """O escritório tem vários clientes; classificar sem escopo mexeria
+        na escrituração de quem não foi pedido."""
+        with _sessao(com_regra) as sessao:
+            outra = Empresa(
+                cnpj="11111111000111",
+                nome="OUTRA EMPRESA LTDA",
+                uf="TO",
+                ie="111",
+                cod_mun="1721000",
+                ind_perfil="A",
+                ind_ativ="1",
+                ind_ativ_contribuicoes="2",
+                cod_inc_trib="1",
+                escritorio_id=1,
+            )
+            sessao.add(outra)
+            sessao.commit()
+            # As notas já importadas passam a ser da outra empresa.
+            for documento in sessao.execute(select(DocumentoFiscal)).scalars():
+                documento.empresa_id = outra.id
+            sessao.commit()
+
+        codigo = main(["fiscal", "classificar", "--empresa", "1", "--aplicar", "--db", com_regra])
+
+        assert codigo == 0
+        assert "Nenhum documento no recorte" in capsys.readouterr().out
+        assert _ajustes(com_regra) == [], "classificou documento de outra empresa"
+
+    def test_conflito_aparece(self, importado, capsys):
+        """O motor não resolve empate por sorteio; esconder faria parecer que sim."""
+        with _sessao(importado) as sessao:
+            for nome, valor in (("Regra A", "2102"), ("Regra B", "1102")):
+                criar_regra(
+                    sessao,
+                    nome=nome,
+                    condicoes=[{"campo": "ncm", "operador": "comeca_com", "valor": "2203"}],
+                    acoes=[{"campo": "cfop", "valor": valor}],
+                    escritorio_id=1,
+                    prioridade=5,
+                )
+            sessao.commit()
+
+        main(["fiscal", "classificar", "--empresa", "1", "--db", importado])
+
+        assert "CONFLITOS" in capsys.readouterr().out
+
+
+class TestAlterarSimulaPorPadrao:
+    """§16: alteração em massa errada estraga o mês inteiro de uma vez."""
+
+    def _alterar(self, url, *extras):
+        return main(
+            [
+                "fiscal",
+                "alterar",
+                "--empresa",
+                "1",
+                "--campo",
+                "cfop",
+                "--valor",
+                "2102",
+                "--db",
+                url,
+                *extras,
+            ]
+        )
+
+    def test_sem_confirmar_nao_grava(self, importado, capsys):
+        codigo = self._alterar(importado)
+
+        saida = capsys.readouterr().out
+        assert codigo == 0
+        assert "mudanças" in saida
+        assert _ajustes(importado) == [], "gravou sem --confirmar"
+
+    def test_diz_que_nao_gravou(self, importado, capsys):
+        self._alterar(importado)
+
+        assert "nada foi gravado" in capsys.readouterr().out
+
+    def test_com_confirmar_grava(self, importado, capsys):
+        codigo = self._alterar(importado, "--confirmar")
+
+        assert codigo == 0
+        assert len(_ajustes(importado)) == 3
+        assert "gravado no lote" in capsys.readouterr().out
+
+    def test_a_simulacao_conta_o_que_mudaria(self, importado, capsys):
+        self._alterar(importado)
+
+        saida = capsys.readouterr().out
+        assert "3 mudanças em 2 documentos" in saida
+
+    def test_o_filtro_recorta(self, importado, capsys):
+        """Sem recorte a alteração pegaria o que não devia."""
+        self._alterar(importado, "--filtro", "ncm:99999999")
+
+        assert "0 mudanças" in capsys.readouterr().out
+
+    def test_apenas_vazios_nao_toca_no_preenchido(self, importado, capsys):
+        """§12.3: preencher o que falta sem sobrescrever o que já tem valor."""
+        self._alterar(importado, "--apenas-vazios")
+
+        assert "0 mudanças" in capsys.readouterr().out, "o CFOP já está preenchido"
+
+    def _numerico(self, url, campo, valor, *extras):
+        return main(
+            [
+                "fiscal",
+                "alterar",
+                "--empresa",
+                "1",
+                "--campo",
+                campo,
+                "--valor",
+                valor,
+                "--db",
+                url,
+                *extras,
+            ]
+        )
+
+    def test_impacto_em_reais_aparece_quando_ha(self, importado, capsys):
+        """Argumento de terminal é `str`; sem converter o impacto sai zerado.
+
+        A diferença entre `0.0` e `"10"` não é numérica, e a simulação existe
+        exatamente para mostrar o impacto financeiro antes de confirmar.
+        """
+        self._numerico(importado, "valor_desconto", "10")
+
+        saida = capsys.readouterr().out
+        assert "impacto em reais" in saida
+        assert "30,00" in saida, "3 itens × 10,00"
+
+    def test_o_valor_gravado_e_numero_e_nao_texto(self, importado):
+        """`"10" > 5` não compara, e a apuração somaria concatenando."""
+        self._numerico(importado, "valor_desconto", "10", "--confirmar")
+
+        with _sessao(importado) as sessao:
+            documento = sessao.execute(select(DocumentoFiscal)).scalars().first()
+            efetivo = valor_efetivo(
+                documento.itens[0],
+                "valor_desconto",
+                sessao.execute(select(AjusteFiscal)).scalars().all(),
+            )
+
+        assert efetivo == 10.0
+        assert isinstance(efetivo, float)
+
+    def test_campo_inexistente_e_recusado(self, importado, capsys):
+        """Alteração em massa com nome errado não alcançaria nada, em silêncio."""
+        codigo = self._numerico(importado, "cfopp", "2102")
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert "cfopp" in saida
+
+
+class TestImpeditivoPrecisaDeForcar:
+    """§16: a decisão de passar por cima tem de ser tomada de propósito.
+
+    O documento do fixture é de ENTRADA e chega com o 6102 do fornecedor;
+    trocá-lo por 5102 — outro CFOP de saída — é uma mudança real e
+    incompatível, e o validador do Fisco rejeitaria o arquivo.
+    """
+
+    def _cfop_de_saida(self, url, *extras):
+        return main(
+            [
+                "fiscal",
+                "alterar",
+                "--empresa",
+                "1",
+                "--campo",
+                "cfop",
+                "--valor",
+                "5102",
+                "--db",
+                url,
+                *extras,
+            ]
+        )
+
+    def test_a_simulacao_marca_como_impeditivo(self, importado, capsys):
+        self._cfop_de_saida(importado)
+
+        saida = capsys.readouterr().out
+        assert "IMPEDITIVO" in saida
+        assert "de saída" in saida and "entrada" in saida
+
+    def test_confirmar_sozinho_nao_grava_o_impeditivo(self, importado, capsys):
+        """Sem isto, `--confirmar` passaria por cima da proteção calado."""
+        codigo = self._cfop_de_saida(importado, "--confirmar")
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert _ajustes(importado) == [], "gravou apesar do aviso impeditivo"
+        assert "impeditiv" in saida.lower()
+
+    def test_com_forcar_grava(self, importado):
+        """A saída existe; só não pode ser o caminho de menor resistência."""
+        codigo = self._cfop_de_saida(importado, "--confirmar", "--forcar")
+
+        assert codigo == 0
+        assert len(_ajustes(importado)) == 3
+
+    def test_o_motivo_fica_registrado(self, importado):
+        """Passar por cima da proteção sem deixar dito por quê seria pior."""
+        self._cfop_de_saida(
+            importado, "--confirmar", "--forcar", "--motivo", "orientação do cliente"
+        )
+
+        motivos = [a.motivo or "" for a in _ajustes(importado)]
+        assert all("orientação do cliente" in m for m in motivos), motivos
+
+
+class TestFiltro:
+    @pytest.mark.parametrize(
+        ("bruto", "campo", "operador", "valor"),
+        [
+            ("ncm:2203", "ncm", "igual", "2203"),
+            ("ncm:comeca_com:2203", "ncm", "comeca_com", "2203"),
+            ("cfop:vazio", "cfop", "vazio", None),
+            ("cfop:preenchido", "cfop", "preenchido", None),
+        ],
+    )
+    def test_as_tres_formas(self, bruto, campo, operador, valor):
+        filtro = cli_fiscal._filtro(bruto)
+
+        assert (filtro.campo, filtro.operador, filtro.valor) == (campo, operador, valor)
+
+    def test_forma_sem_sentido_e_recusada_com_a_lista(self):
+        with pytest.raises(ValueError, match="comeca_com"):
+            cli_fiscal._filtro("sozinho")
+
+    def test_operador_inexistente_e_recusado(self, importado, capsys):
+        codigo = main(
+            [
+                "fiscal",
+                "alterar",
+                "--empresa",
+                "1",
+                "--campo",
+                "cfop",
+                "--valor",
+                "2102",
+                "--filtro",
+                "ncm:parecido_com:2203",
+                "--db",
+                importado,
+            ]
+        )
+
+        assert codigo == 1
+        assert "ERRO" in capsys.readouterr().out
+
+    def test_valor_com_dois_pontos_nao_e_o_caso_deste_dominio(self):
+        """NCM, CFOP, CST e CNPJ não têm dois-pontos; o `=` teria colidido
+        com descrição de produto."""
+        assert cli_fiscal._filtro("emitente_cnpj:12345678000195").valor == "12345678000195"
+
+
+class TestDesfazer:
+    def test_desfazer_devolve_ao_que_era(self, com_regra, capsys):
+        main(["fiscal", "classificar", "--empresa", "1", "--aplicar", "--db", com_regra])
+        lote = _ajustes(com_regra)[0].lote
+        capsys.readouterr()
+
+        codigo = main(["fiscal", "desfazer", "--lote", lote, "--db", com_regra])
+
+        assert codigo == 0
+        assert _ajustes(com_regra) == []
+        assert "3 ajustes desfeitos" in capsys.readouterr().out
+
+    def test_lote_inexistente_nao_e_erro(self, importado, capsys):
+        """Rodar duas vezes o mesmo desfazer não deve quebrar um script."""
+        codigo = main(["fiscal", "desfazer", "--lote", "naoexiste", "--db", importado])
+
+        assert codigo == 0
+        assert "Nenhum ajuste" in capsys.readouterr().out
+
+    def test_lote_vazio_e_recusado(self, importado, capsys):
+        """Lote vazio apagaria os ajustes avulsos — é o que a §16 impede."""
+        codigo = main(["fiscal", "desfazer", "--lote", "", "--db", importado])
+
+        assert codigo == 1
+        assert "lote" in capsys.readouterr().out
+
+    def test_desfazer_so_o_lote_pedido(self, com_regra, capsys):
+        """Desfazer demais seria pior que não desfazer."""
+        main(["fiscal", "classificar", "--empresa", "1", "--aplicar", "--db", com_regra])
+        lote_regra = _ajustes(com_regra)[0].lote
+        with _sessao(com_regra) as sessao:
+            documento = sessao.execute(select(DocumentoFiscal)).scalars().first()
+            aplicar_ajuste(
+                sessao,
+                documento=documento,
+                item=documento.itens[0],
+                campo="valor_desconto",
+                valor_novo="5.00",
+                origem=ORIGEM_USUARIO,
+                lote="outro-lote",
+            )
+            sessao.commit()
+        capsys.readouterr()
+
+        main(["fiscal", "desfazer", "--lote", lote_regra, "--db", com_regra])
+
+        restantes = _ajustes(com_regra)
+        assert len(restantes) == 1
+        assert restantes[0].lote == "outro-lote"
+
+
+class TestArgumentosDoMeioDoFluxo:
+    @pytest.mark.parametrize(
+        ("argv", "faltando"),
+        [
+            (["fiscal", "classificar"], "--empresa"),
+            (["fiscal", "alterar", "--empresa", "1"], "--campo"),
+            (["fiscal", "alterar", "--empresa", "1", "--campo", "cfop"], "--valor"),
+            (["fiscal", "desfazer"], "--lote"),
+        ],
+    )
+    def test_falta_de_argumento_e_recusada(self, banco, capsys, argv, faltando):
+        codigo = main([*argv, "--db", banco])
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert faltando in saida
