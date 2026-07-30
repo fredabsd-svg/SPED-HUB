@@ -34,7 +34,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.api import ApiKeyService, requer_api_key
+from src.api import ApiKeyService, requer_admin_de_sessao, requer_api_key
 from src.audit import AuditService
 from src.dashboard.services import DashboardService
 from src.db.models import (
@@ -98,6 +98,47 @@ async def health_check():
 # ── Empresas ────────────────────────────────────────────────────────────────
 
 
+def _escopo_da_credencial(stmt, credencial):
+    """Restringe uma query com `Empresa` ao escritório da credencial.
+
+    `credencial` é a API Key (ou o usuário admin de sessão) que passou pela
+    dependência. Chave **sem** escritório é chave de instância e lê tudo — é o
+    comportamento histórico, mantido para não invalidar integração existente.
+    Chave **com** escritório lê só o dele.
+
+    Antes nenhuma rota de `/api/v1` filtrava por escritório e a coluna de dono
+    não existia: uma chave entregue ao integrador do escritório A lia a
+    escrituração do B.
+    """
+    escritorio_id = getattr(credencial, "escritorio_id", None)
+    if escritorio_id is None:
+        return stmt
+    return stmt.where(Empresa.escritorio_id == escritorio_id)
+
+
+async def ecd_autorizada(ecd_id: int, credencial=Depends(requer_api_key)) -> int:
+    """Confirma que a credencial pode ver esta ECD e devolve o `ecd_id`.
+
+    É dependência, não verificação copiada em cada rota: são nove rotas com
+    `/{ecd_id}` e a décima esqueceria. Escopar só a listagem seria cosmético —
+    quem quisesse a escrituração do vizinho pediria o id direto.
+
+    Responde **404**, não 403: confirmar que a ECD existe e é de outro
+    escritório já é informação. `usuario_pode_acessar_ecd` segue a mesma regra.
+    """
+    session = _get_session()
+    try:
+        stmt = _escopo_da_credencial(
+            select(ECD.id).join(Empresa, ECD.empresa_id == Empresa.id).where(ECD.id == ecd_id),
+            credencial,
+        )
+        if session.execute(stmt).scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="ECD não encontrada")
+    finally:
+        session.close()
+    return ecd_id
+
+
 @router.get("/empresas")
 async def listar_empresas(
     api_key=Depends(requer_api_key),
@@ -107,10 +148,19 @@ async def listar_empresas(
     """Lista empresas com paginação."""
     session = _get_session()
     try:
-        total = session.execute(select(func.count(Empresa.id))).scalar() or 0
+        # A contagem também é escopada: sem isso o total anunciaria empresas
+        # que a página nunca mostra, e revelaria quantas existem no vizinho.
+        total = (
+            session.execute(_escopo_da_credencial(select(func.count(Empresa.id)), api_key)).scalar()
+            or 0
+        )
         offset = (pagina - 1) * limite
         empresas = (
-            session.execute(select(Empresa).order_by(Empresa.nome).offset(offset).limit(limite))
+            session.execute(
+                _escopo_da_credencial(select(Empresa).order_by(Empresa.nome), api_key)
+                .offset(offset)
+                .limit(limite)
+            )
             .scalars()
             .all()
         )
@@ -197,13 +247,19 @@ async def listar_ecds(
     """Lista ECDs com paginação e filtro opcional por empresa."""
     session = _get_session()
     try:
-        query = select(func.count(ECD.id))
+        # O `join` com Empresa é o que permite escopar: sem ele a contagem de
+        # ECDs não tem por onde chegar ao escritório.
+        query = _escopo_da_credencial(
+            select(func.count(ECD.id)).join(Empresa, ECD.empresa_id == Empresa.id), api_key
+        )
         if empresa_id:
             query = query.where(ECD.empresa_id == empresa_id)
         total = session.execute(query).scalar() or 0
 
         offset = (pagina - 1) * limite
-        query_ecds = select(ECD, Empresa.nome).join(Empresa).order_by(ECD.importado_em.desc())
+        query_ecds = _escopo_da_credencial(
+            select(ECD, Empresa.nome).join(Empresa).order_by(ECD.importado_em.desc()), api_key
+        )
         if empresa_id:
             query_ecds = query_ecds.where(ECD.empresa_id == empresa_id)
         ecds = session.execute(query_ecds.offset(offset).limit(limite)).all()
@@ -233,7 +289,7 @@ async def listar_ecds(
 
 
 @router.get("/ecds/{ecd_id}")
-async def detalhe_ecd(ecd_id: int, api_key=Depends(requer_api_key)):
+async def detalhe_ecd(ecd_id: int = Depends(ecd_autorizada)):
     """Detalhes de uma ECD com estatísticas."""
     session = _get_session()
     try:
@@ -292,9 +348,8 @@ async def detalhe_ecd(ecd_id: int, api_key=Depends(requer_api_key)):
 
 @router.get("/ecds/{ecd_id}/balanco")
 async def api_balanco(
-    ecd_id: int,
     visao: str = Query("hierarquica", pattern="^(hierarquica|publicacao)$"),
-    api_key=Depends(requer_api_key),
+    ecd_id: int = Depends(ecd_autorizada),
 ):
     """Balanço Patrimonial — visão hierárquica ou de publicação."""
     session = _get_session()
@@ -344,7 +399,7 @@ async def api_balanco(
 
 
 @router.get("/ecds/{ecd_id}/dre")
-async def api_dre(ecd_id: int, api_key=Depends(requer_api_key)):
+async def api_dre(ecd_id: int = Depends(ecd_autorizada)):
     """Demonstração do Resultado do Exercício."""
     session = _get_session()
     try:
@@ -369,7 +424,7 @@ async def api_dre(ecd_id: int, api_key=Depends(requer_api_key)):
 
 
 @router.get("/ecds/{ecd_id}/dfc")
-async def api_dfc(ecd_id: int, api_key=Depends(requer_api_key)):
+async def api_dfc(ecd_id: int = Depends(ecd_autorizada)):
     """Demonstração dos Fluxos de Caixa."""
     session = _get_session()
     try:
@@ -395,10 +450,9 @@ async def api_dfc(ecd_id: int, api_key=Depends(requer_api_key)):
 
 @router.get("/ecds/{ecd_id}/diario")
 async def api_diario(
-    ecd_id: int,
     pagina: int = Query(1, ge=1),
     limite: int = Query(50, ge=1, le=200),
-    api_key=Depends(requer_api_key),
+    ecd_id: int = Depends(ecd_autorizada),
 ):
     """Livro Diário com paginação."""
     session = _get_session()
@@ -445,7 +499,7 @@ async def api_diario(
 
 
 @router.get("/ecds/{ecd_id}/kpis")
-async def api_kpis(ecd_id: int, api_key=Depends(requer_api_key)):
+async def api_kpis(ecd_id: int = Depends(ecd_autorizada)):
     """Indicadores financeiros (KPIs)."""
     session = _get_session()
     try:
@@ -478,7 +532,7 @@ async def api_kpis(ecd_id: int, api_key=Depends(requer_api_key)):
 
 
 @router.get("/ecds/{ecd_id}/notas")
-async def api_notas(ecd_id: int, api_key=Depends(requer_api_key)):
+async def api_notas(ecd_id: int = Depends(ecd_autorizada)):
     """Notas explicativas automáticas."""
     session = _get_session()
     try:
@@ -490,7 +544,7 @@ async def api_notas(ecd_id: int, api_key=Depends(requer_api_key)):
 
 
 @router.get("/ecds/{ecd_id}/validar")
-async def api_validar(ecd_id: int, api_key=Depends(requer_api_key)):
+async def api_validar(ecd_id: int = Depends(ecd_autorizada)):
     """Validações de integridade contábil."""
     session = _get_session()
     try:
@@ -503,7 +557,7 @@ async def api_validar(ecd_id: int, api_key=Depends(requer_api_key)):
 
 
 @router.get("/ecds/{ecd_id}/evolucao-multi")
-async def api_evolucao_multi(ecd_id: int, api_key=Depends(requer_api_key)):
+async def api_evolucao_multi(ecd_id: int = Depends(ecd_autorizada)):
     """Evolução patrimonial multi-período."""
     session = _get_session()
     try:
@@ -716,7 +770,7 @@ async def retry_webhooks(
 
 
 @router.get("/api-keys")
-async def listar_api_keys(api_key=Depends(requer_api_key)):
+async def listar_api_keys(admin=Depends(requer_admin_de_sessao)):
     """Lista todas as API Keys (sem expor a chave completa)."""
     svc = ApiKeyService(_get_db_path())
     keys = svc.listar()
@@ -726,7 +780,7 @@ async def listar_api_keys(api_key=Depends(requer_api_key)):
 @router.post("/api-keys")
 async def criar_api_key(
     payload: dict = Body(...),
-    api_key=Depends(requer_api_key),
+    admin=Depends(requer_admin_de_sessao),
 ):
     """Cria uma nova API Key.
 
@@ -748,7 +802,7 @@ async def criar_api_key(
 
 
 @router.delete("/api-keys/{key_id}")
-async def revogar_api_key(key_id: int, api_key=Depends(requer_api_key)):
+async def revogar_api_key(key_id: int, admin=Depends(requer_admin_de_sessao)):
     """Revoga (desativa) uma API Key."""
     svc = ApiKeyService(_get_db_path())
     if svc.revogar(key_id):
@@ -760,7 +814,7 @@ async def revogar_api_key(key_id: int, api_key=Depends(requer_api_key)):
 
 
 @router.get("/api-keys/{key_id}/rate-limit")
-async def obter_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
+async def obter_rate_limit(key_id: int, admin=Depends(requer_admin_de_sessao)):
     """Obtém a configuração de rate limit de uma API Key."""
     svc = RateLimitService(_get_db_path())
     config = svc.obter(key_id)
@@ -779,7 +833,7 @@ async def obter_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
 async def configurar_rate_limit(
     key_id: int,
     payload: dict = Body(...),
-    api_key=Depends(requer_api_key),
+    admin=Depends(requer_admin_de_sessao),
 ):
     """Configura o rate limit de uma API Key.
 
@@ -807,7 +861,7 @@ async def configurar_rate_limit(
 
 
 @router.delete("/api-keys/{key_id}/rate-limit")
-async def remover_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
+async def remover_rate_limit(key_id: int, admin=Depends(requer_admin_de_sessao)):
     """Remove a configuração de rate limit (volta ao padrão)."""
     svc = RateLimitService(_get_db_path())
     if svc.remover(key_id):
@@ -816,7 +870,7 @@ async def remover_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
 
 
 @router.get("/api-keys/{key_id}/rate-limit/status")
-async def status_rate_limit(key_id: int, api_key=Depends(requer_api_key)):
+async def status_rate_limit(key_id: int, admin=Depends(requer_admin_de_sessao)):
     """Retorna o status atual do rate limit (contador em tempo real)."""
     limiter = get_limiter(_get_db_path())
     info = limiter.get_info(key_id)

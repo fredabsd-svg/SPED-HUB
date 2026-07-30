@@ -6,6 +6,26 @@ Atualizado ao fim de cada fase, não só em release (§1.7).
 As entradas descrevem o efeito para quem usa o sistema, não o detalhe
 interno da implementação.
 
+## [Não publicado]
+
+### Segurança
+- **Uma chave de API entregue a um integrador dava a ele controle da
+  instância.** Ela podia criar novas chaves para si — e revogar a original não
+  tirava o acesso —, listar e revogar as chaves do escritório, derrubando as
+  integrações legítimas, e elevar a própria cota de requisições, anulando o
+  limite que existe para proteger o sistema. Administrar chaves e cotas passou a
+  exigir administrador logado no painel.
+- **Uma chave de API lia a escrituração de todos os escritórios.** Agora a chave
+  tem escritório dono, e lê apenas o dele — nas listagens e também ao pedir uma
+  escrituração pelo identificador direto, que era o caminho que tornava o escopo
+  de listagem inútil. Chaves já existentes seguem lendo tudo, para não
+  interromper integrações em funcionamento; crie chaves novas com escritório.
+
+### Alterado
+- **Mudança que quebra integração existente:** um sistema de terceiro que usava
+  a chave de API para criar, listar ou revogar chaves, ou para configurar cota,
+  passa a receber 401. Leitura de dados não muda.
+
 ## [0.18.0] — 2026-07-30
 
 ### Adicionado
