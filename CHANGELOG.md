@@ -36,6 +36,18 @@ interno da implementação.
   havia como recuperar, nem manualmente.
 
 ### Corrigido
+- **Uma importação interrompida por reinício do sistema deixava de existir em
+  silêncio.** O processamento roda dentro do servidor web; reinício,
+  atualização ou queda o matava no meio, e o que sobrava na tela era
+  "Aguardando processamento..." a 0% — uma mensagem dizendo que a escrituração
+  estava na fila, quando ninguém mais ia processá-la. O contador esperava
+  indefinidamente por uma importação que não existia mais. Agora ela é
+  encerrada na subida do sistema, com o aviso de que nada foi gravado e que o
+  arquivo precisa ser reenviado.
+- O arquivo enviado numa importação interrompida ficava para sempre no
+  servidor, ocupando espaço, sem nada que soubesse onde encontrá-lo. Agora sai
+  junto.
+- A limpeza automática de importações antigas nunca removia as canceladas.
 - **A taxa de sucesso dos webhooks estava errada.** Ela contava tentativas em
   vez de entregas, então um evento que chegou na terceira tentativa aparecia
   como uma entrega bem-sucedida em três. Uma integração instável mas

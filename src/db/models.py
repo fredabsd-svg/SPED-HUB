@@ -658,9 +658,13 @@ class AsyncJob(Base):
     tipo: Mapped[str] = mapped_column(
         String(50), nullable=False, index=True
     )  # ecd_import, export_lote, etc.
-    status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="pending", index=True
-    )  # pending, processing, completed, failed
+    # Vocabulário completo em `src.async_jobs.JobStatus`; as listas de estado
+    # terminal e em aberto ficam lá (`STATUS_TERMINAIS`, `STATUS_EM_ABERTO`).
+    # Em aberto:  pending, processing
+    # Terminais:  completed, failed, cancelled, interrupted
+    # `interrupted` é o job cujo processo morreu no meio — sem ele a linha
+    # ficava em `pending` dizendo "Aguardando processamento..." para sempre.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
     progresso: Mapped[float] = mapped_column(default=0.0)  # 0-100
     parametros: Mapped[str | None] = mapped_column(Text)  # JSON
     resultado: Mapped[str | None] = mapped_column(Text)  # JSON

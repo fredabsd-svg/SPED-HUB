@@ -14,9 +14,12 @@ cancelamento dos jobs em execução.
 
 | Símbolo | Para quê |
 |---|---|
-| `JobStatus` | Enum: `pending`, `processing`, `completed`, `failed`, `cancelled`. |
+| `JobStatus` | Enum: `pending`, `processing`, `completed`, `failed`, `cancelled`, `interrupted`. |
+| `STATUS_TERMINAIS` / `STATUS_EM_ABERTO` | Classificação dos estados. Toda verificação de estado usa estas listas. |
 | `JobInfo` | Dataclass de resumo para a API (id, status, progresso, resultado, erro, datas). |
 | `AsyncJobService(db_path)` | `criar`, `atualizar_progresso`, `concluir`, `falhar`, `obter`, `listar`, `limpar_antigos`. |
+| `marcar_em_execucao(job_id, arquivo_temporario=None)` | Persiste `processing` e o caminho do upload. |
+| `recuperar_interrompidos()` | Encerra os jobs que o processo anterior deixou em aberto; roda na subida. |
 | `registrar_token` / `esquecer_token` / `cancelar` / `marcar_cancelado` | Cancelamento cooperativo: liga o token do job em execução ao pedido que chega por outra requisição. |
 | `init_async_job_service(db_path)` / `get_async_job_service(db_path=None)` | Instância global; sem `db_path`, usa `database_reference()`. |
 
@@ -39,6 +42,33 @@ tracking paralelos e independentes.
   memória (protegido por `threading.Lock`) e `obter`/`listar` mesclam o
   overlay ao registro do banco. Isso evita um commit por atualização — mas o
   overlay só existe no processo que está importando.
+- **Por isso o job grava `processing` no início, via `marcar_em_execucao`.**
+  Com o progresso só em memória, a linha do banco dizia `pending` / 0% /
+  "Aguardando processamento..." durante a importação inteira. Depois de um
+  reinício era isso que sobrava: um job que parecia nem ter começado, com uma
+  mensagem afirmando que estava na fila.
+- **A thread é `daemon`, e thread `daemon` morre sem rodar `finally`.** No
+  encerramento do interpretador — reinício, `docker compose up -d` novo,
+  queda — o `finally` que apaga o upload e fecha o job não executa. Antes isso
+  deixava três resíduos: job em aberto para sempre, arquivo órfão no volume de
+  uploads, e nada que soubesse onde procurá-lo. O caminho temporário agora é
+  gravado nos `parametros` justamente para o arquivo poder ser encontrado
+  depois.
+- **`recuperar_interrompidos` roda no `lifespan` da aplicação.** Job em aberto
+  no banco enquanto o processo sobe é, por construção, job abandonado: o
+  executor é uma thread deste processo, não uma fila que alguém varre. Não há
+  threshold de tempo nem falso positivo. Falha aqui é logada e engolida —
+  escritório sem sistema é pior que um job em aberto a mais.
+- **A ressalva é réplica.** Com mais de uma instância web, a subida de uma
+  marcaria como interrompido o job em andamento da outra. O deploy documentado
+  é de instância única (o limite por IP e o próprio overlay de progresso já
+  pressupõem isso); mudar exigiria um worker com posse explícita do job, e está
+  registrado em `docs/status.md`.
+- **Estado novo entra nas duas listas, não em `if`s espalhados.** As
+  verificações eram `(COMPLETED, FAILED)` escritas à mão em quatro lugares —
+  `cancelled` ficava de fora de todas, e a limpeza automática nunca removia
+  job cancelado. `STATUS_TERMINAIS` e `STATUS_EM_ABERTO` cobrem o enum
+  inteiro, e há teste que quebra se um estado novo ficar sem classificação.
 - **Cancelamento é cooperativo e cruza requisições.** O token vive no
   processo que importa; o pedido chega por outra requisição HTTP. `cancelar`
   só sinaliza o token e retorna `False` se o job não estiver rodando neste
@@ -62,6 +92,10 @@ pytest tests/test_ecd_grande.py -k Cancelamento -q   # token, cancelar, marcar_c
 ```
 
 ## O que não faz
+
+- Não retoma importação interrompida: o job é encerrado como `interrupted` e
+  quem enviou precisa reenviar o arquivo. Retomar exigiria commits parciais,
+  que a §6.1 proíbe.
 
 - Não executa nada: não tem fila, não tem worker, não agenda. Só registra
   estado.
