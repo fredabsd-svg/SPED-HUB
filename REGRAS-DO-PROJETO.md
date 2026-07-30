@@ -212,6 +212,30 @@ fazer. Essa verificação é item obrigatório do checklist de revisão.
 
 ---
 
+### 1.13 Roadmap com marcador de ausência **[CI]**
+
+Todo item de `docs/roadmap.md` declara um **marcador de ausência**: um
+`módulo:símbolo` ou caminho de arquivo que só passa a existir quando o item for
+feito. O CI falha se algum marcador existir.
+
+Item bloqueado por credencial, contrato ou dado de terceiro declara `externo`
+seguido da razão. Não é código que falta, então não há marcador possível — mas a
+razão precisa estar escrita, porque é ela que permite reavaliar o bloqueio
+depois.
+
+A §1.1 manda a funcionalidade futura para o roadmap, e o roadmap era o único
+documento sem verificação nenhuma. Ele apodrece na direção mais difícil de
+notar: o item é feito e ninguém volta para tirá-lo de lá. Aconteceu **duas
+vezes** — a exportação do balancete em PDF e os testes de navegador no CI
+seguiram listados como ausentes depois de existirem, com teste passando e job
+no pipeline. Um roadmap que lista o que já está pronto é a §1.1 ao contrário, e
+igualmente enganoso: quem lê acredita que falta trabalho que não falta.
+
+A §1.1 continua **[REVISÃO]**. "A documentação descreve o que o código faz" não
+é mecanizável por inteiro; só esta direção é.
+
+---
+
 ## REGRA 2 — CONFIGURAÇÃO
 
 ### 2.1 Ponto único **[CI]**

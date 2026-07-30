@@ -29,6 +29,7 @@ MODULES = REPO / "docs" / "modules"
 ARCHITECTURE = REPO / "docs" / "architecture"
 ENV_EXAMPLE = REPO / ".env.example"
 PYPROJECT = REPO / "pyproject.toml"
+ROADMAP = REPO / "docs" / "roadmap.md"
 
 # Onde cada regra [CI] é efetivamente cobrada.  Chave: número da seção.
 # Valor: arquivo::teste que quebra quando a regra é violada.
@@ -40,6 +41,7 @@ REGISTRO_CI = {
     "1.8": "tests/test_regras_projeto.py::TestDocumentacao::test_fase_concluida_aponta_teste_existente",
     "1.9": "tests/test_regras_projeto.py::TestDocumentacao::test_arquivo_gerado_declara_fonte_existente",
     "1.12": "tests/test_regras_projeto.py::TestDocumentacao::test_cabecalho_de_arquitetura",
+    "1.13": "tests/test_regras_projeto.py::TestRoadmap",
     "2.1": "tests/test_regras_projeto.py::TestConfiguracao::test_ninguem_le_ambiente_fora_de_settings",
     # A §2.2 tem duas metades: a variável chega ao `Settings` e o campo é
     # lido de fato.  A classe inteira é o alvo porque só uma delas não basta.
@@ -322,7 +324,11 @@ class TestDocumentacao:
                 continue
             citados = re.findall(r"`([^`]+)`", evidencia)
             assert citados, f"fase {fase} marcada concluída sem evidência (§1.8)"
-            ausentes = [c for c in citados if not (REPO / c).exists()]
+            # `arquivo::Classe::teste` é evidência mais precisa que só o
+            # arquivo, e é a forma que o `REGISTRO_CI` já usa.  Aqui o `::`
+            # não era tratado, então apontar o teste exato derrubava a
+            # verificação e empurrava todos para o caminho vago.
+            ausentes = [c for c in citados if not (REPO / c.split("::")[0]).exists()]
             if ausentes:
                 problemas[fase] = ausentes
         assert (
@@ -548,6 +554,166 @@ class TestConfiguracao:
             assert (
                 "nenhum componente consome" in texto
             ), "variável marcada RESERVADO sem a frase exigida pela §2.2"
+
+
+def _itens_do_roadmap() -> list[tuple[str, str]]:
+    """(item, marcador) de cada linha de tabela do `docs/roadmap.md`."""
+    itens = []
+    for linha in ROADMAP.read_text("utf-8").splitlines():
+        celulas = [c.strip() for c in linha.strip().strip("|").split("|")]
+        if len(celulas) != 3 or celulas[0] in {"Item", ""} or set(celulas[0]) <= {"-", ":"}:
+            continue
+        itens.append((celulas[0], celulas[2]))
+    return itens
+
+
+def marcador_existe(alvo: str) -> bool:
+    """O símbolo ou arquivo do marcador de ausência já está no repositório?
+
+    `módulo:símbolo` é resolvido por AST, sem importar o módulo: importar
+    executaria código, e um erro de import viraria "não existe" — a resposta
+    errada, e na direção que passa despercebida.
+    """
+    if ":" not in alvo:
+        return (REPO / alvo).exists()
+    modulo, simbolo = alvo.split(":", 1)
+    arquivo = REPO / (modulo.replace(".", "/") + ".py")
+    if not arquivo.exists():
+        arquivo = REPO / modulo.replace(".", "/") / "__init__.py"
+    if not arquivo.exists():
+        return False
+    arvore = ast.parse(arquivo.read_text("utf-8"), filename=str(arquivo))
+    nomes = {
+        no.name
+        for no in ast.walk(arvore)
+        if isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    nomes |= {
+        destino.id
+        for no in ast.walk(arvore)
+        if isinstance(no, ast.Assign)
+        for destino in no.targets
+        if isinstance(destino, ast.Name)
+    }
+    return simbolo in nomes
+
+
+class TestResolucaoDeMarcador:
+    """A resolução em si, exercitada pelos dois lados.
+
+    O `test_nenhum_marcador_de_ausencia_existe` só a exercita pelo lado
+    negativo: com o roadmap correto, nenhum marcador existe, e uma resolução
+    quebrada devolveria "não existe" para tudo — passando igual. Estes casos
+    usam símbolos conhecidos do próprio repositório.
+    """
+
+    @pytest.mark.parametrize(
+        "alvo",
+        [
+            "src.webhooks:retry_failed",  # função
+            "src.webhooks:WebhookService",  # classe
+            "src.webhooks:LOTE_DE_REENVIO",  # constante de módulo
+            "src.webhooks:dispatch",  # método `async` dentro de classe
+            "src.async_jobs:obter",  # método comum dentro de classe
+            "src/reports/templates/balancete.html",  # caminho de arquivo
+            "docs/roadmap.md",
+        ],
+    )
+    def test_reconhece_o_que_existe(self, alvo):
+        assert marcador_existe(alvo), f"{alvo} existe e a resolução não achou"
+
+    @pytest.mark.parametrize(
+        "alvo",
+        [
+            "src.webhooks:funcao_que_nao_existe",
+            "src.modulo.inexistente:qualquer",
+            "src/reports/templates/inexistente.html",
+            "caminho/que/nao/existe",
+        ],
+    )
+    def test_nao_inventa_o_que_nao_existe(self, alvo):
+        assert not marcador_existe(alvo)
+
+    def test_modulo_com_erro_de_sintaxe_nao_vira_ausencia_silenciosa(self, tmp_path):
+        """Erro ao ler o módulo tem de estourar, não devolver "não existe".
+
+        Devolver `False` aqui esconderia um item pronto: a direção do defeito
+        que esta regra existe para pegar.
+        """
+        quebrado = REPO / "src" / "_marcador_quebrado_temp.py"
+        quebrado.write_text("def isto( não é python\n", encoding="utf-8")
+        try:
+            with pytest.raises(SyntaxError):
+                marcador_existe("src._marcador_quebrado_temp:qualquer")
+        finally:
+            quebrado.unlink()
+
+
+class TestRoadmap:
+    """§1.1 — o roadmap lista o que **não** existe.
+
+    Documento de "o que falta" apodrece na direção mais difícil de notar: o
+    item é feito e ninguém volta para tirá-lo de lá. Aconteceu duas vezes neste
+    projeto — a exportação do balancete em PDF e os testes de navegador no CI
+    seguiram listados como ausentes depois de existirem, com teste passando e
+    job no pipeline. Nenhuma verificação olhava para lá.
+
+    Cada item declara um marcador de ausência (`módulo:símbolo` ou caminho) que
+    só passa a existir quando o item for feito. Item bloqueado por credencial,
+    contrato ou dado de terceiro declara `externo` e a razão: não é código que
+    falta, então não há marcador possível.
+    """
+
+    def test_roadmap_tem_itens(self):
+        """Guarda contra a tabela mudar de forma e os testes virarem teste de nada."""
+        assert _itens_do_roadmap(), "nenhum item lido de docs/roadmap.md — formato mudou?"
+
+    def test_todo_item_declara_marcador(self):
+        sem_marcador = [item for item, marcador in _itens_do_roadmap() if not marcador]
+        assert not sem_marcador, (
+            f"item do roadmap sem marcador de ausência: {sem_marcador} — sem ele "
+            "ninguém percebe quando o item é feito e a lista fica mentindo"
+        )
+
+    def test_item_externo_declara_a_razao(self):
+        """`externo` sem razão é o mesmo que não declarar nada."""
+        sem_razao = [
+            item
+            for item, marcador in _itens_do_roadmap()
+            if marcador.startswith("`externo`") and len(marcador) < len("`externo` — ") + 15
+        ]
+        assert not sem_razao, (
+            f"item marcado `externo` sem dizer de que depende: {sem_razao} — "
+            "a razão é o que permite reavaliar o bloqueio depois"
+        )
+
+    def test_nenhum_marcador_de_ausencia_existe(self):
+        """O teste que faltava: item listado como ausente que já está pronto.
+
+        A resolução vive em `marcador_existe`, exercitada pelos dois lados em
+        `TestResolucaoDeMarcador` — aqui ela só é aplicada.
+        """
+        feitos = []
+        for item, marcador in _itens_do_roadmap():
+            alvo = marcador.strip("`").split("`")[0].strip()
+            if alvo.startswith("externo"):
+                continue
+            if marcador_existe(alvo):
+                feitos.append(f"{item} → {alvo} já existe")
+        assert not feitos, (
+            f"o roadmap lista como ausente o que já está pronto: {feitos} — "
+            "tire do roadmap e registre em docs/status.md (§1.1)"
+        )
+
+    def test_roadmap_nao_repete_item_do_status(self):
+        """O mesmo assunto nos dois documentos divergiria com o tempo."""
+        concluidas = {
+            celulas[1].lower() for celulas in _linhas_de_fase() if celulas[2] == "concluída"
+        }
+        repetidos = [item for item, _ in _itens_do_roadmap() if item.lower() in concluidas]
+        assert (
+            not repetidos
+        ), f"item do roadmap com o mesmo título de fase concluída em status.md: {repetidos}"
 
 
 class TestTestes:

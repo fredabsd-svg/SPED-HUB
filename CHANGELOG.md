@@ -48,6 +48,11 @@ interno da implementação.
   servidor, ocupando espaço, sem nada que soubesse onde encontrá-lo. Agora sai
   junto.
 - A limpeza automática de importações antigas nunca removia as canceladas.
+- O `docs/roadmap.md` listava como ausentes duas coisas que já existiam há
+  fases: a exportação do balancete em PDF e os testes de navegador no CI. Quem
+  lia acreditava que faltava trabalho que não faltava. Cada item do roadmap
+  passou a declarar um marcador que o pipeline verifica, então a lista não fica
+  mais desatualizada em silêncio.
 - **A taxa de sucesso dos webhooks estava errada.** Ela contava tentativas em
   vez de entregas, então um evento que chegou na terceira tentativa aparecia
   como uma entrega bem-sucedida em três. Uma integração instável mas

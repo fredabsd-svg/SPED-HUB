@@ -33,20 +33,22 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 27 | Configuração documentada com efeito real (§2.2) | concluída | `tests/test_config_com_efeito.py`, `tests/test_regras_projeto.py` | `SPED_HUB_SECRET_KEY` segue reservada, por decisão de produto |
 | 28 | Contabilidade de entregas de webhook | concluída | `tests/test_webhooks_entregas_orfas.py`, `tests/test_migrations.py` | o reenvio segue manual e sequencial |
 | 29 | Importação interrompida por reinício é encerrada | concluída | `tests/test_jobs_interrompidos.py` | retomar de onde parou segue fora (§6.1) |
+| 30 | Roadmap com marcador de ausência verificável (§1.13) | concluída | `tests/test_regras_projeto.py::TestRoadmap`, `tests/test_regras_projeto.py::TestResolucaoDeMarcador` | — |
 
-## Em aberto — decisões de produto
+## Limites do comportamento atual
 
-Itens conhecidos que não são defeito de implementação, mas escolha pendente.
-Ver `docs/roadmap.md` para o que ainda não existe.
+O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é
+defeito: é escolha, com a razão registrada. O que **não existe** e mudaria
+cada um destes limites está em [`roadmap.md`](roadmap.md) — aqui não se
+descreve funcionalidade futura (§1.1).
 
-| Item | Situação |
-|---|---|
-| Retomada de importação a partir de offset | Exigiria commits parciais, o que viola a §6.1. Precisaria vir com estado explícito de "importação incompleta" que os relatórios respeitem. |
-| Executor de importação assíncrona vive no processo web | A thread `daemon` é morta no encerramento do interpretador. A recuperação na subida resolve o resíduo, mas pressupõe **instância única** — com mais de uma réplica web, a subida de uma encerraria o job em andamento da outra. Mover o executor para um worker com posse explícita do job é decisão de arquitetura. |
-| Retomar importação interrompida de onde parou | O job interrompido pede reenvio do arquivo. Retomar exigiria commits parciais, que a §6.1 proíbe, e um estado de "importação incompleta" que os relatórios respeitassem. |
-| Reenvio de webhook é manual e sequencial | `POST /api/v1/webhooks/retry` é acionado por gente e aguardado dentro da requisição, então o lote é limitado por tempo de requisição (`LOTE_DE_REENVIO`) e o retorno informa quantas ficaram. Evento perdido por queda do processo é recuperável, mas espera alguém clicar. Automatizar exige decidir onde o laço mora — worker, cron ou fila. |
-| Histórico de `WebhookDelivery` cresce sem limite | Não há expurgo. Uma linha por tentativa, e nada as remove. Definir retenção é decisão de produto, não defeito. |
-| `SPED_HUB_SECRET_KEY` sem consumidor | A única reservada que sobrou (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. Ligá-la exigiria decidir *qual* segredo ela é — e hoje nenhum componente precisa de um. |
+| Limite | Por que é assim | O que mudaria |
+|---|---|---|
+| Importação interrompida pede reenvio do arquivo | Retomar de onde parou exigiria commits parciais, que a §6.1 proíbe. O job é encerrado com aviso de que nada foi gravado | Retomada de importação interrompida |
+| Encerrar job abandonado na subida pressupõe instância única | O executor é uma thread `daemon` dentro do processo web. Com mais de uma réplica, a subida de uma encerraria o job em andamento da outra. O deploy documentado é de instância única, e o limite por IP já pressupõe isso | Executor de importação fora do processo web |
+| Reenvio de webhook é acionado por gente | `POST /api/v1/webhooks/retry` é aguardado dentro da requisição, então o lote é limitado por tempo de requisição (`LOTE_DE_REENVIO`) e o retorno informa quantas ficaram. Evento perdido por queda do processo é recuperável, mas espera o clique | Reenvio automático em segundo plano |
+| Histórico de `WebhookDelivery` cresce sem limite | Uma linha por tentativa, e nada as remove. Definir retenção é escolher quanto histórico o escritório precisa guardar | Expurgo do histórico de entregas |
+| `SPED_HUB_SECRET_KEY` não tem consumidor | A única variável reservada que sobrou (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. Ligá-la exigiria decidir *qual* segredo ela é, e hoje nenhum componente precisa de um | — |
 
 ## Passivo de documentação de módulo (§1.4)
 
