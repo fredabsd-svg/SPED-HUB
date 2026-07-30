@@ -502,6 +502,13 @@ class ApiKey(Base):
     nome: Mapped[str] = mapped_column(String(100), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     prefixo: Mapped[str] = mapped_column(String(11), nullable=False)  # "spd_xxxx" para exibição
+    # Escritório dono da chave.  `None` = chave de instância, que lê tudo — é o
+    # comportamento de toda chave criada antes desta coluna existir, preservado
+    # para não derrubar integração em produção.  Chave COM dono só lê o que é
+    # daquele escritório.
+    escritorio_id: Mapped[int | None] = mapped_column(
+        ForeignKey("escritorios.id"), nullable=True, index=True
+    )
     ativo: Mapped[bool] = mapped_column(default=True)
     criado_em: Mapped[datetime.datetime] = mapped_column(
         DateTime, default=lambda: datetime.datetime.now(datetime.UTC)

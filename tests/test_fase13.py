@@ -847,6 +847,26 @@ class TestE2EAuditDashboard:
         del os.environ["SPED_HUB_DB"]
 
 
+def _admin_logado(app, db_path: str, email: str = "rlconfig@fase13.test") -> TestClient:
+    """Cliente com sessão de administrador.
+
+    Configurar cota deixou de aceitar API Key: uma chave elevando o próprio
+    limite anula a proteção que o limite existe para dar.  Estes testes
+    passavam justamente porque a chave podia — a vulnerabilidade estava
+    codificada como comportamento esperado.
+    """
+    from src.db.models import Usuario, criar_engine, get_session
+
+    engine = criar_engine(db_path)
+    with get_session(engine) as sessao:
+        senha_hash, salt = Usuario.hash_senha("senha-admin")
+        sessao.add(Usuario(email=email, nome="Admin", senha_hash=senha_hash, salt=salt, admin=True))
+        sessao.commit()
+    cliente = TestClient(app)
+    cliente.post("/api/login", data={"email": email, "senha": "senha-admin"})
+    return cliente
+
+
 class TestE2ERateLimitConfig:
     """Testes E2E de configuração de rate limit via API."""
 
@@ -866,20 +886,18 @@ class TestE2ERateLimitConfig:
         # Cria API Key
         svc = ApiKeyService(db_path)
         result = svc.criar(nome="RL Config Key")
-        chave = result["chave"]
         key_id = result["id"]
 
-        client = TestClient(app)
+        client = _admin_logado(app, db_path)
 
         # Obtém config atual (default)
-        resp = client.get(f"/api/v1/api-keys/{key_id}/rate-limit", headers={"X-API-Key": chave})
+        resp = client.get(f"/api/v1/api-keys/{key_id}/rate-limit")
         assert resp.status_code == 200
         assert resp.json()["default"] is True
 
         # Configura rate limit
         resp = client.put(
             f"/api/v1/api-keys/{key_id}/rate-limit",
-            headers={"X-API-Key": chave},
             json={"limite": 50, "janela": 120},
         )
         assert resp.status_code == 200
@@ -887,15 +905,13 @@ class TestE2ERateLimitConfig:
         assert resp.json()["janela"] == 120
 
         # Obtém config atualizada
-        resp = client.get(f"/api/v1/api-keys/{key_id}/rate-limit", headers={"X-API-Key": chave})
+        resp = client.get(f"/api/v1/api-keys/{key_id}/rate-limit")
         assert resp.status_code == 200
         assert resp.json()["limite"] == 50
         assert resp.json()["default"] is False
 
         # Status do rate limit
-        resp = client.get(
-            f"/api/v1/api-keys/{key_id}/rate-limit/status", headers={"X-API-Key": chave}
-        )
+        resp = client.get(f"/api/v1/api-keys/{key_id}/rate-limit/status")
         assert resp.status_code == 200
         assert resp.json()["limite"] == 50
         assert resp.json()["requisicoes_restantes"] <= 50
@@ -917,21 +933,20 @@ class TestE2ERateLimitConfig:
 
         svc = ApiKeyService(db_path)
         result = svc.criar(nome="RL Remove Key")
-        chave = result["chave"]
         key_id = result["id"]
 
         # Configura
         rl_svc = RateLimitService(db_path)
         rl_svc.configurar(key_id, limite=30, janela=60)
 
-        client = TestClient(app)
+        client = _admin_logado(app, db_path)
 
         # Remove
-        resp = client.delete(f"/api/v1/api-keys/{key_id}/rate-limit", headers={"X-API-Key": chave})
+        resp = client.delete(f"/api/v1/api-keys/{key_id}/rate-limit")
         assert resp.status_code == 200
 
         # Volta ao default
-        resp = client.get(f"/api/v1/api-keys/{key_id}/rate-limit", headers={"X-API-Key": chave})
+        resp = client.get(f"/api/v1/api-keys/{key_id}/rate-limit")
         assert resp.json()["default"] is True
 
         del os.environ["SPED_HUB_DB"]

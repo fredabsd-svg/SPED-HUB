@@ -32,6 +32,23 @@ Consumido por `dashboard.app`, que monta os dois routers na aplicação.
 
 ## Decisões não óbvias e armadilhas
 
+- **API Key lê; sessão de administrador administra.** As rotas de `/api-keys*`
+  e as de cota exigem admin logado no dashboard e **recusam** API Key. Antes
+  aceitavam, e a cadeia alcançável com a chave que se entrega a um integrador
+  era: criar chaves novas para si (nem revogar a original tirava o acesso),
+  listar e revogar as chaves do escritório (derrubando integrações legítimas),
+  e elevar a própria cota de rate limit (anulando o limite que a protege).
+  Estava registrado como simples lacuna — "não tem escopo por chave" — o que
+  subdimensionava: era administração total da instância.
+- **`ecd_autorizada` é dependência, não verificação por rota.** São nove rotas
+  com `/{ecd_id}` e a décima esqueceria. Escopar só a listagem seria cosmético:
+  quem quisesse a escrituração do vizinho pediria o id direto. Há teste por AST
+  que falha se uma rota nova não passar pela dependência.
+- **Escopo responde 404, nunca 403.** Confirmar que a ECD existe e é de outro
+  escritório já é informação; a resposta é idêntica à de ECD inexistente.
+- **A contagem também é escopada.** Total sem escopo anunciaria empresas que a
+  página nunca mostra, e revelaria quantas o vizinho tem.
+
 - **A chave nunca é armazenada em claro.** Só o SHA-256 vai ao banco; a
   comparação usa `hmac.compare_digest`. A chave completa aparece uma única
   vez, na resposta de `ApiKeyService.criar` — `listar` devolve só o prefixo.
@@ -67,7 +84,8 @@ pytest tests/test_review_regressions.py -k ApiKey -q   # expiração naive
 
 - Não escreve dados contábeis: as rotas de ECD/relatórios são somente
   leitura; importação é do dashboard/CLI.
-- Não tem escopo por chave: qualquer API Key válida acessa tudo, inclusive
-  criar e revogar outras chaves.
+- Não escopa chave **sem dono** (`escritorio_id` nulo): ela lê tudo. É o
+  comportamento de toda chave criada antes da coluna existir, preservado para
+  não invalidar integração em produção. Chave nova deve ser criada com dono.
 - Não pagina o Livro Diário no banco: a paginação é em memória.
 - Não versiona schema GraphQL nem oferece mutations — só queries.

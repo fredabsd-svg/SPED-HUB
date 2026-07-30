@@ -142,6 +142,39 @@ async def requer_api_key(request: Request):
     )
 
 
+async def requer_admin_de_sessao(request: Request):
+    """Exige administrador com sessão do dashboard.  **Recusa API Key.**
+
+    Administrar a instância não é trabalho de integração. Uma API Key existe
+    para um sistema de terceiro LER dados; com ela também administrando, quem
+    recebe a chave podia:
+
+    * criar novas chaves para si mesmo — nem revogar a original tirava o acesso;
+    * listar e **revogar as chaves do próprio escritório**, derrubando as
+      integrações legítimas;
+    * elevar a própria cota de rate limit, anulando o limite que o protege.
+
+    A cadeia inteira era alcançável com a chave que se entrega a um integrador,
+    e estava registrada como simples lacuna: "não tem escopo por chave".
+
+    Sessão de admin é exigida porque revogar chave e mexer em cota são atos que
+    precisam de gente identificada por trás — e a auditoria registra o usuário.
+    """
+    from src.auth import get_usuario_atual
+
+    usuario = await get_usuario_atual(request)
+    if usuario is None:
+        # Mensagem igual para "sem credencial" e "credencial é chave": quem
+        # sonda não aprende se a rota existe para outro tipo de credencial.
+        raise HTTPException(
+            status_code=401,
+            detail="Esta rota exige sessão de administrador do dashboard",
+        )
+    if not usuario.admin:
+        raise HTTPException(status_code=403, detail="Acesso administrativo necessário")
+    return usuario
+
+
 # ── API Key Service (Fase 12) ───────────────────────────────────────────────
 
 
@@ -156,12 +189,21 @@ class ApiKeyService:
         init_db(engine)
         return get_session(engine)
 
-    def criar(self, nome: str, dias_expiracao: int | None = None) -> dict:
+    def criar(
+        self,
+        nome: str,
+        dias_expiracao: int | None = None,
+        escritorio_id: int | None = None,
+    ) -> dict:
         """Cria uma nova API Key.
+
+        `escritorio_id=None` cria chave de **instância**, que lê tudo — é o
+        comportamento histórico, mantido para não invalidar chave existente.
+        Com escritório, a chave só lê o que é daquele escritório.
 
         Returns:
             dict com id, nome, prefixo, chave_completa (exibida uma única vez),
-            criado_em, expira_em.
+            criado_em, expira_em, escritorio_id.
         """
         chave_completa, key_hash = gerar_api_key()
         prefixo = chave_completa[:11]  # "spd_" + 7 chars
@@ -178,6 +220,7 @@ class ApiKeyService:
                 nome=nome,
                 key_hash=key_hash,
                 prefixo=prefixo,
+                escritorio_id=escritorio_id,
                 ativo=True,
                 expira_em=expira_em,
             )
@@ -201,6 +244,7 @@ class ApiKeyService:
                 "criado_em": api_key.criado_em.isoformat() if api_key.criado_em else None,
                 "expira_em": api_key.expira_em.isoformat() if api_key.expira_em else None,
                 "ativo": api_key.ativo,
+                "escritorio_id": api_key.escritorio_id,
             }
         finally:
             session.close()
