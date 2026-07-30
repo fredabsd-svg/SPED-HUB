@@ -6,7 +6,7 @@ Atualizado ao fim de cada fase, não só em release (§1.7).
 As entradas descrevem o efeito para quem usa o sistema, não o detalhe
 interno da implementação.
 
-## [Não publicado]
+## [0.18.0] — 2026-07-30
 
 ### Adicionado
 - **Os webhooks passaram a disparar.** O cadastro de endpoints, a proteção
@@ -92,16 +92,14 @@ interno da implementação.
   componente a lia: quem seguia o guia acreditava ter restringido o acesso e
   não havia restrição nenhuma. `localhost` e `127.0.0.1` seguem aceitos, para
   não quebrar a verificação de saúde do container.
+- O evento de webhook de relatório informa formato, nome do arquivo, empresa e
+  período — nunca os valores da escrituração, que não devem sair para endpoint
+  de terceiro.
 
 ### Removido
 - `SPED_HUB_DEBUG`, que era lida e não mudava comportamento de nada. Estava
   documentada como reservada; uma opção que não faz nada não deveria existir.
   Com isso, a única variável reservada que resta é `SPED_HUB_SECRET_KEY`.
-
-### Segurança
-- O evento de relatório informa formato, nome do arquivo, empresa e período —
-  nunca os valores da escrituração, que não devem sair para endpoint de
-  terceiro.
 
 ## [0.17.0] — 2026-07-29
 
@@ -130,24 +128,6 @@ interno da implementação.
   travamento do dashboard: o arquivo entrava no banco com hierarquia
   inválida e ninguém era avisado. Ciclo é reportado como erro, com o
   caminho completo (`1 → 2 → 1`).
-
-### Corrigido
-- O repositório carregava 29 MB de fontes órfãs (o zip inteiro do download
-  da Inter e as variáveis que só o PDF usava); saíram na troca de
-  identidade.
-- **O dashboard travava o servidor inteiro** quando a ECD importada tinha
-  hierarquia de plano de contas em ciclo (uma conta que é a própria
-  sintética, ou A→B→A). Como o servidor atende num único fluxo, ele parava
-  de responder para todos os usuários do escritório, e só voltava com
-  reinício manual. A hierarquia vem do arquivo do cliente.
-- Depois de importar uma escrituração, o usuário via o JSON cru da resposta
-  na tela em vez da mensagem de sucesso.
-
-### Alterado
-- Os testes de navegador voltaram a passar (10 de 10) e a suíte caiu de
-  2 min para 14 s. Continuam fora da execução padrão do `pytest`.
-
-### Adicionado
 - `REGRAS-DO-PROJETO.md`: as regras de trabalho do repositório. Cada regra
   diz quem a cobra — o pipeline ou a revisão de PR — e cita o defeito real
   que a motivou.
@@ -160,6 +140,8 @@ interno da implementação.
   agora.
 
 ### Alterado
+- Os testes de navegador voltaram a passar (10 de 10) e a suíte caiu de
+  2 min para 14 s. Continuam fora da execução padrão do `pytest`.
 - `continuidade.MD` virou um índice. Ele acumulava estado, histórico,
   pendências e próximos passos no mesmo arquivo, e já divergia do código:
   trazia uma contagem fixa de testes e marcava fase concluída sem apontar o
@@ -169,6 +151,16 @@ interno da implementação.
   configurasse acreditaria ter ligado algo.
 
 ### Corrigido
+- O repositório carregava 29 MB de fontes órfãs (o zip inteiro do download
+  da Inter e as variáveis que só o PDF usava); saíram na troca de
+  identidade.
+- **O dashboard travava o servidor inteiro** quando a ECD importada tinha
+  hierarquia de plano de contas em ciclo (uma conta que é a própria
+  sintética, ou A→B→A). Como o servidor atende num único fluxo, ele parava
+  de responder para todos os usuários do escritório, e só voltava com
+  reinício manual. A hierarquia vem do arquivo do cliente.
+- Depois de importar uma escrituração, o usuário via o JSON cru da resposta
+  na tela em vez da mensagem de sucesso.
 - A imagem Docker voltou a construir. O `python:3.11-slim` migrou para
   Debian trixie, onde o pacote `libgdk-pixbuf2.0-0` deixou de existir com
   esse nome — a construção falhava por completo.
