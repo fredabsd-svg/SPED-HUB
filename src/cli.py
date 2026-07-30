@@ -10,6 +10,7 @@ Subcomandos:
     migrar         — Aplica migrações de schema (Alembic)
     migrar-dados   — Copia o conteúdo de um banco para outro
     usuario        — Cria e lista usuários do painel
+    fiscal         — Central de Documentos, geração de SPED e escriturações
 """
 
 import argparse
@@ -18,6 +19,7 @@ import logging
 import sys
 from pathlib import Path
 
+from src import cli_fiscal
 from src.db.models import criar_engine, get_session, init_db
 from src.db.repository import Repository
 from src.ecd_importer import ECDImportService
@@ -849,6 +851,9 @@ def main(argv: list[str] | None = None) -> int:
     p_usr.add_argument("--escritorio", type=int, help="ID do escritório dono")
     p_usr.add_argument("--db", default=None, help="Banco (URL ou caminho SQLite)")
 
+    # fiscal
+    cli_fiscal.registrar(sub)
+
     args = parser.parse_args(argv)
 
     if args.comando == "importar-ecd":
@@ -869,6 +874,11 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_migrar_dados(args)
     elif args.comando == "usuario":
         return cmd_usuario(args)
+    elif args.comando == "fiscal":
+        if erro := cli_fiscal.conferir_argumentos(args):
+            print(erro)
+            return 1
+        return cli_fiscal.cmd_fiscal(args)
     else:
         parser.print_help()
     return 0
