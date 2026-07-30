@@ -38,6 +38,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 32 | Migração de dados entre bancos (`sped-hub migrar-dados`) | concluída | `tests/test_migracao_de_dados.py` | exercitada contra PostgreSQL real no CI |
 | 33 | Reenvio automático de entrega interrompida | concluída | `tests/test_manutencao.py::TestReenvioAutomatico` | `failed` segue no reenvio manual, por escolha |
 | 34 | Escopo e poder da API Key | concluída | `tests/test_escopo_de_api_key.py` | chave sem dono segue lendo tudo, por retrocompatibilidade |
+| 35 | `docker compose up` funciona na primeira execução | concluída | `tests/test_deploy_config.py::TestEntrypointDoNginxExecutado` | emissão do certificado real segue manual (ver `docs/deploy.md`) |
 
 ## Limites do comportamento atual
 
@@ -54,6 +55,7 @@ descreve funcionalidade futura (§1.1).
 | Entrega de webhook que esgotou as tentativas espera intervenção | O reenvio automático retoma só o que uma queda interrompeu no meio. Entrega que respondeu mal em **todas** as tentativas não é reenviada sozinha: martelar de hora em hora um endereço quebrado não resolve, e ali o que falta é alguém olhar. O botão "Reenviar falhas" alcança essas, e é aguardado dentro da requisição — daí o lote limitado por tempo (`LOTE_DE_REENVIO`) | — (é escolha, não pendência) |
 | Chave de API sem dono lê todos os escritórios | Toda chave criada antes da coluna `escritorio_id` ficou com dono nulo, e nulo significa "chave de instância". Preenchê-las com um escritório arbitrário quebraria integração em produção; com o errado, seria pior — a integração pararia de ver os dados certos sem explicação. Chave nova deve ser criada com dono | — (é escolha de retrocompatibilidade) |
 | `SPED_HUB_SECRET_KEY` não tem consumidor | A única variável reservada que sobrou (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. Ligá-la exigiria decidir *qual* segredo ela é, e hoje nenhum componente precisa de um | — |
+| A primeira subida usa certificado autoassinado, e o navegador reclama | O certificado do Let's Encrypt só pode ser emitido depois de o nginx responder na porta 80 no domínio real, com DNS já apontado — nada disso existe quando alguém roda `docker compose up` pela primeira vez. Antes o nginx recusava subir; agora ele sobe, avisa no log que é autoassinado e serve em `http://localhost/`. A emissão do certificado real é um comando manual, documentado em `docs/deploy.md` | — (é escolha: emitir sozinho exigiria domínio e DNS que o sistema não tem como adivinhar) |
 
 ## Passivo de documentação de módulo (§1.4)
 

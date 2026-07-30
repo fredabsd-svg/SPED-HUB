@@ -62,24 +62,64 @@ docker compose run --rm web python -m src.cli migrar status   # "Schema em dia."
 
 ### Migrando de SQLite para PostgreSQL
 
-Não há migração de dados automatizada.  O caminho testado é reimportar as
-ECDs no banco novo — a importação é idempotente por (empresa, período) e
-recusa duplicatas, então repetir é seguro.
+```bash
+# 1. crie o schema no destino
+docker compose run --rm web python -m src.cli migrar aplicar --db "postgresql+psycopg://..."
+
+# 2. copie o conteúdo (tudo ou nada; recusa destino que já tenha dados)
+docker compose run --rm web python -m src.cli migrar-dados \
+    --de /app/data/sped_hub.db --para "postgresql+psycopg://..."
+```
+
+A cópia preserva os identificadores, corrige as sequências do Postgres e
+confere as contagens no fim.  `--conferir` compara os dois bancos sem copiar
+nada.  Reimportar as ECDs também funciona, mas perde o que não vem de arquivo:
+usuários, mapeamentos de conta, visões de filtro, chaves de API e auditoria.
 
 ## 3. SSL
 
-O `docker-compose.yml` traz nginx e certbot.  Na primeira emissão:
+O nginx **sobe sem certificado**.  Na ausência de um Let's Encrypt válido ele
+gera um autoassinado e serve a aplicação em HTTP, sem redirecionar — é o que
+permite `docker compose up` funcionar na primeira execução, e é o caminho de
+quem só quer experimentar na própria máquina.
+
+Antes, o `nginx.conf` apontava direto para o certificado do Let's Encrypt.  Numa
+instalação nova o arquivo não existia, o nginx recusava subir e o container
+entrava em laço de reinício — inclusive no primeiro passo desta própria seção.
+
+O endereço do backend também passou a ser resolvido **a cada requisição**, e não
+uma única vez na subida.  Antes, recriar o `web` — qualquer `docker compose up`
+depois de trocar a imagem — lhe dava um IP novo que o nginx não enxergava: ele
+seguia mandando para o IP antigo e devolvia 502 em tudo, com o `web` saudável ao
+lado, até alguém reiniciar o nginx na mão.  Se o nginx subir sem o `web` no ar,
+agora responde 502 em vez de recusar subir.
+
+### Para valer, com domínio
+
+Defina o domínio (o nginx procura o certificado por esse nome):
 
 ```bash
-docker compose up -d nginx
+echo "SPED_HUB_DOMINIO=seu-dominio.com.br" >> .env
+docker compose up -d nginx        # sobe com autoassinado e serve o desafio ACME
 docker compose run --rm certbot certonly --webroot -w /var/www/certbot \
+    --cert-name seu-dominio.com.br \
     -d seu-dominio.com.br --email voce@exemplo.com --agree-tos --no-eff-email
-docker compose restart nginx
+docker compose restart nginx      # agora acha o certificado real
 ```
 
-O `nginx.conf` referencia `/etc/letsencrypt/live/sped-hub/`.  Ou nomeie o
-certificado assim (`--cert-name sped-hub`), ou ajuste o caminho no arquivo.
-A renovação roda sozinha no serviço `certbot`.
+O log do nginx diz qual dos dois está em uso:
+
+```
+[sped-hub] certificado Let's Encrypt encontrado para 'seu-dominio.com.br'; HTTP redireciona para HTTPS.
+[sped-hub] AVISO: sem certificado para 'sped-hub'. Subindo com certificado AUTOASSINADO...
+```
+
+O `--cert-name` precisa bater com `SPED_HUB_DOMINIO`: é por esse nome que o
+nginx monta o caminho `/etc/letsencrypt/live/<nome>/`.
+
+A renovação roda sozinha no serviço `certbot`.  A **emissão inicial** não —
+`certbot renew` não emite nada na primeira vez, e é por isso que o comando
+acima é necessário uma vez.
 
 ## 4. Subir
 
