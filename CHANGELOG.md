@@ -6,7 +6,7 @@ Atualizado ao fim de cada fase, não só em release (§1.7).
 As entradas descrevem o efeito para quem usa o sistema, não o detalhe
 interno da implementação.
 
-## [Não publicado]
+## [0.19.0] — 2026-07-30
 
 ### Adicionado
 - `sped-hub usuario criar` e `sped-hub usuario listar`, para administrar as
