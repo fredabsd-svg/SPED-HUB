@@ -424,3 +424,54 @@ class TestSentido:
         oco = ImportadorDeDocumentos(sessao, escritorio_id=escritorio.id).importar(nfe_xml())
         assert oco.desfecho is Desfecho.IMPORTADO
         assert sessao.get(DocumentoFiscal, oco.documento_id).empresa_id is None
+
+
+class TestAmbasAsPontasCadastradas:
+    """Transferência entre filiais do mesmo escritório.
+
+    O documento deveria ser escriturado pelas DUAS empresas — saída para uma,
+    entrada para a outra — e o modelo só admite uma `empresa_id`. A escolha
+    tem de ser determinística e avisada, senão a mesma nota importada duas
+    vezes vincularia a empresas diferentes.
+    """
+
+    def _duas_pontas(self, sessao, escritorio):
+        for cnpj, nome in (
+            ("12345678000195", "MATRIZ"),
+            ("98765432000198", "FILIAL"),
+        ):
+            sessao.add(Empresa(cnpj=cnpj, nome=nome, escritorio_id=escritorio.id))
+        sessao.commit()
+
+    def test_escolha_e_o_emitente(self, sessao, escritorio):
+        self._duas_pontas(sessao, escritorio)
+        oco = ImportadorDeDocumentos(sessao, escritorio_id=escritorio.id).importar(nfe_xml())
+
+        documento = sessao.get(DocumentoFiscal, oco.documento_id)
+        assert documento.emitente_cnpj == "12345678000195"
+        empresa = sessao.get(Empresa, documento.empresa_id)
+        assert empresa.cnpj == "12345678000195", "não ficou com o emitente"
+        assert documento.sentido == "saida"
+
+    def test_a_escolha_nao_depende_da_ordem_de_cadastro(self, sessao, escritorio):
+        """Com `.limit(1)` sem ordem, isto dependia do humor do banco."""
+        for cnpj, nome in (
+            ("98765432000198", "FILIAL"),
+            ("12345678000195", "MATRIZ"),
+        ):
+            sessao.add(Empresa(cnpj=cnpj, nome=nome, escritorio_id=escritorio.id))
+        sessao.commit()
+
+        oco = ImportadorDeDocumentos(sessao, escritorio_id=escritorio.id).importar(nfe_xml())
+
+        documento = sessao.get(DocumentoFiscal, oco.documento_id)
+        assert sessao.get(Empresa, documento.empresa_id).cnpj == "12345678000195"
+
+    def test_avisa_que_a_contraparte_fica_sem_escrituracao(self, sessao, escritorio, caplog):
+        self._duas_pontas(sessao, escritorio)
+        with caplog.at_level("WARNING", logger="sped-hub.documentos"):
+            ImportadorDeDocumentos(sessao, escritorio_id=escritorio.id).importar(nfe_xml())
+
+        assert any(
+            "duas pontas" in r.getMessage() for r in caplog.records
+        ), "a contraparte fica sem escrituração e ninguém é avisado"

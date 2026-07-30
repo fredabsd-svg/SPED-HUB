@@ -39,8 +39,8 @@ verificação exige que a razão esteja escrita.
 
 Já existem o modelo de dados, o adaptador de NF-e/NFC-e (lendo os dois
 regimes tributários), o importador em lote com deduplicação, a camada
-efetiva (ajustes com reversão por lote), o motor de classificação e as
-alterações em massa com simulação — ver
+efetiva (ajustes com reversão por lote), o motor de classificação, as
+alterações em massa com simulação e o gerador da EFD ICMS/IPI — ver
 [`status.md`](status.md). Sobre a Reforma Tributária, ver
 [`reforma-tributaria.md`](reforma-tributaria.md).
 
@@ -50,7 +50,9 @@ O que falta:
 |---|---|---|
 | Importação de NFS-e por provedor | Exige um adaptador por provedor municipal | `src.documentos.adaptadores:AdaptadorNFSe` |
 | Recálculo de totais depois de alteração em massa (§12.5) | Alterar a parcela de um item não recompõe o total do documento | `src.documentos.massa:recalcular` |
-| Geração de EFD ICMS/IPI | Hoje o sistema só **lê** EFD (`src/parsers/efd.py`) | `src.escrituracoes.efd_icms:GeradorEFDICMS` |
+| Blocos G, H e 1 da EFD ICMS/IPI | O gerador cobre 0, C, E e 9 | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_h` |
+| Documentos de serviço, energia e transporte na EFD (C500, D100) | Só o C100 de mercadorias é gerado | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_d` |
+| Ajustes de apuração pela tabela 5.1.1 (E111) | O E110 é soma direta, sem ajuste nem saldo credor anterior | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_apuracao` |
 | Geração de EFD-Contribuições | Idem | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes` |
 | Apuração de CBS, IBS e Imposto Seletivo | Os campos são lidos do documento; nenhuma apuração os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS` |
 | Espelhos antes da geração | — | `src.escrituracoes.espelhos:Espelho` |
