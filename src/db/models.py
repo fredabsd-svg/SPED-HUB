@@ -957,6 +957,65 @@ class AjusteFiscal(Base):
         return f"<AjusteFiscal {self.campo}={self.valor_novo!r} ({self.origem})>"
 
 
+class RegraFiscal(Base):
+    """Uma classificação recorrente, guardada para não ser refeita a cada mês.
+
+    "Para este fornecedor e este NCM, use sempre este CFOP" é a forma que o
+    conhecimento fiscal do escritório toma — e hoje ele mora na cabeça de
+    alguém.  Aqui ele vira dado.
+
+    **Condições e ações são estruturadas, não expressão avaliada.**  Um campo
+    de texto com uma expressão que o sistema executa seria muito mais
+    expressivo, e transformaria o banco em superfície de execução de código:
+    quem escrevesse na tabela rodaria o que quisesse no servidor.  A troco de
+    conveniência que este domínio não exige — as condições reais são
+    comparações entre um campo e um valor.
+
+    Formato de `condicoes` (todas precisam casar):
+
+        [{"campo": "ncm", "operador": "comeca_com", "valor": "2203"},
+         {"campo": "emitente_cnpj", "operador": "igual", "valor": "1234…"}]
+
+    Formato de `acoes`:
+
+        [{"campo": "cfop", "valor": "6404"}]
+    """
+
+    __tablename__ = "regras_fiscais"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    escritorio_id: Mapped[int | None] = mapped_column(ForeignKey("escritorios.id"), index=True)
+    # Nulo = vale para todas as empresas do escritório.
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), index=True)
+
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(Text)
+    # Maior vence.  Empate entre regras que agem no mesmo campo é conflito, e
+    # o motor o denuncia em vez de escolher por sorteio.
+    prioridade: Mapped[int] = mapped_column(default=0, index=True)
+    condicoes: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    acoes: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+    # A que obrigação a regra serve (`efd_icms`, `efd_contribuicoes`…); nulo
+    # vale para todas.
+    obrigacao: Mapped[str | None] = mapped_column(String(30))
+    # Regra fiscal nasce e morre com a legislação: uma que valia até dezembro
+    # não pode ser aplicada a documento de janeiro.
+    vigencia_inicio: Mapped[datetime.date | None] = mapped_column()
+    vigencia_fim: Mapped[datetime.date | None] = mapped_column()
+    confianca: Mapped[float] = mapped_column(default=1.0)
+    ativa: Mapped[bool] = mapped_column(default=True, index=True)
+
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    atualizado_em: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    def __repr__(self):
+        return f"<RegraFiscal {self.nome!r} p={self.prioridade}>"
+
+
 # ── Engine Factory (Fase 17: banco configurável) ───────────────────────────
 
 

@@ -43,7 +43,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 37 | Registro público fecha depois do primeiro usuário | concluída | `tests/test_registro_publico.py` | tela de gestão de usuários segue fora; a criação é por CLI |
 | 38 | Mensagem de erro chega à tela | concluída | `tests/test_registro_publico.py::TestMensagemDeErroChegaNaTela`, `tests/test_e2e_playwright.py` | — |
 | 39 | Central de Documentos Fiscais: modelo em três camadas, adaptador de NF-e e importação em lote | concluída | `tests/test_documentos_fiscais.py`, `tests/test_migrations.py` | NFS-e, classificação, alterações em massa e geradores de SPED seguem no roadmap |
-| 40 | Camada efetiva: ajustes com histórico e reversão por lote | concluída | `tests/test_camada_efetiva.py` | nada além dos testes a consome ainda; a classificação é o primeiro consumidor |
+| 40 | Camada efetiva: ajustes com histórico e reversão por lote | concluída | `tests/test_camada_efetiva.py` | — |
+| 41 | Motor de classificação fiscal com regras, prioridade e conflito | concluída | `tests/test_classificacao_fiscal.py` | nenhuma tela mostra as sugestões ainda; a aplicação é por chamada |
 
 ## Limites do comportamento atual
 
