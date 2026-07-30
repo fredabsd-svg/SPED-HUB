@@ -41,6 +41,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 35 | `docker compose up` funciona na primeira execução | concluída | `tests/test_deploy_config.py::TestEntrypointDoNginxExecutado` | emissão do certificado real segue manual (ver `docs/deploy.md`) |
 | 36 | Worker encerra em vez de girar em vazio com a fila quebrada | concluída | `tests/test_worker_fila_quebrada.py`, `tests/test_migrations.py::TestLoggingSobreviveAMigracao` | — |
 | 37 | Registro público fecha depois do primeiro usuário | concluída | `tests/test_registro_publico.py` | tela de gestão de usuários segue fora; a criação é por CLI |
+| 38 | Mensagem de erro chega à tela | concluída | `tests/test_registro_publico.py::TestMensagemDeErroChegaNaTela`, `tests/test_e2e_playwright.py` | — |
 
 ## Limites do comportamento atual
 

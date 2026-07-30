@@ -14,6 +14,12 @@ interno da implementação.
   histórico do shell.
 
 ### Corrigido
+- **Nenhuma mensagem de erro aparecia na tela.** Errar a senha no login, ou
+  tentar se cadastrar com um e-mail já em uso, deixava a tela parada: nenhum
+  aviso, nenhuma pista do que tinha acontecido. O código que monta o alerta
+  existia e era executado — só descartava o resultado, porque o htmx não
+  substitui o conteúdo quando a resposta é de erro sem que se peça
+  explicitamente.
 - **Um worker cujo canal de tarefas quebrasse consumia um núcleo inteiro, em
   silêncio, para sempre.** O laço tratava "fila vazia" e "fila quebrada" do
   mesmo jeito: esperar um segundo e tentar de novo. Mas numa fila quebrada o

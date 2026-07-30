@@ -25,6 +25,7 @@ por `sped-hub usuario criar`, por quem já administra o servidor.
 from __future__ import annotations
 
 import datetime
+import pathlib
 
 import pytest
 from sqlalchemy import select
@@ -33,6 +34,8 @@ from sqlalchemy.orm import Session
 from src.auth import AuthService, aplicar_escopo_empresas, usuario_pode_acessar_ecd
 from src.cli import main
 from src.db.models import ECD, Empresa, Escritorio, criar_engine, init_db
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -412,3 +415,35 @@ class TestRotaWebDeRegistro:
 
         assert resposta.status_code == 400
         assert "cadastrado" in resposta.json()["mensagem"].lower()
+
+
+class TestMensagemDeErroChegaNaTela:
+    """O alerta de erro era montado e descartado.
+
+    O `htmx:beforeSwap` do `base.html` transforma `{"status":"erro",...}` num
+    `.alert-error` legível — e nunca aparecia: em resposta 4xx o HTMX não faz
+    swap sem `shouldSwap`, e o ramo só mexia em `isError`, que apenas silencia
+    o log do console. Verificado no navegador, antes do conserto:
+
+        LOGIN COM SENHA ERRADA      -> texto do #login-result: ''
+        REGISTRO COM E-MAIL EM USO  -> texto do #register-result: ''
+
+    Quem errava a senha via a tela parada, sem explicação. O
+    `tests/test_e2e_playwright.py` cobre no navegador; aqui fica a trava
+    barata, que roda sem Chromium.
+    """
+
+    @pytest.fixture
+    def script(self) -> str:
+        base = (REPO_ROOT / "src" / "dashboard" / "templates" / "base.html").read_text("utf-8")
+        inicio = base.index('if (corpo && corpo.status === "erro"')
+        return base[inicio : inicio + 800]
+
+    def test_ramo_de_erro_libera_o_swap(self, script):
+        assert "shouldSwap = true" in script, (
+            "sem `shouldSwap`, o HTMX descarta o alerta em resposta 4xx e a " "tela fica parada"
+        )
+
+    def test_a_mensagem_e_escapada(self, script):
+        """Ela vem do servidor e é injetada como HTML."""
+        assert "escapar(corpo.mensagem)" in script
