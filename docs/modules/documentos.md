@@ -35,12 +35,20 @@ As três camadas que a suíte separa:
 | `historico(session, doc, campo=None)` | Os ajustes que alcançam o campo, em ordem. |
 | `novo_lote()` | Identificador para desfazer uma massa inteira. |
 | `ORIGEM_REGRA` / `ORIGEM_USUARIO` | Separa sugestão de decisão. |
+| `MotorDeClassificacao(session, obrigacao=).avaliar(doc)` | Propõe, sem tocar no banco. Devolve `ResultadoClassificacao`. |
+| `Sugestao` | Regra, valor anterior, sugerido, justificativa, confiança e `impacto` em reais. |
+| `Conflito` | Duas regras de mesma prioridade no mesmo campo — o motor não escolhe. |
+| `aplicar(session, doc, sugestoes, lote=)` | Vira `AjusteFiscal` de origem `regra`; devolve o lote. |
+| `criar_regra(session, ...)` / `validar_regra(regra)` | Cadastra já validada. |
+| `regras_aplicaveis(session, doc)` | As que valem, da maior prioridade à menor. |
+| `OPERADORES` | `igual`, `em`, `comeca_com`, `vazio`, `maior_que`… |
 
 ## O que não faz
 
-Não classifica, não altera em massa e não gera escrituração — ver
-`docs/roadmap.md`. A camada efetiva existe, mas nada além dos testes a
-consome ainda: nenhuma tela a mostra e nenhum gerador a lê. Não lê NFS-e: cada provedor municipal precisa do seu
+Não altera em massa e não gera escrituração — ver `docs/roadmap.md`. A
+camada efetiva e a classificação existem, mas nada além dos testes as consome:
+nenhuma tela as mostra e nenhum gerador as lê. O motor **não escolhe** entre
+regras empatadas e **não aplica** nada sozinho. Não lê NFS-e: cada provedor municipal precisa do seu
 adaptador. Não valida códigos fiscais contra as tabelas oficiais, e **não
 calcula tributo nenhum**: os valores de CBS, IBS e IS são lidos do XML, nunca
 presumidos.
@@ -94,6 +102,25 @@ dependência nova. Quem depende: nada ainda; o dashboard não expõe a Central.
 - **`SUBSTITUIR` apaga os ajustes do documento antigo** (cascade). Por isso o
   padrão é `IGNORAR`: reimportar uma pasta com a política errada descartaria
   horas de classificação sem avisar.
+- **Condições e ações de regra são JSON estruturado, não expressão avaliada.**
+  Um campo de texto que o sistema executasse transformaria a tabela de regras
+  em superfície de execução de código no servidor — quem escrevesse nela
+  rodaria o que quisesse —, a troco de expressividade que o domínio não pede:
+  as condições reais são comparações entre um campo e um valor.
+- **`escritorio_id IN (1, NULL)` não casa com `escritorio_id IS NULL`.** Em
+  SQL o `NULL` não participa de `IN`, e as regras de escopo global — que são a
+  maioria — ficavam invisíveis: a classificação simplesmente não acontecia. O
+  filtro usa `or_(coluna == valor, coluna.is_(None))`.
+- **Empate de prioridade no mesmo campo é conflito, não escolha.** Decidir por
+  ordem de chegada faria a mesma importação produzir resultados diferentes
+  entre execuções, sem ninguém desconfiar. O motor denuncia e deixa o campo
+  como está.
+- **A regra lê o efetivo, não o normalizado.** Uma regra que roda depois de
+  outra precisa enxergar o que a primeira decidiu, senão a ordem das regras
+  deixa de significar o que aparenta.
+- **`avaliar` não grava.** Sugerir e aplicar são passos separados: uma
+  classificação errada aplicada em silêncio sobre um mês inteiro só se
+  descobre na malha fina.
 - **O ICMS vem embrulhado na variante** (`ICMS00`, `ICMS60`, `ICMSSN102`…). O
   adaptador desce no primeiro filho em vez de listar as ~20 formas, que mudam
   a cada nota técnica.
@@ -102,5 +129,7 @@ dependência nova. Quem depende: nada ainda; o dashboard não expõe a Central.
 
 ```bash
 pytest tests/test_documentos_fiscais.py -q  # adaptador, reforma, XML hostil, duplicidade
+pytest tests/test_camada_efetiva.py -q      # ajustes, tipos, reversão por lote
+pytest tests/test_classificacao_fiscal.py -q  # regras, prioridade, conflito, vigência
 pytest tests/test_migrations.py -q          # o schema da migração bate com os modelos
 ```

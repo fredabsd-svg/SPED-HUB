@@ -38,8 +38,8 @@ verificação exige que a razão esteja escrita.
 ## Central de Documentos Fiscais e suíte fiscal
 
 Já existem o modelo de dados, o adaptador de NF-e/NFC-e (lendo os dois
-regimes tributários), o importador em lote com deduplicação e a camada
-efetiva (ajustes com reversão por lote) — ver
+regimes tributários), o importador em lote com deduplicação, a camada
+efetiva (ajustes com reversão por lote) e o motor de classificação — ver
 [`status.md`](status.md). Sobre a Reforma Tributária, ver
 [`reforma-tributaria.md`](reforma-tributaria.md).
 
@@ -48,7 +48,6 @@ O que falta:
 | Item | Situação | Marcador de ausência |
 |---|---|---|
 | Importação de NFS-e por provedor | Exige um adaptador por provedor municipal | `src.documentos.adaptadores:AdaptadorNFSe` |
-| Motor de classificação fiscal | — | `src.documentos.classificacao:MotorDeClassificacao` |
 | Alterações em massa com simulação e reversão | — | `src.documentos.massa:SimulacaoDeAlteracao` |
 | Geração de EFD ICMS/IPI | Hoje o sistema só **lê** EFD (`src/parsers/efd.py`) | `src.escrituracoes.efd_icms:GeradorEFDICMS` |
 | Geração de EFD-Contribuições | Idem | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes` |
