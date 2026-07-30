@@ -1,0 +1,29 @@
+# Quebra de linha por tipo de arquivo.
+#
+# Sem isto, o Git no Windows (`core.autocrlf=true`, que é o padrão de lá)
+# converte LF para CRLF ao fazer checkout.  Num script de shell copiado para
+# dentro de um container Linux, isso é fatal e o erro não ajuda em nada:
+#
+#   exec /sped-hub-entrypoint.sh: no such file or directory
+#
+# O arquivo está lá.  Quem "não existe" é o interpretador: o shebang virou
+# `#!/bin/sh\r`, e o kernel procura literalmente por um programa chamado
+# `/bin/sh\r`.  O container do nginx entrou em laço de reinício por causa
+# disso, e nenhum job do CI veria — todos rodam em Linux, onde o checkout
+# mantém LF.
+*.sh    text eol=lf
+*.conf  text eol=lf
+
+# Arquivos que o Docker copia para dentro de imagens Linux.
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+.env.example    text eol=lf
+
+# Binários: o Git não deve tentar normalizar nada.
+*.png   binary
+*.jpg   binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.db    binary

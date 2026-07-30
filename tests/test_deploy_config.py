@@ -651,3 +651,85 @@ class TestDocumentacaoDeDeploy:
         assert (
             not desconhecidos
         ), f"docs/deploy.md usa serviços inexistentes: {sorted(desconhecidos)}"
+
+
+class TestQuebraDeLinhaNaoQuebraOContainer:
+    """CRLF num script de shell mata o container, e o erro engana.
+
+    O Git no Windows converte LF para CRLF ao fazer checkout — é o padrão de
+    lá (`core.autocrlf=true`). Num script copiado para dentro de um container
+    Linux, o shebang vira `#!/bin/sh\\r`, e o kernel procura literalmente por um
+    programa chamado `/bin/sh\\r`:
+
+        exec /sped-hub-entrypoint.sh: no such file or directory
+        sped-hub-nginx exited with code 255 (restarting)
+
+    O arquivo está lá. Quem não existe é o interpretador. Nenhum job do CI
+    veria: todos rodam em Linux, onde o checkout mantém LF.
+    """
+
+    def test_repositorio_fixa_a_quebra_de_linha_dos_scripts(self):
+        atributos = REPO_ROOT / ".gitattributes"
+        assert atributos.is_file(), (
+            "sem .gitattributes, o Git no Windows entrega os .sh com CRLF e o "
+            "container do nginx entra em laço de reinício"
+        )
+        regras = atributos.read_text("utf-8")
+        assert re.search(
+            r"^\*\.sh\s+.*eol=lf", regras, re.M
+        ), ".gitattributes não fixa `eol=lf` para *.sh"
+
+    def test_nenhum_script_do_repositorio_esta_com_crlf(self):
+        """Pega o arquivo que escapou, não só a regra que deveria cobri-lo."""
+        com_crlf = [
+            caminho.relative_to(REPO_ROOT)
+            for caminho in REPO_ROOT.rglob("*.sh")
+            if ".git/" not in str(caminho) and b"\r\n" in caminho.read_bytes()
+        ]
+        assert not com_crlf, f"scripts com CRLF: {com_crlf}"
+
+    def test_imagem_do_nginx_normaliza_a_quebra_de_linha(self):
+        """O .gitattributes só vale para checkout novo.
+
+        Quem já clonou no Windows segue com CRLF no arquivo em disco, e o
+        build sai do disco. Sem esta linha, `git pull` não conserta nada.
+        """
+        dockerfile = (REPO_ROOT / "deploy" / "nginx" / "Dockerfile").read_text("utf-8")
+        assert re.search(
+            r"sed\s+-i\s+'s/\\r\$//'", dockerfile
+        ), "o Dockerfile do nginx não tira o CR do entrypoint"
+
+    def test_ci_sobe_o_nginx_com_o_entrypoint_em_crlf(self):
+        """A prova real precisa de Docker, e só o CI tem.
+
+        Os testes acima conferem arquivo e regra. Que a imagem construída a
+        partir de um checkout do Windows de fato sobe, só subindo.
+        """
+        ci = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8"))
+        script = "\n".join(str(p.get("run", "")) for p in ci["jobs"]["docker"]["steps"])
+        assert re.search(
+            r"docker run\b[^\n]*--name nginx-crlf", script
+        ), "o CI não sobe o container construído a partir do checkout do Windows"
+        assert "sed -i 's/$/\\r/'" in script, "o CI não estraga a quebra de linha antes"
+        assert re.search(
+            r"RestartCount.*nginx-crlf", script
+        ), "o CI sobe o container mas não confere que ele não reinicia"
+
+    @pytest.mark.skipif(shutil.which("sh") is None, reason="precisa de sh")
+    def test_entrypoint_com_crlf_volta_a_rodar_depois_da_normalizacao(self, tmp_path):
+        """Prova o efeito, não a presença da linha."""
+        original = (REPO_ROOT / "deploy" / "nginx" / "entrypoint.sh").read_bytes()
+        estragado = tmp_path / "entrypoint.sh"
+        estragado.write_bytes(original.replace(b"\n", b"\r\n"))
+        estragado.chmod(0o755)
+
+        # O erro aponta para o script — que existe. O ausente é o
+        # interpretador `/bin/sh\r`. É o mesmo engano que o Docker relata.
+        assert estragado.is_file()
+        with pytest.raises((FileNotFoundError, OSError)) as falha:
+            subprocess.run([str(estragado)], capture_output=True, text=True)
+        assert "No such file or directory" in str(falha.value)
+
+        # A mesma normalização que o Dockerfile aplica.
+        estragado.write_bytes(estragado.read_bytes().replace(b"\r\n", b"\n"))
+        assert estragado.read_bytes() == original

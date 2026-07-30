@@ -131,6 +131,27 @@ docker compose ps          # migrate deve estar "exited (0)", o resto "healthy"
 
 `web` e `worker` só sobem depois que `migrate` termina com sucesso.
 
+### Se você constrói no Windows
+
+O repositório fixa a quebra de linha dos scripts (`.gitattributes`) e a imagem
+do nginx normaliza no build.  Um clone antigo, feito antes disso, ainda tem os
+arquivos com CRLF em disco — e o build sai do disco.  O sintoma é o nginx em
+laço de reinício com uma mensagem que engana:
+
+```
+exec /sped-hub-entrypoint.sh: no such file or directory
+sped-hub-nginx exited with code 255 (restarting)
+```
+
+O arquivo está lá.  Quem não existe é o interpretador: o shebang virou
+`#!/bin/sh\r`.  Depois do `git pull` a imagem já corrige sozinha; para
+normalizar também o que está em disco:
+
+```bash
+git add --renormalize .
+git checkout -- .
+```
+
 ### Primeiro acesso e contas
 
 Abra `/register` e crie a **primeira** conta: ela vira administrador.  Depois
