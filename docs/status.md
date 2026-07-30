@@ -49,6 +49,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 43 | Gerador da EFD ICMS/IPI (blocos 0, C, E, 9) | concluída | `tests/test_gerador_efd_icms.py` | inventário, ativo, serviços, ajustes 5.1.1 e ST seguem fora — ver `docs/modules/escrituracoes.md` |
 | 44 | Gerador da EFD-Contribuições (blocos 0, C, M, 9), com regime e atividade como cadastro obrigatório | concluída | `tests/test_gerador_efd_contribuicoes.py` | no regime cumulativo os créditos das entradas **não** são descontados, e o resultado avisa; o `IND_ATIV` tem tabela própria, diferente da EFD ICMS/IPI; blocos A, D, F e I, créditos extemporâneos e regimes especiais seguem fora |
 | 45 | Terceira camada: a escrituração arquivada — o arquivo que efetivamente saiu | concluída | `tests/test_escrituracao_arquivada.py` | o conteúdo é guardado, não reconstruído, e a linha nunca é alterada; nenhuma tela mostra o histórico ainda |
+| 46 | `sped-hub fiscal`: a cadeia da Central pela linha de comando | concluída | `tests/test_cli_fiscal.py` | importar, listar, gerar e conferir; gerar **sempre** arquiva, e `conferir` sai com 2 quando o entregue divergiu. Nenhuma tela web ainda |
 
 ## Limites do comportamento atual
 
@@ -75,7 +76,8 @@ A regra vale por adoção: módulo novo ou alterado exige o documento. A lista
 abaixo diminui a cada PR que toca nesses módulos.
 
 **Documentados:** `api`, `async_jobs`, `audit`, `auth`, `cache`, `cli`,
-`dashboard`, `db`, `documentos`, `escrituracoes`, `ecd_importer`, `email_service`, `filters`,
+`cli_fiscal`, `dashboard`, `db`, `documentos`, `escrituracoes`,
+`ecd_importer`, `email_service`, `filters`,
 `logging_config`, `monitoring`, `parsers`, `ratelimit`, `reports`,
 `settings`, `uploads`, `validators`, `version`, `watchdog`, `webhooks`,
 `worker_queue`, `worker_runner`.

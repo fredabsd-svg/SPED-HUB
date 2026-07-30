@@ -24,6 +24,17 @@ Subcomandos (entry point `sped-hub = "src.cli:main"` no pyproject; também
 | `migrar [status\|aplicar\|adotar] [--db]` | Migrações Alembic; `status` é o default. |
 | `migrar-dados --de --para [--lote --conferir]` | Copia o conteúdo de um banco para outro. |
 | `usuario criar\|listar [--email --nome --senha --admin --escritorio --db]` | Contas do painel. Sem `--senha`, pede sem eco. |
+| `fiscal empresas [--db]` | As empresas cadastradas, com o cadastro fiscal que decide se podem gerar. |
+| `fiscal importar CAMINHO… [--escritorio --db]` | Importa XML; pasta é varrida por `.xml`, recursivamente. |
+| `fiscal documentos --empresa [--de --ate --db]` | Os documentos da Central, com o total. |
+| `fiscal gerar --empresa --de --ate [--tipo --saida --db]` | Gera a EFD **e arquiva** a escrituração. |
+| `fiscal historico [--empresa --db]` | As escriturações geradas, com hash. |
+| `fiscal conferir --escrituracao [--diff --db]` | O entregue contra o que sairia agora. Sai com **2** se divergiu. |
+
+O `fiscal` vive em `src/cli_fiscal.py` — a cadeia da Central é grande o
+bastante para não caber junto com os relatórios contábeis, e o `cli.py` só
+registra o parser e despacha. As decisões dele estão em
+[`cli_fiscal.md`](cli_fiscal.md).
 
 ## Depende de / quem depende
 
@@ -69,6 +80,9 @@ importa a CLI.
 - Os testes entram por `main()` com `sys.argv` trocado — o parser também é
   exercitado, não só as funções `cmd_*` (o módulo já esteve com 0% de
   cobertura).
+- **`fiscal conferir` sai com 2 quando divergiu**, distinto do 1 de erro —
+  divergência não é falha. Os demais subcomandos usam só 0 e 1. As outras
+  decisões do `fiscal` estão em [`cli_fiscal.md`](cli_fiscal.md).
 
 ## Como testar isoladamente
 
