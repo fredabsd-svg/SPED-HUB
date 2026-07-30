@@ -274,14 +274,37 @@ class ImportadorDeDocumentos:
         candidatos = [c for c in (normalizado.emitente_cnpj, normalizado.destinatario_cnpj) if c]
         if not candidatos:
             return None
-        return self.session.execute(
-            select(Empresa)
-            .where(
-                Empresa.cnpj.in_(candidatos),
-                Empresa.escritorio_id == self.escritorio_id,
+        encontradas = (
+            self.session.execute(
+                select(Empresa)
+                .where(
+                    Empresa.cnpj.in_(candidatos),
+                    Empresa.escritorio_id == self.escritorio_id,
+                )
+                .order_by(Empresa.id)
             )
-            .limit(1)
-        ).scalar_one_or_none()
+            .scalars()
+            .all()
+        )
+        if not encontradas:
+            return None
+        if len(encontradas) > 1:
+            # As duas pontas são do escritório — transferência entre filiais,
+            # por exemplo.  O documento deveria ser escriturado pelas duas (uma
+            # como saída, outra como entrada), e o modelo só admite uma
+            # `empresa_id`.  Fica com o EMITENTE, por ser quem tem a obrigação
+            # de emitir, e o aviso registra o que está sendo perdido.
+            por_cnpj = {e.cnpj: e for e in encontradas}
+            escolhida = por_cnpj.get(normalizado.emitente_cnpj) or encontradas[0]
+            logger.warning(
+                "Documento %s tem as duas pontas cadastradas (%s); escriturado "
+                "para %s. A contraparte precisa de escrituração própria.",
+                normalizado.chave,
+                ", ".join(sorted(por_cnpj)),
+                escolhida.cnpj,
+            )
+            return escolhida
+        return encontradas[0]
 
     @staticmethod
     def _sentido(normalizado: DocumentoNormalizado, empresa: Empresa | None) -> Sentido:

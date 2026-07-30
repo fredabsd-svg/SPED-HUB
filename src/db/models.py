@@ -184,6 +184,13 @@ class Empresa(Base):
     tip_ecd: Mapped[str | None] = mapped_column(String(1))
     ident_mf: Mapped[str | None] = mapped_column(String(1))
     ind_esc_cons: Mapped[str | None] = mapped_column(String(1))
+    # ── Configuração para a EFD ICMS/IPI ──────────────────────────────────
+    # Os dois campos do registro 0000 que não dá para derivar de documento
+    # nenhum: dependem do enquadramento da empresa junto à SEFAZ.  Sem eles o
+    # arquivo sai, mas com o enquadramento errado — e o validador aceita,
+    # porque não tem como saber.  Daí serem cadastro, não default.
+    ind_perfil: Mapped[str | None] = mapped_column(String(1))  # A, B ou C
+    ind_ativ: Mapped[str | None] = mapped_column(String(1))  # 0=industrial, 1=outros
     escritorio_id: Mapped[int | None] = mapped_column(
         ForeignKey("escritorios.id"), nullable=True, index=True
     )

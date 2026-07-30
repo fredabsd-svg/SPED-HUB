@@ -46,6 +46,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 40 | Camada efetiva: ajustes com histórico e reversão por lote | concluída | `tests/test_camada_efetiva.py` | — |
 | 41 | Motor de classificação fiscal com regras, prioridade e conflito | concluída | `tests/test_classificacao_fiscal.py` | nenhuma tela mostra as sugestões ainda; a aplicação é por chamada |
 | 42 | Alterações em massa: seleção, simulação com impacto, proteções e reversão | concluída | `tests/test_alteracoes_em_massa.py` | recálculo de totais (§12.5) segue no roadmap |
+| 43 | Gerador da EFD ICMS/IPI (blocos 0, C, E, 9) | concluída | `tests/test_gerador_efd_icms.py` | inventário, ativo, serviços, ajustes 5.1.1 e ST seguem fora — ver `docs/modules/escrituracoes.md` |
 
 ## Limites do comportamento atual
 
@@ -63,6 +64,7 @@ descreve funcionalidade futura (§1.1).
 | Chave de API sem dono lê todos os escritórios | Toda chave criada antes da coluna `escritorio_id` ficou com dono nulo, e nulo significa "chave de instância". Preenchê-las com um escritório arbitrário quebraria integração em produção; com o errado, seria pior — a integração pararia de ver os dados certos sem explicação. Chave nova deve ser criada com dono | — (é escolha de retrocompatibilidade) |
 | `SPED_HUB_SECRET_KEY` não tem consumidor | A única variável reservada que sobrou (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. Ligá-la exigiria decidir *qual* segredo ela é, e hoje nenhum componente precisa de um | — |
 | Criar usuário depois do primeiro exige acesso ao servidor | O `/register` é público: enquanto esteve aberto, qualquer um que alcançasse o servidor criava conta e caía no mesmo grupo do contador — numa instalação de escritório único ninguém tem `escritorio_id`, nem os usuários nem as empresas importadas. Fechá-lo foi a correção; a alternativa (tela de convite com papel e escritório) é trabalho de front-end que ninguém pediu ainda. `sped-hub usuario criar` resolve o caso real | Tela de gestão de usuários no painel |
+| Documento entre duas empresas do mesmo escritório é escriturado por uma só | Transferência entre filiais deveria entrar como saída numa e entrada na outra, e o modelo só admite uma `empresa_id` por documento. Fica com o emitente, por ser quem tem a obrigação de emitir, e o log avisa que a contraparte precisa de escrituração própria | Documento com escrituração por ambas as pontas |
 | A primeira subida usa certificado autoassinado, e o navegador reclama | O certificado do Let's Encrypt só pode ser emitido depois de o nginx responder na porta 80 no domínio real, com DNS já apontado — nada disso existe quando alguém roda `docker compose up` pela primeira vez. Antes o nginx recusava subir; agora ele sobe, avisa no log que é autoassinado e serve em `http://localhost/`. A emissão do certificado real é um comando manual, documentado em `docs/deploy.md` | — (é escolha: emitir sozinho exigiria domínio e DNS que o sistema não tem como adivinhar) |
 
 ## Passivo de documentação de módulo (§1.4)
@@ -71,7 +73,7 @@ A regra vale por adoção: módulo novo ou alterado exige o documento. A lista
 abaixo diminui a cada PR que toca nesses módulos.
 
 **Documentados:** `api`, `async_jobs`, `audit`, `auth`, `cache`, `cli`,
-`dashboard`, `db`, `documentos`, `ecd_importer`, `email_service`, `filters`,
+`dashboard`, `db`, `documentos`, `escrituracoes`, `ecd_importer`, `email_service`, `filters`,
 `logging_config`, `monitoring`, `parsers`, `ratelimit`, `reports`,
 `settings`, `uploads`, `validators`, `version`, `watchdog`, `webhooks`,
 `worker_queue`, `worker_runner`.
