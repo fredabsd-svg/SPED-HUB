@@ -42,13 +42,21 @@ As três camadas que a suíte separa:
 | `criar_regra(session, ...)` / `validar_regra(regra)` | Cadastra já validada. |
 | `regras_aplicaveis(session, doc)` | As que valem, da maior prioridade à menor. |
 | `OPERADORES` | `igual`, `em`, `comeca_com`, `vazio`, `maior_que`… |
+| `Selecao(escritorio_id=, empresa_id=, data_inicio=, data_fim=, filtros=)` | O recorte da massa. Recusa seleção sem filtro. |
+| `Filtro(campo, operador, valor)` | Uma condição do recorte; todas são E. |
+| `Alteracao(campo, valor, apenas_vazios=)` | O que fazer com o selecionado. |
+| `simular(session, selecao, alteracoes)` | O que mudaria — **não toca no banco**. |
+| `confirmar(session, simulacao, motivo=, forcar=)` | Grava num lote reversível. |
+| `Simulacao` | Contagens, `impacto_total` em reais, `por_campo()`, `avisos`. |
+| `Aviso` | Problema detectado, com `impeditivo` separando recusa de sinalização. |
 
 ## O que não faz
 
-Não altera em massa e não gera escrituração — ver `docs/roadmap.md`. A
-camada efetiva e a classificação existem, mas nada além dos testes as consome:
-nenhuma tela as mostra e nenhum gerador as lê. O motor **não escolhe** entre
-regras empatadas e **não aplica** nada sozinho. Não lê NFS-e: cada provedor municipal precisa do seu
+Não gera escrituração — ver `docs/roadmap.md`. Modelo, importação, camada
+efetiva, classificação e alterações em massa existem, mas nada além dos testes
+as consome: nenhuma tela as mostra e nenhum gerador as lê. O motor **não
+escolhe** entre regras empatadas, `simular` **não grava**, e nenhum recálculo
+de totais existe ainda (§12.5). Não lê NFS-e: cada provedor municipal precisa do seu
 adaptador. Não valida códigos fiscais contra as tabelas oficiais, e **não
 calcula tributo nenhum**: os valores de CBS, IBS e IS são lidos do XML, nunca
 presumidos.
@@ -121,6 +129,25 @@ dependência nova. Quem depende: nada ainda; o dashboard não expõe a Central.
 - **`avaliar` não grava.** Sugerir e aplicar são passos separados: uma
   classificação errada aplicada em silêncio sobre um mês inteiro só se
   descobre na malha fina.
+- **O filtro da massa trabalha sobre o efetivo.** Um item já classificado
+  tem de aparecer pelo valor novo, senão a segunda passada de saneamento não
+  enxerga o que a primeira fez. Como o efetivo não existe em SQL, o recorte é
+  em duas etapas: o banco reduz pelo escopo (escritório, empresa, período), o
+  conteúdo é conferido em memória.
+- **Filtro de item alcança o cabeçalho quando algum item casa.** Sem isso,
+  "documentos que tenham item com NCM 2203, mudar a natureza de operação"
+  seria impossível — o cabeçalho não tem a coluna `ncm` e nunca casaria.
+- **Campo que existe nos dois níveis só atinge o item.** `base_icms` é parcela
+  no item e TOTAL no documento; sobrescrever o total com o valor de uma
+  parcela deixaria o cabeçalho sem bater com a soma dos itens. Ajustar total é
+  recálculo, não substituição.
+- **Seleção sem filtro é recusada.** Alcançaria a base inteira do escritório, e
+  `desfazer_lote` seria a única saída depois do estrago.
+- **As proteções são deliberadamente poucas.** Só o que dá para checar sem
+  cadastro que ainda não existe: CFOP contra o sentido do documento, formato de
+  NCM/CEST/CST, documento cancelado. CSOSN em empresa não optante exigiria o
+  regime tributário cadastrado — fingir que verifica seria pior que não
+  verificar.
 - **O ICMS vem embrulhado na variante** (`ICMS00`, `ICMS60`, `ICMSSN102`…). O
   adaptador desce no primeiro filho em vez de listar as ~20 formas, que mudam
   a cada nota técnica.
@@ -131,5 +158,6 @@ dependência nova. Quem depende: nada ainda; o dashboard não expõe a Central.
 pytest tests/test_documentos_fiscais.py -q  # adaptador, reforma, XML hostil, duplicidade
 pytest tests/test_camada_efetiva.py -q      # ajustes, tipos, reversão por lote
 pytest tests/test_classificacao_fiscal.py -q  # regras, prioridade, conflito, vigência
+pytest tests/test_alteracoes_em_massa.py -q   # seleção, simulação, proteções, reversão
 pytest tests/test_migrations.py -q          # o schema da migração bate com os modelos
 ```
