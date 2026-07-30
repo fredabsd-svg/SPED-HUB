@@ -13,7 +13,10 @@ nada acusasse: são divergências entre arquivos que ninguém executa junto.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -293,6 +296,317 @@ class TestWorkflowDeRelease:
         assert "APP_VERSION" in script and "exit 1" in script
 
 
+class TestIntegridadeDoCompose:
+    """Erros que o compose só acusa na hora de subir, no servidor."""
+
+    def test_todo_volume_nomeado_esta_declarado(self, compose):
+        """Volume usado por um serviço e ausente do topo aborta o `up` inteiro.
+
+        `docker compose` recusa o arquivo com "service refers to undefined
+        volume" — e derruba todos os serviços, não só o que errou.
+        """
+        declarados = set(compose.get("volumes") or {})
+        for nome_servico, servico in compose["services"].items():
+            for montagem in servico.get("volumes") or []:
+                if not isinstance(montagem, str) or ":" not in montagem:
+                    continue
+                origem = montagem.split(":")[0]
+                # Bind mount (./x, /x, ../x) não precisa de declaração.
+                if origem.startswith((".", "/", "~")):
+                    continue
+                assert origem in declarados, (
+                    f"o serviço {nome_servico} monta o volume nomeado "
+                    f"'{origem}', que não está declarado no topo do compose"
+                )
+
+
+class TestNginxSobeSemCertificado:
+    """`docker compose up` tem de funcionar na primeira execução.
+
+    O `nginx.conf` apontava direto para
+    `/etc/letsencrypt/live/<dominio>/fullchain.pem`. Numa instalação nova o
+    arquivo não existe, o nginx recusa subir, e o container entra em laço:
+
+        nginx: [emerg] cannot load certificate ".../fullchain.pem"
+        sped-hub-nginx exited with code 1 (restarting)
+
+    E não havia saída: o certbot do compose só roda `renew`, que não emite nada
+    na primeira vez, e a emissão precisa do nginx já servindo o desafio ACME na
+    porta 80. Ovo e galinha — inclusive o primeiro passo do próprio guia de
+    deploy não funcionava.
+    """
+
+    @pytest.fixture
+    def entrypoint(self) -> str:
+        return (REPO_ROOT / "deploy" / "nginx" / "entrypoint.sh").read_text("utf-8")
+
+    def test_nginx_conf_nao_aponta_para_certificado_fixo(self):
+        """A causa direta do laço de reinício."""
+        nginx = NGINX.read_text("utf-8")
+        diretas = re.findall(r"^\s*ssl_certificate(?:_key)?\s+(\S+);", nginx, re.M)
+        assert not diretas, (
+            f"o nginx.conf aponta direto para {diretas} — se o arquivo não existir, "
+            "o nginx recusa subir e o container entra em laço de reinício"
+        )
+
+    def test_certificado_vem_de_include(self):
+        nginx = NGINX.read_text("utf-8")
+        assert "include /etc/nginx/ssl/certificado.conf;" in nginx
+
+    def test_entrypoint_gera_autoassinado_quando_falta(self, entrypoint):
+        assert "openssl req -x509" in entrypoint
+        assert "autoassinado" in entrypoint
+
+    def test_entrypoint_avisa_que_e_autoassinado(self, entrypoint):
+        """Subir com autoassinado sem avisar seria pior que falhar."""
+        assert "AVISO" in entrypoint
+        assert "NÃO para produção" in entrypoint
+
+    def test_entrypoint_entrega_ao_entrypoint_oficial(self, entrypoint):
+        """Sem o `exec`, os scripts de /docker-entrypoint.d/ não rodam."""
+        assert "exec /docker-entrypoint.sh" in entrypoint
+
+    def test_imagem_do_nginx_traz_openssl(self):
+        """O entrypoint depende do binário; a imagem oficial não o garante.
+
+        Assumir que está lá seria apostar numa suposição que só quebraria no
+        servidor do escritório, na primeira subida.
+        """
+        dockerfile = (REPO_ROOT / "deploy" / "nginx" / "Dockerfile").read_text("utf-8")
+        assert "openssl" in dockerfile
+        assert "apk add" in dockerfile
+
+    def test_compose_constroi_a_imagem_do_nginx(self, compose):
+        nginx = compose["services"]["nginx"]
+        assert "build" in nginx, "o nginx precisa da imagem própria, com openssl"
+        assert nginx["build"]["context"] == "./deploy/nginx"
+
+    def test_volume_de_ssl_e_gravavel(self, compose):
+        """O autoassinado e os includes são escritos ali.
+
+        `/etc/letsencrypt` segue somente-leitura, que é o certo — o nginx não
+        tem por que escrever no diretório do certbot.
+        """
+        montagens = compose["services"]["nginx"]["volumes"]
+        ssl = [m for m in montagens if "/etc/nginx/ssl" in m]
+        assert ssl, "falta o volume de /etc/nginx/ssl"
+        assert not ssl[0].endswith(":ro"), "o volume de ssl precisa ser gravável"
+        letsencrypt = [m for m in montagens if "/etc/letsencrypt" in m]
+        assert letsencrypt and letsencrypt[0].endswith(
+            ":ro"
+        ), "/etc/letsencrypt deve seguir somente-leitura para o nginx"
+
+    def test_http2_nao_usa_diretiva_depreciada(self):
+        """`listen ... http2` gerava aviso em toda subida desde o nginx 1.25."""
+        nginx = NGINX.read_text("utf-8")
+        assert "listen 443 ssl http2" not in nginx
+        assert "http2 on;" in nginx
+
+    def test_imagem_base_suporta_a_diretiva_http2(self):
+        """`http2 on;` só existe a partir do nginx 1.25.1.
+
+        Em versão anterior não é aviso, é erro fatal — `unknown directive
+        "http2"` — e o container volta ao laço de reinício que este trabalho
+        acabou de resolver. Descoberto validando o `nginx.conf` com o nginx
+        1.24, que rejeita a diretiva.
+        """
+        dockerfile = (REPO_ROOT / "deploy" / "nginx" / "Dockerfile").read_text("utf-8")
+        base = re.search(r"^FROM\s+nginx:(\d+)\.(\d+)", dockerfile, re.M)
+        assert base, "não deu para ler a versão do nginx no FROM"
+        maior, menor = int(base.group(1)), int(base.group(2))
+        assert (maior, menor) >= (1, 25), (
+            f"o nginx.conf usa `http2 on;`, que exige nginx >= 1.25, mas a "
+            f"imagem base é {maior}.{menor}"
+        )
+
+    def test_nginx_nao_resolve_o_backend_na_subida(self):
+        """Nome de host resolvido na subida prende o nginx a um IP morto.
+
+        Com `upstream { server web:8000; }` — ou com o nome escrito direto no
+        `proxy_pass` — o nginx consulta o DNS uma vez, ao ler a configuração, e
+        guarda o IP para sempre. Recriar o `web` lhe dá um IP novo, e o nginx
+        seguia mandando para o antigo: 502 em tudo, com a aplicação saudável ao
+        lado, até alguém reiniciar o nginx na mão.
+
+        E, se o nome não resolve na subida, não é 502 — é erro fatal
+        (`host not found in upstream`) e o mesmo laço de reinício do
+        certificado ausente.
+        """
+        proxy = (REPO_ROOT / "deploy" / "nginx" / "proxy.conf").read_text("utf-8")
+        destino = re.search(r"^\s*proxy_pass\s+(\S+);", proxy, re.M)
+        assert destino, "proxy.conf sem proxy_pass"
+        assert "$" in destino.group(1), (
+            f"proxy_pass aponta para {destino.group(1)} sem variável — o nginx "
+            "resolve o nome na subida e recusa subir sem o backend no ar"
+        )
+
+        nginx = NGINX.read_text("utf-8")
+        assert not re.search(
+            r"^\s*upstream\s+\S+\s*\{", nginx, re.M
+        ), "bloco `upstream` volta a resolver o nome do backend na subida"
+        assert re.search(r"^\s*resolver\s+\S+", nginx, re.M), (
+            "proxy_pass com variável exige `resolver` declarado, senão toda "
+            "requisição falha com 'no resolver defined to resolve'"
+        )
+
+    def test_ci_sobe_o_nginx_sem_certificado_e_sem_backend(self):
+        """O único lugar onde o cenário do bug roda de verdade.
+
+        Os testes acima conferem arquivos e executam o entrypoint; nenhum sobe
+        o nginx. O bug original — container em laço de reinício na instalação
+        nova — só aparece com o nginx de fato subindo, e para isso é preciso
+        Docker. O job `docker` do CI tem.
+        """
+        ci = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text("utf-8"))
+        passos = ci["jobs"]["docker"]["steps"]
+        script = "\n".join(str(p.get("run", "")) for p in passos)
+        assert "deploy/nginx" in script, "o CI não constrói a imagem do nginx"
+        assert "docker run" in script, "o CI não sobe o container do nginx"
+
+    def test_dominio_e_configuravel(self, compose, entrypoint):
+        """Sem isso, o operador tinha de editar o nginx.conf à mão."""
+        assert "SPED_HUB_DOMINIO" in entrypoint
+        ambiente = compose["services"]["nginx"].get("environment") or []
+        assert any("SPED_HUB_DOMINIO" in str(v) for v in ambiente)
+
+    def test_guia_explica_que_a_emissao_inicial_e_manual(self):
+        """`certbot renew` não emite na primeira vez — o guia tem de dizer."""
+        deploy = (REPO_ROOT / "docs" / "deploy.md").read_text("utf-8")
+        assert "certonly" in deploy
+        assert "renew" in deploy
+
+    def test_todo_include_fixo_chega_na_imagem(self, compose):
+        """`include` de arquivo ausente derruba o nginx igual ao certificado.
+
+        Os includes de `/etc/nginx/ssl/` o entrypoint escreve em tempo de
+        execução. Os demais têm de vir na imagem (COPY) ou montados pelo
+        compose — não há terceira origem.
+        """
+        fontes = [NGINX, REPO_ROOT / "deploy" / "nginx" / "entrypoint.sh"]
+        referidos = set()
+        for fonte in fontes:
+            referidos |= set(re.findall(r"include\s+(/etc/nginx/\S+?);", fonte.read_text("utf-8")))
+        em_tempo_de_execucao = {c for c in referidos if c.startswith("/etc/nginx/ssl/")}
+        assert em_tempo_de_execucao, "nenhum include gerado pelo entrypoint"
+
+        dockerfile = (REPO_ROOT / "deploy" / "nginx" / "Dockerfile").read_text("utf-8")
+        montagens = compose["services"]["nginx"]["volumes"]
+        for caminho in referidos - em_tempo_de_execucao:
+            copiado = re.search(rf"^COPY\s+\S+\s+{re.escape(caminho)}\s*$", dockerfile, re.M)
+            montado = any(m.split(":")[1] == caminho for m in montagens if ":" in m)
+            assert copiado or montado, (
+                f"o nginx inclui {caminho}, mas nem o Dockerfile o copia nem o "
+                "compose o monta — o nginx recusa subir"
+            )
+
+
+@pytest.mark.skipif(
+    shutil.which("openssl") is None or shutil.which("sh") is None,
+    reason="precisa de sh e openssl para executar o entrypoint",
+)
+class TestEntrypointDoNginxExecutado:
+    """Roda o entrypoint de verdade, em vez de conferir o texto dele.
+
+    Grep no script prova que uma linha existe, não que o script produz os
+    arquivos que o `nginx.conf` inclui. Se o entrypoint deixar de escrever um
+    include, o nginx volta a recusar subir — `include` de arquivo ausente é
+    erro fatal, exatamente como o certificado ausente era.
+    """
+
+    @staticmethod
+    def _executar(raiz: Path, dominio: str = "sped-hub") -> str:
+        """Executa o entrypoint com as raízes absolutas redirecionadas.
+
+        Só troca prefixos de caminho e neutraliza o `exec` final (que trocaria
+        o processo pelo nginx). A lógica de decisão do certificado é a real.
+        """
+        script = (REPO_ROOT / "deploy" / "nginx" / "entrypoint.sh").read_text("utf-8")
+        script = script.replace('"/etc/letsencrypt', f'"{raiz}/etc/letsencrypt')
+        script = script.replace('"/etc/nginx', f'"{raiz}/etc/nginx')
+        script = script.replace("exec /docker-entrypoint.sh", ": /docker-entrypoint.sh")
+        alvo = raiz / "entrypoint.sh"
+        alvo.write_text(script, encoding="utf-8")
+        concluido = subprocess.run(
+            ["sh", str(alvo), "nginx", "-g", "daemon off;"],
+            capture_output=True,
+            text=True,
+            env={"PATH": os.environ.get("PATH", ""), "SPED_HUB_DOMINIO": dominio},
+        )
+        assert (
+            concluido.returncode == 0
+        ), f"o entrypoint falhou (código {concluido.returncode}): {concluido.stderr}"
+        return concluido.stdout
+
+    @staticmethod
+    def _includes_de_ssl_no_nginx_conf() -> set[str]:
+        nginx = NGINX.read_text("utf-8")
+        return set(re.findall(r"include\s+/etc/nginx/ssl/(\S+);", nginx))
+
+    def test_escreve_todo_include_de_ssl_que_o_nginx_conf_espera(self, tmp_path):
+        """`include` de arquivo inexistente é erro fatal no nginx, como o cert."""
+        esperados = self._includes_de_ssl_no_nginx_conf()
+        assert esperados, "nenhum include de /etc/nginx/ssl no nginx.conf"
+
+        self._executar(tmp_path)
+        gerado = tmp_path / "etc" / "nginx" / "ssl"
+        faltando = {nome for nome in esperados if not (gerado / nome).is_file()}
+        assert not faltando, (
+            f"o nginx.conf inclui {sorted(faltando)}, mas o entrypoint não escreve "
+            "esses arquivos — o nginx recusa subir"
+        )
+
+    def test_sem_certificado_real_usa_autoassinado_valido(self, tmp_path):
+        saida = self._executar(tmp_path, dominio="escritorio.exemplo")
+        assert "AUTOASSINADO" in saida
+
+        conf = (tmp_path / "etc" / "nginx" / "ssl" / "certificado.conf").read_text("utf-8")
+        caminhos = dict(re.findall(r"(ssl_certificate(?:_key)?)\s+(\S+);", conf))
+        assert set(caminhos) == {"ssl_certificate", "ssl_certificate_key"}
+
+        pem = Path(caminhos["ssl_certificate"])
+        assert pem.is_file(), "o certificado apontado não existe"
+        assert Path(caminhos["ssl_certificate_key"]).is_file()
+        texto = subprocess.run(
+            ["openssl", "x509", "-in", str(pem), "-noout", "-subject"],
+            capture_output=True,
+            text=True,
+        )
+        assert texto.returncode == 0, f"certificado ilegível: {texto.stderr}"
+        assert "escritorio.exemplo" in texto.stdout
+
+    def test_sem_certificado_real_o_http_serve_a_aplicacao(self, tmp_path):
+        """Redirecionar para um HTTPS autoassinado só rende aviso do navegador."""
+        self._executar(tmp_path)
+        http = (tmp_path / "etc" / "nginx" / "ssl" / "http-raiz.conf").read_text("utf-8")
+        assert "proxy.conf" in http
+        assert "301" not in http
+
+    def test_com_certificado_real_o_http_redireciona(self, tmp_path):
+        vivo = tmp_path / "etc" / "letsencrypt" / "live" / "escritorio.exemplo"
+        vivo.mkdir(parents=True)
+        (vivo / "fullchain.pem").write_text("cert", encoding="utf-8")
+        (vivo / "privkey.pem").write_text("chave", encoding="utf-8")
+
+        saida = self._executar(tmp_path, dominio="escritorio.exemplo")
+        assert "AUTOASSINADO" not in saida
+
+        conf = (tmp_path / "etc" / "nginx" / "ssl" / "certificado.conf").read_text("utf-8")
+        assert str(vivo / "fullchain.pem") in conf
+        assert str(vivo / "privkey.pem") in conf
+        http = (tmp_path / "etc" / "nginx" / "ssl" / "http-raiz.conf").read_text("utf-8")
+        assert "301 https://$host$request_uri" in http
+
+    def test_reinicio_preserva_o_autoassinado(self, tmp_path):
+        """Regerar a cada subida invalidaria a sessão TLS de quem já aceitou."""
+        self._executar(tmp_path)
+        pem = tmp_path / "etc" / "nginx" / "ssl" / "autoassinado.pem"
+        antes = pem.read_bytes()
+
+        saida = self._executar(tmp_path)
+        assert "gerado" not in saida, "o entrypoint regerou o certificado no reinício"
+        assert pem.read_bytes() == antes
+
+
 class TestDocumentacaoDeDeploy:
     @pytest.fixture
     def deploy(self) -> str:
@@ -314,10 +628,17 @@ class TestDocumentacaoDeDeploy:
         assert "migrate" in compose["services"]
         assert "migrar adotar" in deploy
 
-    def test_caminho_do_certificado_confere_com_o_nginx(self, deploy):
-        nginx = NGINX.read_text("utf-8")
-        caminho = re.search(r"ssl_certificate\s+(\S+)/fullchain\.pem", nginx).group(1)
-        assert caminho in deploy, f"o checklist não menciona {caminho}, usado pelo nginx"
+    def test_caminho_do_certificado_confere_com_o_entrypoint(self, deploy):
+        """O caminho real vive no entrypoint, que é quem decide o certificado.
+
+        Antes vivia no `nginx.conf` — e apontar direto para o Let's Encrypt era
+        justamente o que fazia o nginx recusar subir em instalação nova.
+        """
+        entrypoint = (REPO_ROOT / "deploy" / "nginx" / "entrypoint.sh").read_text("utf-8")
+        assert "/etc/letsencrypt/live/" in entrypoint
+        assert (
+            "/etc/letsencrypt/live/" in deploy
+        ), "o guia não menciona o caminho onde o nginx procura o certificado"
 
     def test_nao_cita_servico_inexistente_no_compose(self, deploy, compose):
         """Comando de checklist que aponta para serviço que não existe falha na hora errada."""

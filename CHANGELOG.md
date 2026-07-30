@@ -8,6 +8,27 @@ interno da implementação.
 
 ## [Não publicado]
 
+### Corrigido
+- **`docker compose up` não subia numa instalação nova.** O nginx apontava
+  direto para o certificado do Let's Encrypt, que ainda não existe na primeira
+  execução; ele recusava subir (`cannot load certificate`) e o container
+  entrava em laço de reinício. Não havia saída pelo próprio compose: o certbot
+  configurado só renova, e emitir o primeiro certificado exige o nginx já
+  respondendo na porta 80. Agora o nginx gera um certificado autoassinado
+  quando não encontra o real, sobe, avisa no log que é autoassinado e serve a
+  aplicação em `http://localhost/` — e passa a redirecionar para HTTPS assim
+  que o certificado de verdade aparece. O primeiro passo do próprio guia de
+  deploy (`docker compose up -d nginx`) era o passo que falhava.
+- **Depois de recriar o container da aplicação, o site respondia 502 em tudo.**
+  O nginx resolvia o endereço do backend uma única vez, ao subir, e guardava o
+  IP; o container recriado ganha IP novo, e o nginx seguia mandando para o
+  antigo — com a aplicação saudável ao lado — até alguém reiniciá-lo na mão.
+  Agora o endereço é resolvido a cada requisição.
+- O domínio do certificado virou configuração (`SPED_HUB_DOMINIO`); antes era
+  preciso editar o `nginx.conf` à mão.
+- O aviso `the "listen ... http2" directive is deprecated` deixou de aparecer
+  a cada subida.
+
 ### Segurança
 - **Uma chave de API entregue a um integrador dava a ele controle da
   instância.** Ela podia criar novas chaves para si — e revogar a original não

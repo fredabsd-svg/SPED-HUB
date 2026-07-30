@@ -146,3 +146,50 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t sped-hub .
+
+      # O nginx apontava direto para o certificado do Let's Encrypt e recusava
+      # subir em instalação nova, deixando o container em laço de reinício.
+      # Conferir arquivo não pega isso: só pega subindo o container sem
+      # certificado e sem backend, que é o estado de quem roda
+      # `docker compose up` pela primeira vez.
+      - name: nginx sobe sem certificado e sem backend
+        run: |
+          set -eux
+          docker build -t sped-hub-nginx ./deploy/nginx
+
+          # Rede própria: é onde o DNS embutido do Docker (127.0.0.11) existe,
+          # como na rede do compose. Na bridge padrão ele não responde.
+          docker network create sped-hub-teste
+          docker run -d --name nginx-teste --network sped-hub-teste -p 8080:80 \
+            -e SPED_HUB_DOMINIO=exemplo.teste \
+            -v "$PWD/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            sped-hub-nginx
+
+          # 15s cobre a geração do autoassinado com folga; o laço de reinício
+          # que este teste procura já teria acontecido várias vezes até lá.
+          sleep 15
+          docker logs nginx-teste
+
+          # O container tem de estar de pé — não reiniciando, não morto.
+          test "$(docker inspect -f '{{.State.Running}}' nginx-teste)" = true
+          test "$(docker inspect -f '{{.State.Restarting}}' nginx-teste)" = false
+          test "$(docker inspect -f '{{.State.RestartCount}}' nginx-teste)" = 0
+
+          # Sem certificado real: avisa que é autoassinado e serve a aplicação
+          # em HTTP, sem redirecionar (redirecionar para um HTTPS autoassinado
+          # só rende aviso do navegador).
+          docker logs nginx-teste 2>&1 | grep -q AUTOASSINADO
+
+          # 5xx é o certo aqui: não há backend. O que não pode é o nginx
+          # morrer por causa disso — antes, nem chegava a responder.
+          codigo=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 http://127.0.0.1:8080/)
+          echo "nginx respondeu $codigo sem backend"
+          case "$codigo" in 5??) ;; *) echo "esperado 5xx, veio $codigo"; exit 1;; esac
+
+          # Nenhum aviso de diretiva depreciada na subida.
+          if docker logs nginx-teste 2>&1 | grep -q 'directive is deprecated'; then
+            echo 'nginx reclamou de diretiva depreciada'; exit 1
+          fi
+
+          docker rm -f nginx-teste
+          docker network rm sped-hub-teste
