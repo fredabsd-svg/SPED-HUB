@@ -26,7 +26,6 @@ verificação exige que a razão esteja escrita.
 | Item | O que falta decidir | Marcador de ausência |
 |---|---|---|
 | Retomada de importação interrompida a partir de onde parou | Como representar "escrituração incompleta" sem que os relatórios a tratem como completa. Hoje a importação interrompida é encerrada e pede reenvio do arquivo | `src.ecd_importer:retomar` |
-| Expurgo do histórico de entregas de webhook | Qual retenção. Há uma linha por tentativa, e nada as remove | `src.webhooks:purgar_deliveries` |
 | Reenvio automático de webhook em segundo plano | Onde o laço mora: worker, cron ou fila. Hoje o reenvio é acionado por gente | `src.webhooks:reenviar_pendentes_em_segundo_plano` |
 
 ## Depende de contrato ou credencial

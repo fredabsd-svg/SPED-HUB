@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
@@ -274,6 +274,56 @@ class WebhookService:
             if status:
                 query = query.where(WebhookDelivery.status == status)
             return list(session.execute(query.limit(limite)).scalars())
+        finally:
+            session.close()
+
+    def purgar_deliveries(self, dias: int | None = None) -> int:
+        """Remove entregas concluídas mais antigas que `dias`.
+
+        `dias=None` usa `SPED_HUB_WEBHOOK_RETENTION_DAYS`; `0` desliga e nada é
+        removido.  Há uma linha por **tentativa**, não por evento, então uma
+        integração instável enche a tabela rápido — e nada a removia.
+
+        Só entrega em estado terminal sai.  Entrega em voo (`pending`) e
+        entrega abandonada ficam, independentemente da idade: a abandonada é
+        justamente a que o operador ainda pode recuperar, e apagá-la
+        transformaria "evento recuperável" em "evento perdido para sempre".
+        """
+        if dias is None:
+            dias = get_settings().webhook_delivery_retention_days
+        dias = int(dias)
+        if dias <= 0:
+            return 0
+
+        corte = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=dias)
+        session = self._get_session()
+        try:
+            abandonadas = {linha.id for linha in self.deliveries_abandonadas()}
+            condicao = [
+                WebhookDelivery.status.in_(STATUS_TERMINAIS),
+                WebhookDelivery.criado_em < corte,
+            ]
+            if abandonadas:
+                condicao.append(WebhookDelivery.id.notin_(abandonadas))
+            alvos = [
+                linha_id
+                for (linha_id,) in session.execute(
+                    select(WebhookDelivery.id).where(*condicao)
+                ).all()
+            ]
+            if not alvos:
+                return 0
+            # Em lotes: um `IN` com milhares de itens estoura o limite de
+            # parâmetros do SQLite (999) e de drivers de Postgres.
+            for inicio in range(0, len(alvos), 500):
+                session.execute(
+                    delete(WebhookDelivery).where(
+                        WebhookDelivery.id.in_(alvos[inicio : inicio + 500])
+                    )
+                )
+            session.commit()
+            logger.info("Expurgo de entregas de webhook: %d removidas (> %dd)", len(alvos), dias)
+            return len(alvos)
         finally:
             session.close()
 

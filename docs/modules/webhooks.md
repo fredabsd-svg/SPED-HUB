@@ -23,6 +23,7 @@ entregas falhas.
 | `WebhookService.deliveries_abandonadas(webhook_id=None)` | Entregas sem desfecho porque o processo morreu no meio. |
 | `STATUS_DESFECHO` / `STATUS_TERMINAIS` | Vocabulário de `WebhookDelivery.status`. |
 | `LOTE_DE_REENVIO` | Quantas entregas um clique em "Reenviar falhas" processa. |
+| `WebhookService.purgar_deliveries(dias=None)` | Remove entregas concluídas vencidas; preserva em voo e abandonadas. |
 | `emitir(tipo, dados, *, db_path=None, aguardar=False)` | Entrada síncrona que dispara um evento. Não bloqueia e não propaga falha. |
 | `BACKOFF_BASE`, `BACKOFF_MAX` | Constantes do backoff (2 s .. cap 60 s). |
 
@@ -107,6 +108,15 @@ consome via essas rotas, não importa o módulo diretamente.
 - **O evento leva metadado, nunca escrituração.** `relatorio.gerado` informa
   formato, nome do arquivo, empresa e período — não os saldos. Webhook sai
   para endpoint de terceiro.
+- **O expurgo nunca remove entrega em voo nem abandonada.** `purgar_deliveries`
+  filtra por estado terminal e exclui o que `deliveries_abandonadas` aponta.
+  A abandonada é justamente a que o operador ainda pode recuperar, e a idade
+  dela é grande por definição — um expurgo por idade a pegaria primeiro, e
+  transformaria "evento recuperável" em "evento perdido para sempre".
+- **O `DELETE` sai fatiado em lotes.** Um `IN` com milhares de itens estoura o
+  limite de parâmetros por statement (999 em SQLite antigo; há teto também nos
+  drivers de Postgres). Há teste contando os statements emitidos, porque contar
+  linhas removidas passaria mesmo sem o fatiamento.
 - **Um registro com `eventos` ilegível não bloqueia os demais.** O
   `json.loads` sem guarda derrubava a entrega inteira no primeiro registro
   corrompido.
@@ -132,6 +142,8 @@ pytest tests/test_migrations.py -k Reconciliacao -q      # migração dos resíd
   abandonadas.
 - Não reenvia sozinho: `POST /api/v1/webhooks/retry` é acionado por gente. Um
   evento perdido por queda do processo fica esperando alguém clicar.
-- Não faz expurgo de `WebhookDelivery`: o histórico cresce sem limite.
+- Não decide sozinho quando expurgar: `purgar_deliveries` existe, mas quem o
+  chama periodicamente é o laço de manutenção do `dashboard.app`. Rodando o
+  módulo fora da aplicação (CLI, script), o expurgo não acontece.
 - Não suporta mTLS nem validação de certificado customizada.
 - Não deduplica eventos nem garante ordem de entrega.

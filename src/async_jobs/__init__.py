@@ -11,7 +11,10 @@ Fluxo:
   1. POST /api/upload-async → cria AsyncJob (status=pending), inicia background task
   2. Background task processa ECD, atualiza progresso (0-100%)
   3. GET /api/jobs/{id} → retorna status, progresso, resultado ou erro
-  4. Jobs concluídos expiram após 24h (limpeza automática)
+  4. Jobs concluídos expiram por `SPED_HUB_JOB_RETENTION_HOURS` (24h por
+     omissão).  Quem executa é o laço de manutenção do `dashboard.app`, não
+     este módulo: `limpar_antigos` existia aqui e a "limpeza automática" que
+     esta linha prometia não tinha ninguém a chamando.
 """
 
 import datetime
