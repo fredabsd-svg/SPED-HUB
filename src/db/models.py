@@ -191,6 +191,21 @@ class Empresa(Base):
     # porque não tem como saber.  Daí serem cadastro, não default.
     ind_perfil: Mapped[str | None] = mapped_column(String(1))  # A, B ou C
     ind_ativ: Mapped[str | None] = mapped_column(String(1))  # 0=industrial, 1=outros
+    # ── Configuração para a EFD-Contribuições ─────────────────────────────
+    # COD_INC_TRIB do registro 0110: 1=não cumulativo, 2=cumulativo, 3=ambos.
+    # É o campo que decide se a empresa desconta crédito das aquisições.
+    # Errar nele produz arquivo estruturalmente válido com contribuição
+    # errada — o Fisco cobra a diferença com multa, e a conferência não pega.
+    cod_inc_trib: Mapped[str | None] = mapped_column(String(1))
+    # IND_ATIV do registro 0000 da EFD-Contribuições.  É campo separado do
+    # `ind_ativ` acima de propósito: as duas escriturações fazem perguntas
+    # diferentes com o mesmo nome.  Na EFD ICMS/IPI a resposta é binária
+    # (0=industrial, 1=outros); aqui são 0=industrial ou equiparado,
+    # 1=prestador de serviços, 2=comércio, 3=PJ dos §§ 6º, 8º e 9º do art. 3º
+    # da Lei 9.718/98, 4=atividade imobiliária, 9=outros.  Reaproveitar o
+    # outro campo declararia como prestador de serviços toda empresa de
+    # comércio que respondeu "1 = outros" pensando na EFD ICMS/IPI.
+    ind_ativ_contribuicoes: Mapped[str | None] = mapped_column(String(1))
     escritorio_id: Mapped[int | None] = mapped_column(
         ForeignKey("escritorios.id"), nullable=True, index=True
     )

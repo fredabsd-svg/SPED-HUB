@@ -28,15 +28,20 @@ import datetime
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass, field
-from decimal import ROUND_HALF_UP, Decimal
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from src.db.models import AjusteFiscal, DocumentoFiscal, Empresa
 from src.documentos.ajustes import valor_efetivo
+from src.escrituracoes.base import (
+    CampoObrigatorioAusente,
+    GeradorBase,
+    ResultadoGeracao,
+    formatar_data,
+    formatar_valor,
+)
+from src.escrituracoes.base import texto as _texto
 
 logger = logging.getLogger("sped-hub.escrituracoes")
 
@@ -47,87 +52,14 @@ COD_VER = "018"
 BLOCOS = ("0", "C", "E", "9")
 
 _PERFIS = {"A", "B", "C"}
+# IND_ATIV do 0000 desta escrituração: binário, 0=industrial e 1=outros.  Não
+# confundir com o IND_ATIV da EFD-Contribuições, que tem o mesmo nome e outra
+# tabela — lá o "1" quer dizer prestador de serviços.  São dois campos de
+# cadastro separados; ver `src.escrituracoes.efd_contribuicoes.ATIVIDADES`.
 _ATIVIDADES = {"0", "1"}
 
 
-class CampoObrigatorioAusente(ValueError):
-    """Falta cadastro sem o qual o arquivo sairia errado — e aceito.
-
-    O validador do Fisco não recusa um perfil de enquadramento errado: ele não
-    tem como saber qual é o certo.  O erro só aparece meses depois, em
-    intimação.  Por isso o gerador para aqui em vez de assumir um padrão.
-    """
-
-
-# ── Formatação do leiaute ──────────────────────────────────────────────────
-
-
-def formatar_valor(valor: float | Decimal | None) -> str:
-    """Duas casas, vírgula decimal, sem separador de milhar.
-
-    Zero vira campo vazio: o leiaute trata valor ausente e valor zero como a
-    mesma coisa na maioria dos campos, e escrever `0,00` onde o validador
-    espera vazio gera advertência.
-    """
-    if valor is None:
-        return ""
-    numero = Decimal(str(valor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    if numero == 0:
-        return ""
-    return f"{numero:.2f}".replace(".", ",")
-
-
-def formatar_data(data: datetime.date | None) -> str:
-    """ddmmaaaa — o formato do leiaute, sem separador."""
-    return data.strftime("%d%m%Y") if data else ""
-
-
-def _texto(valor: Any) -> str:
-    return "" if valor is None else str(valor)
-
-
-@dataclass
-class Registro:
-    """Uma linha do arquivo.
-
-    Guardar os campos em lista, e só juntá-los na hora de escrever, é o que
-    permite contar e conferir antes de gerar o texto final.
-    """
-
-    tipo: str
-    campos: list[str] = field(default_factory=list)
-
-    def linha(self) -> str:
-        return "|" + "|".join([self.tipo, *self.campos]) + "|"
-
-
-@dataclass
-class ResultadoGeracao:
-    """O arquivo e o que se precisa saber sobre ele."""
-
-    registros: list[Registro] = field(default_factory=list)
-    avisos: list[str] = field(default_factory=list)
-
-    @property
-    def total_linhas(self) -> int:
-        return len(self.registros)
-
-    def contagem_por_tipo(self) -> dict[str, int]:
-        contagem: dict[str, int] = defaultdict(int)
-        for registro in self.registros:
-            contagem[registro.tipo] += 1
-        return dict(contagem)
-
-    def texto(self) -> str:
-        """O arquivo, com quebra de linha CRLF.
-
-        O leiaute do SPED pede CRLF; gerar com LF faz alguns validadores
-        recusarem o arquivo inteiro sem dizer por quê.
-        """
-        return "\r\n".join(r.linha() for r in self.registros) + "\r\n"
-
-
-class GeradorEFDICMS:
+class GeradorEFDICMS(GeradorBase):
     """Monta a EFD ICMS/IPI de um período."""
 
     def __init__(
@@ -144,7 +76,7 @@ class GeradorEFDICMS:
         self.data_inicio = data_inicio
         self.data_fim = data_fim
         self.cod_fin = cod_fin
-        self._resultado = ResultadoGeracao()
+        super().__init__()
 
     # ── Entrada ────────────────────────────────────────────────────────────
 
@@ -217,9 +149,6 @@ class GeradorEFDICMS:
                 {c.name: valor_efetivo(item, c.name, do_item) for c in item.__table__.columns}
             )
         return {"documento": documento, "cabecalho": cabecalho, "itens": itens}
-
-    def _add(self, tipo: str, *campos: Any) -> None:
-        self._resultado.registros.append(Registro(tipo, [_texto(c) for c in campos]))
 
     # ── Bloco 0: identificação e cadastros ─────────────────────────────────
 
@@ -503,38 +432,3 @@ class GeradorEFDICMS:
             "apuração do E110 é a soma direta dos documentos: não inclui ajustes da "
             "tabela 5.1.1, saldo credor anterior nem deduções — confira antes de transmitir"
         )
-
-    # ── Bloco 9: controle ──────────────────────────────────────────────────
-
-    def _encerrar_bloco(self, bloco: str, tipo_encerramento: str) -> None:
-        """`|X990|n|`, onde n conta o próprio encerramento.
-
-        Contar antes de acrescentar a linha deixaria o total um a menos, e o
-        validador recusa o arquivo inteiro por causa disso.
-        """
-        do_bloco = sum(1 for r in self._resultado.registros if r.tipo.startswith(bloco))
-        self._add(tipo_encerramento, do_bloco + 1)
-
-    def _bloco_9(self) -> None:
-        """O bloco que conta os outros — e a si mesmo.
-
-        É onde gerador próprio erra: o 9900 tem de contar também os registros
-        do bloco 9, inclusive os 9900 que ainda vão ser escritos, o 9990 e o
-        9999. A ordem aqui existe para fechar essa conta sem chute.
-        """
-        self._add("9001", "0")
-
-        contagem = self._resultado.contagem_por_tipo()
-        # Um 9900 para cada tipo já presente, mais os que este bloco produz.
-        tipos = sorted(contagem)
-        # +1 pelo 9900 do próprio "9900", +1 pelo 9990, +1 pelo 9999.
-        contagem["9900"] = len(tipos) + 3
-        contagem["9990"] = 1
-        contagem["9999"] = 1
-
-        for tipo in sorted(contagem):
-            self._add("9900", tipo, contagem[tipo])
-
-        do_bloco_9 = sum(1 for r in self._resultado.registros if r.tipo.startswith("9"))
-        self._add("9990", do_bloco_9 + 2)  # +9990 +9999
-        self._add("9999", len(self._resultado.registros) + 1)
