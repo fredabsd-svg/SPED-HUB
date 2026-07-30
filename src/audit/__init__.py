@@ -30,9 +30,9 @@ from sqlalchemy.orm import Session
 
 from src.db.models import (
     AuditLog,
-    criar_engine,
     get_session,
-    init_db,
+    init_db_once,
+    obter_engine,
     truncar_para_coluna,
 )
 
@@ -46,8 +46,8 @@ class AuditService:
         self.db_path = db_path
 
     def _get_session(self) -> Session:
-        engine = criar_engine(self.db_path)
-        init_db(engine)
+        engine = obter_engine(self.db_path)
+        init_db_once(engine)
         return get_session(engine)
 
     def registrar(

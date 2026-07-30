@@ -31,9 +31,9 @@ from sqlalchemy.orm import Session
 from src.db.models import (
     WebhookDelivery,
     WebhookRegistration,
-    criar_engine,
     get_session,
-    init_db,
+    init_db_once,
+    obter_engine,
 )
 from src.settings import get_settings
 
@@ -158,8 +158,8 @@ class WebhookService:
         self.db_path = db_path
 
     def _get_session(self) -> Session:
-        engine = criar_engine(self.db_path)
-        init_db(engine)
+        engine = obter_engine(self.db_path)
+        init_db_once(engine)
         return get_session(engine)
 
     def registrar(
@@ -854,9 +854,9 @@ def _ha_assinante(db_path: str, tipo: str) -> bool:
     consulta já elimina os inativos, que é o caso comum de quem desligou a
     integração sem apagar o registro.
     """
-    engine = criar_engine(db_path)
+    engine = obter_engine(db_path)
     try:
-        init_db(engine)
+        init_db_once(engine)
         with get_session(engine) as session:
             inscricoes = (
                 session.execute(

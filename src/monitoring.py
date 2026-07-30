@@ -26,9 +26,9 @@ from src.db.models import (
     AuditLog,
     Empresa,
     WebhookDelivery,
-    criar_engine,
     get_session,
-    init_db,
+    init_db_once,
+    obter_engine,
 )
 from src.version import APP_VERSION
 
@@ -183,8 +183,8 @@ def normalize_path(path: str) -> str:
 
 
 def _database_metrics(db_path: str, minutes: int) -> dict:
-    engine = criar_engine(db_path)
-    init_db(engine)
+    engine = obter_engine(db_path)
+    init_db_once(engine)
     session = get_session(engine)
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=minutes)
     try:

@@ -14,7 +14,7 @@ Validações:
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
@@ -114,41 +114,61 @@ class ValidadorIntegridade:
         return resultados
 
     def _validar_partidas_dobradas(self) -> list[Inconsistencia]:
-        """(a) Σ débitos = Σ créditos por lançamento."""
+        """(a) Σ débitos = Σ créditos por lançamento.
+
+        Agrega no banco, em UMA consulta. Antes era uma consulta de partidas
+        por lançamento: 20.002 consultas para 20.000 lançamentos, medido. Numa
+        ECD de 240 mil lançamentos isso é ~240 mil viagens ao banco e ~54 s só
+        nesta validação em SQLite local — sobre PostgreSQL em rede, minutos de
+        pura latência, para uma das oito validações.
+
+        O `HAVING` também muda o consumo de memória: só volta lançamento
+        desbalanceado, então a memória passa a ser proporcional ao número de
+        **defeitos**, não ao tamanho da escrituração. A versão anterior
+        carregava os 240 mil objetos de lançamento antes de olhar qualquer um.
+
+        `LEFT JOIN` e `COALESCE` são defensivos, não decisivos: com o `CASE`
+        tendo `else_=0.0`, a soma só é NULL quando não há linha nenhuma, e aí
+        `ABS(NULL - NULL)` também não satisfaz o `HAVING` — o lançamento sem
+        partida fica de fora dos dois jeitos, como já ficava antes. Ficam porque
+        `INNER JOIN` passaria a esconder esse lançamento do agrupamento, e é
+        dele que sairia um "lançamento sem partida" se a validação vier a
+        reportá-lo (hoje não reporta, nem a versão antiga reportava).
+        """
         inconsistencias = []
 
-        lancamentos = list(
-            self.session.execute(
-                select(Lancamento).where(Lancamento.ecd_id == self.ecd_id)
-            ).scalars()
+        debitos = func.coalesce(
+            func.sum(case((Partida.ind_dc == "D", Partida.vl_dc), else_=0.0)), 0.0
+        )
+        creditos = func.coalesce(
+            func.sum(case((Partida.ind_dc == "C", Partida.vl_dc), else_=0.0)), 0.0
+        )
+        # A expressão é repetida no HAVING em vez de referenciada por rótulo:
+        # nem todo backend aceita alias de agregado ali.
+        consulta = (
+            select(Lancamento.num_lcto, Lancamento.dt_lcto, debitos, creditos)
+            .outerjoin(Partida, Partida.lancamento_id == Lancamento.id)
+            .where(Lancamento.ecd_id == self.ecd_id)
+            .group_by(Lancamento.id, Lancamento.num_lcto, Lancamento.dt_lcto)
+            .having(func.abs(debitos - creditos) > 0.005)
         )
 
-        for lanc in lancamentos:
-            partidas = list(
-                self.session.execute(
-                    select(Partida).where(Partida.lancamento_id == lanc.id)
-                ).scalars()
-            )
-
-            total_debitos = sum(p.vl_dc for p in partidas if p.ind_dc == "D")
-            total_creditos = sum(p.vl_dc for p in partidas if p.ind_dc == "C")
-
-            if abs(total_debitos - total_creditos) > 0.005:
-                inconsistencias.append(
-                    Inconsistencia(
-                        tipo="partidas_dobradas",
-                        severidade="erro",
-                        descricao=f"Lançamento {lanc.num_lcto} em {lanc.dt_lcto}: "
-                        f"Débitos R$ {total_debitos:,.2f} ≠ Créditos R$ {total_creditos:,.2f}",
-                        detalhes={
-                            "num_lcto": lanc.num_lcto,
-                            "dt_lcto": lanc.dt_lcto.isoformat(),
-                            "total_debitos": round(total_debitos, 2),
-                            "total_creditos": round(total_creditos, 2),
-                            "diferenca": round(total_debitos - total_creditos, 2),
-                        },
-                    )
+        for num_lcto, dt_lcto, total_debitos, total_creditos in self.session.execute(consulta):
+            inconsistencias.append(
+                Inconsistencia(
+                    tipo="partidas_dobradas",
+                    severidade="erro",
+                    descricao=f"Lançamento {num_lcto} em {dt_lcto}: "
+                    f"Débitos R$ {total_debitos:,.2f} ≠ Créditos R$ {total_creditos:,.2f}",
+                    detalhes={
+                        "num_lcto": num_lcto,
+                        "dt_lcto": dt_lcto.isoformat(),
+                        "total_debitos": round(total_debitos, 2),
+                        "total_creditos": round(total_creditos, 2),
+                        "diferenca": round(total_debitos - total_creditos, 2),
+                    },
                 )
+            )
 
         return inconsistencias
 

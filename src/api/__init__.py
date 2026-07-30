@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.audit import get_audit_service
-from src.db.models import ApiKey, criar_engine, get_session, init_db
+from src.db.models import ApiKey, get_session, init_db_once, obter_engine
 from src.ratelimit import get_limiter
 from src.settings import database_reference
 
@@ -72,7 +72,7 @@ async def validar_requisicao_api(request: Request, db_path: str):
             )
         raise HTTPException(status_code=401, detail="X-API-Key header obrigatório")
 
-    engine = criar_engine(db_path)
+    engine = obter_engine(db_path)
     session = get_session(engine)
     try:
         hash_chave = _hash_key(chave)
@@ -185,8 +185,8 @@ class ApiKeyService:
         self.db_path = db_path
 
     def _get_session(self) -> Session:
-        engine = criar_engine(self.db_path)
-        init_db(engine)
+        engine = obter_engine(self.db_path)
+        init_db_once(engine)
         return get_session(engine)
 
     def criar(

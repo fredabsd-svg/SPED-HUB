@@ -31,6 +31,20 @@ Consumido por: `cli` (comando `validar`), `api.routes` (REST) e
 
 ## Decisões não óbvias e armadilhas
 
+- **A validação (a) agrega no banco, em uma consulta.** Era uma consulta de
+  partidas por lançamento: 20.002 consultas para 20.000 lançamentos, medido.
+  Numa ECD de 240 mil isso são ~240 mil viagens e ~54 s só nesta validação em
+  SQLite local — sobre PostgreSQL em rede, minutos de pura latência. O `HAVING`
+  também troca o consumo de memória: só volta lançamento desbalanceado, então a
+  memória passa a ser proporcional ao número de defeitos, não ao tamanho da
+  escrituração.
+- **`LEFT JOIN` e `COALESCE` ali são defensivos, não decisivos.** Com
+  `else_=0.0` no `CASE`, a soma só é NULL sem linha nenhuma, e aí o `HAVING`
+  também não passa: lançamento sem partida fica de fora dos dois jeitos, como
+  já ficava. Ficam porque `INNER JOIN` esconderia esse lançamento do
+  agrupamento, e é dele que sairia um "lançamento sem partida" se a validação
+  vier a reportá-lo.
+
 - **`erro` versus `alerta` é uma distinção de natureza.** Divergência de
   valor (saldos, DRE, movimentos) pode ser centavo de arredondamento;
   algumas são `alerta`. Partida descasada, balanço que não fecha e

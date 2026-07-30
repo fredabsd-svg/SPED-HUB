@@ -43,9 +43,9 @@ from src.db.models import (
     Lancamento,
     Partida,
     PlanoConta,
-    criar_engine,
     get_session,
-    init_db,
+    init_db_once,
+    obter_engine,
 )
 from src.ratelimit import RateLimitService, get_limiter
 from src.reports.balanco import BalancoPatrimonial
@@ -68,8 +68,8 @@ def _get_db_path() -> str:
 
 
 def _get_session() -> Session:
-    engine = criar_engine(_get_db_path())
-    init_db(engine)
+    engine = obter_engine(_get_db_path())
+    init_db_once(engine)
     return get_session(engine)
 
 
