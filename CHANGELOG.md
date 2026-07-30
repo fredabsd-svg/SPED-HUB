@@ -8,6 +8,24 @@ interno da implementação.
 
 ## [Não publicado]
 
+### Adicionado
+- **`sped-hub fiscal`: dá para importar XML de nota, gerar a EFD e conferir o
+  que foi entregue.** A Central de Documentos, os geradores da EFD ICMS/IPI e
+  da EFD-Contribuições e o registro do que foi enviado já existiam por dentro,
+  e não havia como chegar até eles. Agora a sequência inteira roda pelo
+  terminal: `fiscal importar` recebe uma pasta de XML (varre sozinho e ignora
+  o que não é nota), `fiscal documentos` mostra o que entrou, `fiscal gerar`
+  produz o arquivo, e `fiscal historico` lista o que já foi gerado.
+- **`sped-hub fiscal conferir` responde se o que foi entregue ainda bate com o
+  sistema.** Quando alguém corrige uma nota depois do fechamento, o arquivo
+  que já foi transmitido deixa de corresponder ao que o sistema tem — e não
+  havia como perceber isso. O comando mostra o que mudou, por tipo de
+  registro, e sai com código 2 quando divergiu, para caber em rotina
+  automática. O arquivo entregue continua guardado como saiu, intocado.
+- Gerar **sempre** registra a escrituração; não há como produzir um arquivo
+  sem deixar rastro do que saiu. Gerar de novo cria um registro novo, sem
+  apagar o anterior.
+
 ### Corrigido
 - **Quem constrói no Windows não conseguia subir o nginx.** O Git converte a
   quebra de linha dos arquivos ao baixar o repositório, e o script que o
