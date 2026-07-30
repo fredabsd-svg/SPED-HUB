@@ -15,8 +15,11 @@ Para incluir o PostgreSQL, defina ``TEST_DATABASE_URL`` (ver
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import inspect
@@ -135,6 +138,68 @@ def _desmigrar_para(url: str, revisao: str) -> None:
             command.downgrade(cfg, revisao)
     finally:
         engine.dispose()
+
+
+class TestLoggingSobreviveAMigracao:
+    """Migrar não pode emudecer o resto do processo.
+
+    O `alembic/env.py` chama `fileConfig(...)`, e o padrão dessa função é
+    `disable_existing_loggers=True`. "Existing" quer dizer *todo* logger já
+    criado que o `alembic.ini` não nomeie — ou seja, todos os `src.*`. Eles
+    ficavam mudos no processo inteiro depois de qualquer migração.
+
+    Onde isso aparecia: o `logger.info` de fim de migração não saía, e na
+    suíte, qualquer arquivo que rodasse uma migração deixava sem registro
+    nenhum os `caplog` dos arquivos seguintes — testes que passavam sozinhos e
+    falhavam em conjunto.
+    """
+
+    def test_env_py_preserva_os_loggers_existentes(self):
+        """A linha é uma só, e some se alguém regenerar o env.py do modelo."""
+        env = (Path(__file__).resolve().parent.parent / "alembic" / "env.py").read_text("utf-8")
+        chamada = re.search(r"fileConfig\((.*?)\)", env, re.S)
+        assert chamada, "alembic/env.py não chama fileConfig"
+        assert "disable_existing_loggers=False" in chamada.group(1), (
+            "fileConfig sem `disable_existing_loggers=False` emudece todos os "
+            "loggers de src.* no processo inteiro"
+        )
+
+    def test_migrar_de_verdade_nao_emudece_os_loggers(self, tmp_path):
+        """O que importa é o efeito, não a linha: migra e confere que sai log.
+
+        O handler é montado à mão, depois da migração, de propósito. O
+        `fileConfig` troca os handlers do logger raiz pelos do `alembic.ini` —
+        inclusive o de captura do pytest —, então o `caplog` fica cego pelo
+        resto do teste e não serve de instrumento aqui. Trocar handler é o que
+        `fileConfig` existe para fazer; o defeito é outro, e é o que se afere:
+        o logger continuar emitindo.
+        """
+        logger = logging.getLogger("src.db.migrations")
+        assert not logger.disabled, "logger já vinha desativado antes da migração"
+
+        upgrade_head(f"sqlite:///{tmp_path / 'depois.db'}")
+
+        assert not logger.disabled, "migrar desativou o logger de src.db.migrations"
+
+        capturados: list[str] = []
+
+        class _Coletor(logging.Handler):
+            def emit(self, record):
+                capturados.append(record.getMessage())
+
+        coletor = _Coletor()
+        nivel_anterior = logger.level
+        logger.addHandler(coletor)
+        logger.setLevel(logging.INFO)
+        try:
+            logger.info("continua audível")
+        finally:
+            logger.removeHandler(coletor)
+            logger.setLevel(nivel_anterior)
+
+        assert capturados == [
+            "continua audível"
+        ], "o logger de src.db.migrations parou de emitir depois da migração"
 
 
 class TestRevisoes:

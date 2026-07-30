@@ -24,7 +24,13 @@ from src.settings import database_reference  # noqa: E402
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers` é True por padrão, e "existing" aqui quer
+    # dizer *todo* logger já criado no processo que o `alembic.ini` não
+    # nomeie — ou seja, todos os `src.*`.  Eles ficam mudos daí em diante, no
+    # processo inteiro: o `logger.info` de fim de migração não sai, e na
+    # suíte de testes qualquer arquivo que rode uma migração deixava os
+    # `caplog` seguintes sem registro nenhum.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
