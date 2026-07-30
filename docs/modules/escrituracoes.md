@@ -14,6 +14,11 @@ Os dois montam o arquivo a partir da camada efetiva — o normalizado mais os
 ajustes. O que o operador corrigiu na tela é o que vai para o Fisco, e o XML
 original continua intocado para conferência.
 
+Gerado o arquivo, `arquivadas.py` guarda o que saiu: é a **terceira camada**,
+ao lado do documento original e do tratamento fiscal. O conteúdo é gravado,
+não reconstruído — regerar responde "o que eu enviaria hoje", e a pergunta da
+intimação é "o que você enviou".
+
 O que os dois têm em comum vive em `base.py`: formatação do leiaute, estrutura
 de registro e as contagens do bloco 9. Essa última é a razão principal de a
 base existir — é onde gerador próprio erra, e acertá-la numa escrituração e
@@ -36,6 +41,13 @@ errá-la na seguinte seria o resultado natural de duplicar o código.
 | `COD_VER` | Versão do leiaute da EFD ICMS/IPI declarada no 0000. |
 | `REGIMES` | Os valores válidos de `cod_inc_trib` (registro 0110). |
 | `ATIVIDADES` | Os valores válidos de `ind_ativ_contribuicoes` (IND_ATIV do 0000). |
+| `arquivar(session, resultado=, empresa=, tipo=, data_inicio=, data_fim=)` | Guarda o arquivo que saiu, com os documentos que entraram nele. |
+| `comparar(escrituracao, resultado)` | O que mudou entre o arquivado e uma geração nova. |
+| `escrituracoes_do_documento(session, documento)` | Em que arquivos esta nota entrou. |
+| `avisos_de(escrituracao)` | Os avisos como estavam na hora de gerar. |
+| `hash_do_conteudo(texto)` | SHA-256 do arquivo como sai, com CRLF. |
+| `TIPOS` | As obrigações que podem ser arquivadas. |
+| `TipoDesconhecido` | Tipo fora de `TIPOS` — arquivar assim tornaria o arquivo inencontrável. |
 
 ## O que não faz
 
@@ -66,8 +78,9 @@ ajuste, benefício ou saldo credor precisa conferir e complementar; o
 ## Depende de / quem depende
 
 Depende de `db.models` e de `documentos.ajustes` (a camada efetiva); da stdlib,
-`decimal` e `collections`. Quem depende: nada ainda — nenhuma rota ou comando
-expõe os geradores.
+`decimal`, `collections`, `difflib`, `hashlib` e `json`. Quem depende: nada
+ainda — nenhuma rota ou comando expõe os geradores nem as escriturações
+arquivadas.
 
 ## Decisões não óbvias e armadilhas
 
@@ -80,6 +93,22 @@ expõe os geradores.
   razoável, e o palpite errado é caro. Quando o regime é cumulativo o resultado
   traz aviso dizendo que os créditos **não** foram descontados — o silêncio
   faria parecer esquecimento.
+- **O arquivo arquivado é guardado, não reconstruído.** Um sistema que regera
+  sob demanda responde "o que eu enviaria hoje"; a pergunta da intimação é "o
+  que você enviou". Basta um ajuste depois da entrega para as duas respostas
+  divergirem — e é aí que a diferença importa. Por isso `Escrituracao.conteudo`
+  guarda o texto, e a linha nunca é alterada: regerar cria outra escrituração.
+- **`arquivar` não sobrescreve o período.** Duas gerações do mesmo mês são dois
+  fatos, e qual delas foi transmitida é informação que o sistema ainda não tem.
+  Sobrescrever seria inventá-la, e apagaria a única cópia do que saiu antes.
+- **A comparação conta multiconjunto, não conjunto.** Linha repetida é o normal
+  num arquivo SPED: o mesmo produto com os mesmos valores em dois documentos
+  gera dois C170 idênticos. Perguntar "esta linha continua no arquivo?"
+  responderia que sim quando uma das duas mudou, e o resumo diria que o C170
+  está intacto justamente quando não está.
+- **O hash é do texto com CRLF.** Normalizar antes de somar daria o mesmo hash
+  para dois arquivos que o validador do Fisco trata de forma diferente — e o
+  hash existe justamente para conferir contra o arquivo entregue.
 - **As contagens do bloco 9 se contam.** O `9900` conta os registros do próprio
   bloco 9, inclusive os `9900` que ainda vão ser escritos, o `9990` e o `9999`;
   o `X990` de cada bloco conta a si mesmo; o `9999` conta a própria linha. É o
@@ -120,5 +149,6 @@ expõe os geradores.
 ## Como testar isoladamente
 
 ```bash
-pytest tests/test_gerador_efd_icms.py tests/test_gerador_efd_contribuicoes.py -q
+pytest tests/test_gerador_efd_icms.py tests/test_gerador_efd_contribuicoes.py \
+       tests/test_escrituracao_arquivada.py -q
 ```

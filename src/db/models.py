@@ -1038,6 +1038,84 @@ class RegraFiscal(Base):
         return f"<RegraFiscal {self.nome!r} p={self.prioridade}>"
 
 
+class Escrituracao(Base):
+    """A terceira camada: o arquivo que efetivamente saiu.
+
+    As outras duas já existem — o documento original (`xml_original`, byte a
+    byte) e o tratamento fiscal (`AjusteFiscal`, do qual sai a camada
+    efetiva).  Faltava guardar o que foi **entregue ao Fisco**, que não é
+    dedutível de nenhuma das duas.
+
+    **O conteúdo é guardado, não reconstruído.**  Regerar o período depois
+    produziria outro arquivo assim que qualquer ajuste mudasse — e é
+    justamente quando algo muda que se precisa saber o que foi enviado antes.
+    Um sistema que reconstrói responde "o que eu enviaria hoje"; a pergunta da
+    intimação é "o que você enviou".
+
+    **A linha é imutável.**  Regerar o mesmo período cria outra escrituração;
+    esta nunca é alterada.  Sem isso a prova valeria o quanto vale um
+    documento que a parte interessada pode reescrever.
+
+    O `hash_conteudo` é do texto exatamente como saiu, com CRLF, e serve para
+    conferir contra o arquivo que o contribuinte tem em mãos.
+    """
+
+    __tablename__ = "escrituracoes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    escritorio_id: Mapped[int | None] = mapped_column(ForeignKey("escritorios.id"), index=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), nullable=False, index=True)
+
+    # `efd_icms`, `efd_contribuicoes`.
+    tipo: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    data_inicio: Mapped[datetime.date] = mapped_column(nullable=False, index=True)
+    data_fim: Mapped[datetime.date] = mapped_column(nullable=False)
+
+    conteudo: Mapped[str] = mapped_column(Text, nullable=False)
+    hash_conteudo: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    total_linhas: Mapped[int] = mapped_column(nullable=False, default=0)
+
+    # Os avisos como estavam na hora de gerar.  Fazem parte do que a pessoa viu
+    # ao decidir transmitir, e o gerador de amanhã pode avisar outra coisa.
+    avisos: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+
+    gerada_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+
+    documentos: Mapped[list["EscrituracaoDocumento"]] = relationship(
+        back_populates="escrituracao", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self):
+        return f"<Escrituracao {self.tipo} {self.data_inicio}..{self.data_fim}>"
+
+
+class EscrituracaoDocumento(Base):
+    """Que documentos entraram em que arquivo.
+
+    Responde as duas perguntas que a intimação faz: "esta nota foi
+    escriturada?" e "em qual arquivo?".  Sem a ligação, a única resposta
+    possível seria reabrir cada arquivo gerado e procurar a chave dentro.
+    """
+
+    __tablename__ = "escrituracoes_documentos"
+    __table_args__ = (
+        UniqueConstraint("escrituracao_id", "documento_id", name="uq_escrituracao_documento"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    escrituracao_id: Mapped[int] = mapped_column(
+        ForeignKey("escrituracoes.id"), nullable=False, index=True
+    )
+    documento_id: Mapped[int] = mapped_column(
+        ForeignKey("documentos_fiscais.id"), nullable=False, index=True
+    )
+
+    escrituracao: Mapped["Escrituracao"] = relationship(back_populates="documentos")
+
+
 # ── Engine Factory (Fase 17: banco configurável) ───────────────────────────
 
 

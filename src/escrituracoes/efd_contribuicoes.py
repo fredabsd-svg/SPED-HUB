@@ -108,7 +108,7 @@ class GeradorEFDContribuicoes(GeradorBase):
         documentos = self._documentos()
         visoes = [self._visao(d) for d in documentos]
 
-        self._resultado = ResultadoGeracao()
+        self._resultado = ResultadoGeracao(documentos_ids=[d.id for d in documentos])
         self._bloco_0(visoes)
         self._bloco_c(visoes)
         self._bloco_m(visoes)
