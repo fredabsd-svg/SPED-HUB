@@ -67,7 +67,7 @@ A regra vale por adoção: módulo novo ou alterado exige o documento. A lista
 abaixo diminui a cada PR que toca nesses módulos.
 
 **Documentados:** `api`, `async_jobs`, `audit`, `auth`, `cache`, `cli`,
-`dashboard`, `db`, `ecd_importer`, `email_service`, `filters`,
+`dashboard`, `db`, `documentos`, `ecd_importer`, `email_service`, `filters`,
 `logging_config`, `monitoring`, `parsers`, `ratelimit`, `reports`,
 `settings`, `uploads`, `validators`, `version`, `watchdog`, `webhooks`,
 `worker_queue`, `worker_runner`.

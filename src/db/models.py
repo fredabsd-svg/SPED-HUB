@@ -686,6 +686,277 @@ class AsyncJob(Base):
         return f"<AsyncJob {self.id} {self.tipo} {self.status}>"
 
 
+# ── Central de Documentos Fiscais ──────────────────────────────────────────
+#
+# As três camadas que a suíte fiscal precisa manter separadas:
+#
+#   1. ORIGINAL    — o XML como veio, byte a byte, em `DocumentoFiscal.xml_original`.
+#                    Nunca é reescrito.  É a prova de o que o emitente declarou.
+#   2. NORMALIZADO — os campos extraídos do original para uma estrutura única,
+#                    igual para NF-e, NFC-e, NFS-e de qualquer provedor.  Também
+#                    imutável: representa o original, só que legível.
+#   3. EFETIVO     — o que vai para o SPED.  NÃO é uma coluna: é o normalizado
+#                    mais os `AjusteFiscal` aplicados em ordem.
+#
+# A terceira camada ser calculada, e não gravada, é o que torna a reversão
+# trivial e a auditoria exata: desfazer um lote é apagar seus ajustes, e a
+# pergunta "por que este registro saiu assim?" se responde listando os ajustes
+# daquele campo.  Gravar o valor final numa coluna faria as três camadas
+# divergirem no primeiro `UPDATE` que alguém escrevesse fora do fluxo.
+
+
+class DocumentoFiscal(Base):
+    """Um documento fiscal importado — NF-e, NFC-e, NFS-e.
+
+    A chave de acesso é única por escritório, e é o que impede o mesmo XML de
+    entrar duas vezes por caminhos diferentes (pasta, ZIP, API).  Documentos de
+    serviço nem sempre têm chave de 44 dígitos; nesses casos o adaptador do
+    provedor monta uma identidade estável a partir de CNPJ, número e série.
+    """
+
+    __tablename__ = "documentos_fiscais"
+    __table_args__ = (UniqueConstraint("escritorio_id", "chave", name="uq_documento_chave"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    escritorio_id: Mapped[int | None] = mapped_column(ForeignKey("escritorios.id"), index=True)
+    empresa_id: Mapped[int | None] = mapped_column(ForeignKey("empresas.id"), index=True)
+
+    # Identidade
+    chave: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    modelo: Mapped[str] = mapped_column(String(2), nullable=False)  # 55, 65, 57…
+    especie: Mapped[str] = mapped_column(String(12), nullable=False)  # nfe, nfce, nfse
+    numero: Mapped[str] = mapped_column(String(20), nullable=False)
+    serie: Mapped[str | None] = mapped_column(String(5))
+
+    # Sentido e situação
+    sentido: Mapped[str] = mapped_column(String(7), nullable=False)  # entrada|saida
+    situacao: Mapped[str] = mapped_column(String(12), nullable=False, default="autorizado")
+    finalidade: Mapped[str | None] = mapped_column(String(20))
+    natureza_operacao: Mapped[str | None] = mapped_column(String(120))
+
+    # Partes
+    emitente_cnpj: Mapped[str | None] = mapped_column(String(14), index=True)
+    emitente_nome: Mapped[str | None] = mapped_column(String(120))
+    emitente_ie: Mapped[str | None] = mapped_column(String(20))
+    emitente_uf: Mapped[str | None] = mapped_column(String(2))
+    destinatario_cnpj: Mapped[str | None] = mapped_column(String(14), index=True)
+    destinatario_nome: Mapped[str | None] = mapped_column(String(120))
+    destinatario_ie: Mapped[str | None] = mapped_column(String(20))
+    destinatario_uf: Mapped[str | None] = mapped_column(String(2))
+    municipio_codigo: Mapped[str | None] = mapped_column(String(7))
+
+    # Datas
+    data_emissao: Mapped[datetime.date | None] = mapped_column(index=True)
+    data_entrada_saida: Mapped[datetime.date | None] = mapped_column()
+
+    # Totais, como declarados no documento
+    valor_total: Mapped[float] = mapped_column(default=0.0)
+    valor_produtos: Mapped[float] = mapped_column(default=0.0)
+    valor_desconto: Mapped[float] = mapped_column(default=0.0)
+    valor_frete: Mapped[float] = mapped_column(default=0.0)
+    valor_seguro: Mapped[float] = mapped_column(default=0.0)
+    valor_outras: Mapped[float] = mapped_column(default=0.0)
+    base_icms: Mapped[float] = mapped_column(default=0.0)
+    valor_icms: Mapped[float] = mapped_column(default=0.0)
+    valor_icms_st: Mapped[float] = mapped_column(default=0.0)
+    valor_ipi: Mapped[float] = mapped_column(default=0.0)
+    valor_pis: Mapped[float] = mapped_column(default=0.0)
+    valor_cofins: Mapped[float] = mapped_column(default=0.0)
+    # Reforma: totais do documento.  Convivem com os de cima durante toda a
+    # transição (2026–2032).
+    valor_ibs: Mapped[float] = mapped_column(default=0.0)
+    valor_cbs: Mapped[float] = mapped_column(default=0.0)
+    valor_is: Mapped[float] = mapped_column(default=0.0)
+
+    # Camada 1: o documento como chegou.
+    xml_original: Mapped[str | None] = mapped_column(Text)
+    hash_original: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    origem: Mapped[str | None] = mapped_column(String(40))  # arquivo, zip, api…
+    nome_arquivo: Mapped[str | None] = mapped_column(String(255))
+    adaptador: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    importado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+
+    itens: Mapped[list["ItemDocumentoFiscal"]] = relationship(
+        back_populates="documento", cascade="all, delete-orphan"
+    )
+    ajustes: Mapped[list["AjusteFiscal"]] = relationship(
+        back_populates="documento", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self):
+        return f"<DocumentoFiscal {self.especie} {self.numero} {self.chave[:8]}…>"
+
+
+class ItemDocumentoFiscal(Base):
+    """Um item do documento, normalizado.
+
+    Os campos ficam com o nome do domínio fiscal, não o do XML: o mesmo
+    `cfop` vem de `prod/CFOP` na NF-e e não existe na NFS-e, onde o adaptador
+    o deixa nulo para a classificação preencher depois.
+    """
+
+    __tablename__ = "itens_documentos_fiscais"
+    __table_args__ = (UniqueConstraint("documento_id", "numero_item", name="uq_item_documento"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    documento_id: Mapped[int] = mapped_column(
+        ForeignKey("documentos_fiscais.id"), nullable=False, index=True
+    )
+    numero_item: Mapped[int] = mapped_column(nullable=False)
+
+    codigo: Mapped[str | None] = mapped_column(String(60))
+    descricao: Mapped[str | None] = mapped_column(String(255))
+    ncm: Mapped[str | None] = mapped_column(String(8), index=True)
+    cest: Mapped[str | None] = mapped_column(String(7))
+    codigo_servico: Mapped[str | None] = mapped_column(String(20))
+    unidade: Mapped[str | None] = mapped_column(String(6))
+    quantidade: Mapped[float] = mapped_column(default=0.0)
+    valor_unitario: Mapped[float] = mapped_column(default=0.0)
+    valor_total: Mapped[float] = mapped_column(default=0.0)
+    valor_desconto: Mapped[float] = mapped_column(default=0.0)
+    valor_frete: Mapped[float] = mapped_column(default=0.0)
+    valor_seguro: Mapped[float] = mapped_column(default=0.0)
+    valor_outras: Mapped[float] = mapped_column(default=0.0)
+
+    cfop: Mapped[str | None] = mapped_column(String(4), index=True)
+    origem_mercadoria: Mapped[str | None] = mapped_column(String(1))
+    cst_icms: Mapped[str | None] = mapped_column(String(3), index=True)
+    csosn: Mapped[str | None] = mapped_column(String(3))
+    base_icms: Mapped[float] = mapped_column(default=0.0)
+    aliquota_icms: Mapped[float] = mapped_column(default=0.0)
+    valor_icms: Mapped[float] = mapped_column(default=0.0)
+    base_icms_st: Mapped[float] = mapped_column(default=0.0)
+    valor_icms_st: Mapped[float] = mapped_column(default=0.0)
+    valor_fcp: Mapped[float] = mapped_column(default=0.0)
+    cst_ipi: Mapped[str | None] = mapped_column(String(2))
+    valor_ipi: Mapped[float] = mapped_column(default=0.0)
+    cst_pis: Mapped[str | None] = mapped_column(String(2), index=True)
+    base_pis: Mapped[float] = mapped_column(default=0.0)
+    aliquota_pis: Mapped[float] = mapped_column(default=0.0)
+    valor_pis: Mapped[float] = mapped_column(default=0.0)
+    cst_cofins: Mapped[str | None] = mapped_column(String(2), index=True)
+    base_cofins: Mapped[float] = mapped_column(default=0.0)
+    aliquota_cofins: Mapped[float] = mapped_column(default=0.0)
+    valor_cofins: Mapped[float] = mapped_column(default=0.0)
+    valor_iss: Mapped[float] = mapped_column(default=0.0)
+    codigo_beneficio: Mapped[str | None] = mapped_column(String(10))
+
+    # ── Reforma Tributária do Consumo (EC 132/2023, LC 214/2025) ──────────
+    #
+    # Estes campos CONVIVEM com os de ICMS/PIS/Cofins acima, não os
+    # substituem: de 2026 a 2032 o mesmo item carrega os dois regimes.  Só em
+    # 2033, com a extinção de ICMS e ISS, o bloco antigo deixa de ser
+    # preenchido.  Modelar como substituição obrigaria a reescrever tudo na
+    # virada de cada ano da transição.
+    #
+    # O IBS é UM tributo com DUAS destinações — estadual e municipal —, e o
+    # XML traz alíquota e valor separados para cada uma.  Somá-los numa coluna
+    # só perderia a informação que a apuração precisa, porque a partilha entre
+    # os entes é o cerne do imposto.
+    #
+    # Vigência: os grupos passam a ser exigidos na NF-e em 03/08/2026
+    # (NT 2025.002).  Ver docs/reforma-tributaria.md para o cronograma e a
+    # procedência de cada informação.
+    cst_ibscbs: Mapped[str | None] = mapped_column(String(3), index=True)
+    # Os três primeiros dígitos repetem o CST; o resto detalha o enquadramento.
+    # Largura folgada de propósito: a tabela é publicada pela SVRS e cresce.
+    class_trib_ibscbs: Mapped[str | None] = mapped_column(String(10))
+    base_ibscbs: Mapped[float] = mapped_column(default=0.0)
+
+    aliquota_ibs_uf: Mapped[float] = mapped_column(default=0.0)
+    valor_ibs_uf: Mapped[float] = mapped_column(default=0.0)
+    aliquota_ibs_mun: Mapped[float] = mapped_column(default=0.0)
+    valor_ibs_mun: Mapped[float] = mapped_column(default=0.0)
+    # Município do fato gerador do IBS — pode diferir do município do
+    # destinatário, e é ele que decide a destinação da parcela municipal.
+    municipio_fg_ibs: Mapped[str | None] = mapped_column(String(7))
+
+    aliquota_cbs: Mapped[float] = mapped_column(default=0.0)
+    valor_cbs: Mapped[float] = mapped_column(default=0.0)
+
+    # Reduções, diferimento e devolução
+    percentual_reducao_aliquota: Mapped[float] = mapped_column(default=0.0)
+    aliquota_efetiva: Mapped[float] = mapped_column(default=0.0)
+    valor_diferido: Mapped[float] = mapped_column(default=0.0)
+    valor_devolucao_tributo: Mapped[float] = mapped_column(default=0.0)
+
+    # Crédito presumido
+    codigo_credito_presumido: Mapped[str | None] = mapped_column(String(10))
+    valor_credito_presumido: Mapped[float] = mapped_column(default=0.0)
+    valor_credito_presumido_susp: Mapped[float] = mapped_column(default=0.0)
+
+    # Monofásico
+    quantidade_bc_mono: Mapped[float] = mapped_column(default=0.0)
+    valor_ibs_mono: Mapped[float] = mapped_column(default=0.0)
+    valor_cbs_mono: Mapped[float] = mapped_column(default=0.0)
+    valor_ibs_mono_retido: Mapped[float] = mapped_column(default=0.0)
+    valor_cbs_mono_retido: Mapped[float] = mapped_column(default=0.0)
+
+    # Imposto Seletivo.  Tem alíquota ad valorem E específica (por unidade
+    # tributável) — bebidas e cigarros usam a segunda —, por isso a unidade e
+    # a quantidade viajam junto.
+    cst_is: Mapped[str | None] = mapped_column(String(3))
+    class_trib_is: Mapped[str | None] = mapped_column(String(10))
+    base_is: Mapped[float] = mapped_column(default=0.0)
+    aliquota_is: Mapped[float] = mapped_column(default=0.0)
+    aliquota_is_especifica: Mapped[float] = mapped_column(default=0.0)
+    unidade_tributavel_is: Mapped[str | None] = mapped_column(String(6))
+    quantidade_tributavel_is: Mapped[float] = mapped_column(default=0.0)
+    valor_is: Mapped[float] = mapped_column(default=0.0)
+
+    documento: Mapped["DocumentoFiscal"] = relationship(back_populates="itens")
+
+    def __repr__(self):
+        return f"<ItemDocumentoFiscal {self.numero_item} {self.codigo}>"
+
+
+class AjusteFiscal(Base):
+    """A camada de tratamento: um campo, um valor novo, uma justificativa.
+
+    É aditiva de propósito.  Cada ajuste guarda o valor que o campo tinha
+    quando foi criado (`valor_anterior`), quem o fez e por quê — e o valor
+    efetivo de um campo é o do ajuste mais recente que o alcança.  Desfazer um
+    lote é apagar os ajustes daquele lote; nada mais precisa ser tocado, e o
+    normalizado nunca foi alterado.
+
+    `origem` distingue o que a regra sugeriu do que a pessoa decidiu, que é o
+    que a §6 do pedido chama de "informação sugerida" contra "informação
+    alterada pelo usuário".
+    """
+
+    __tablename__ = "ajustes_fiscais"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    documento_id: Mapped[int] = mapped_column(
+        ForeignKey("documentos_fiscais.id"), nullable=False, index=True
+    )
+    # Nulo = ajuste no cabeçalho do documento.
+    item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("itens_documentos_fiscais.id"), index=True
+    )
+
+    campo: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    valor_anterior: Mapped[str | None] = mapped_column(Text)
+    valor_novo: Mapped[str | None] = mapped_column(Text)
+
+    origem: Mapped[str] = mapped_column(String(12), nullable=False)  # regra|usuario
+    regra: Mapped[str | None] = mapped_column(String(120))
+    motivo: Mapped[str | None] = mapped_column(Text)
+    lote: Mapped[str | None] = mapped_column(String(32), index=True)
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+
+    documento: Mapped["DocumentoFiscal"] = relationship(back_populates="ajustes")
+
+    def __repr__(self):
+        return f"<AjusteFiscal {self.campo}={self.valor_novo!r} ({self.origem})>"
+
+
 # ── Engine Factory (Fase 17: banco configurável) ───────────────────────────
 
 
