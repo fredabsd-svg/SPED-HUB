@@ -73,6 +73,11 @@ class ResultadoGeracao:
 
     registros: list[Registro] = field(default_factory=list)
     avisos: list[str] = field(default_factory=list)
+    # Os documentos que entraram no arquivo, na ordem em que foram escriturados.
+    # Quem arquiva a escrituração precisa disto, e só o gerador sabe: o período
+    # sozinho não basta, porque o recorte depende também da empresa e do que
+    # estava importado na hora de gerar.
+    documentos_ids: list[int] = field(default_factory=list)
 
     @property
     def total_linhas(self) -> int:
