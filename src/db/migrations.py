@@ -111,3 +111,176 @@ def stamp_head(url: str | None = None) -> None:
         logger.info("Schema marcado como %s sem executar migrações", revisao_head())
     finally:
         engine.dispose()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Migração de DADOS entre bancos (SQLite → PostgreSQL, e o caminho inverso)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# O que está acima migra **schema**.  Isto migra **conteúdo**: até aqui, um
+# escritório que rodava em SQLite e queria PostgreSQL só tinha o caminho de
+# reimportar todas as ECDs — perdendo usuários, mapeamentos, visões de filtro,
+# chaves de API e o histórico de auditoria, que não vêm de arquivo nenhum.
+
+
+class ErroDeMigracaoDeDados(RuntimeError):
+    """Migração de dados recusada ou interrompida.  Nada foi gravado."""
+
+
+def _tabelas_em_ordem():
+    """Tabelas em ordem de dependência — pai antes de filho.
+
+    `sorted_tables` do SQLAlchemy já resolve isso a partir das chaves
+    estrangeiras.  Copiar fora de ordem violaria a FK no destino.
+    """
+    from src.db.models import Base
+
+    return list(Base.metadata.sorted_tables)
+
+
+def _contagens(engine) -> dict[str, int]:
+    """Quantas linhas cada tabela tem.  Tabela ausente conta como zero."""
+    from sqlalchemy import func, inspect, select
+
+    existentes = set(inspect(engine).get_table_names())
+    contagens: dict[str, int] = {}
+    with engine.connect() as conexao:
+        for tabela in _tabelas_em_ordem():
+            if tabela.name not in existentes:
+                contagens[tabela.name] = 0
+                continue
+            contagens[tabela.name] = (
+                conexao.execute(select(func.count()).select_from(tabela)).scalar() or 0
+            )
+    return contagens
+
+
+def _corrigir_sequencias(conexao, tabelas) -> None:
+    """Avança as sequências do Postgres além dos ids copiados.
+
+    É o defeito clássico deste tipo de migração, e ele é **silencioso**: as
+    linhas chegam com id explícito, a sequência continua em 1, e a migração
+    parece ter dado certo.  O erro só aparece quando o escritório cadastra a
+    próxima empresa e recebe violação de chave primária.
+    """
+    from sqlalchemy import text
+
+    if conexao.dialect.name != "postgresql":
+        return
+    for tabela in tabelas:
+        for coluna in tabela.primary_key.columns:
+            if not isinstance(coluna.type.python_type, type):
+                continue
+            if coluna.type.python_type is not int:
+                continue
+            conexao.execute(
+                text(
+                    "SELECT setval("
+                    "  pg_get_serial_sequence(:tabela, :coluna),"
+                    f"  COALESCE((SELECT MAX({coluna.name}) FROM {tabela.name}), 0) + 1,"
+                    "  false"
+                    ")"
+                ).bindparams(tabela=tabela.name, coluna=coluna.name),
+            )
+
+
+def migrar_dados(origem: str, destino: str, *, lote: int = 1_000) -> dict[str, int]:
+    """Copia o conteúdo de `origem` para `destino`, preservando os ids.
+
+    Preservar id é obrigatório, não conveniência: as chaves estrangeiras do
+    banco inteiro apontam para eles, e renumerar exigiria reescrever cada
+    referência — em `partidas`, `saldos_periodicos` e `lancamentos`, que são as
+    tabelas grandes.
+
+    Garantias:
+
+    * **O destino precisa estar vazio.**  Migrar sobre banco com dados é
+      escolha que este comando não toma sozinho: no melhor caso viola chave
+      primária, no pior mistura a escrituração de dois lugares sem avisar.
+    * **Tudo ou nada.**  A cópia inteira roda em uma transação no destino.
+      Metade da escrituração migrada é pior que nenhuma, porque parece
+      completa — e é dela que sairia um balanço errado.
+    * **Sequências corrigidas.**  Ver `_corrigir_sequencias`.
+    * **Memória constante.**  As linhas saem em lotes; `partidas` de uma ECD
+      real não cabe em memória.
+
+    Devolve `{tabela: linhas copiadas}`.  Levanta `ErroDeMigracaoDeDados` se o
+    destino não estiver vazio ou se o schema dele não existir.
+    """
+    from sqlalchemy import inspect, select
+
+    origem_url = _normalizar(origem)
+    destino_url = _normalizar(destino)
+    if not origem_url or not destino_url:
+        raise ErroDeMigracaoDeDados("origem e destino são obrigatórios")
+    if origem_url == destino_url:
+        raise ErroDeMigracaoDeDados("origem e destino são o mesmo banco")
+
+    motor_origem = criar_engine(url=origem_url)
+    motor_destino = criar_engine(url=destino_url)
+    try:
+        tabelas = _tabelas_em_ordem()
+        faltando = {t.name for t in tabelas} - set(inspect(motor_destino).get_table_names())
+        if faltando:
+            raise ErroDeMigracaoDeDados(
+                f"o destino não tem o schema completo (faltam {len(faltando)} tabelas). "
+                "Rode `sped-hub migrar aplicar --db <destino>` antes."
+            )
+
+        ocupadas = {nome: n for nome, n in _contagens(motor_destino).items() if n}
+        if ocupadas:
+            raise ErroDeMigracaoDeDados(
+                f"o destino já tem dados ({ocupadas}) — migrar sobre banco ocupado "
+                "misturaria a escrituração de dois lugares. Use um banco vazio."
+            )
+
+        copiadas: dict[str, int] = {}
+        with motor_destino.begin() as saida, motor_origem.connect() as entrada:
+            existentes_na_origem = set(inspect(motor_origem).get_table_names())
+            for tabela in tabelas:
+                if tabela.name not in existentes_na_origem:
+                    copiadas[tabela.name] = 0
+                    continue
+                total = 0
+                resultado = entrada.execution_options(stream_results=True).execute(select(tabela))
+                while True:
+                    linhas = resultado.fetchmany(lote)
+                    if not linhas:
+                        break
+                    saida.execute(tabela.insert(), [dict(linha._mapping) for linha in linhas])
+                    total += len(linhas)
+                copiadas[tabela.name] = total
+                if total:
+                    logger.info("Migração de dados: %s → %d linhas", tabela.name, total)
+            _corrigir_sequencias(saida, tabelas)
+
+        logger.info(
+            "Migração de dados concluída: %d linhas em %d tabelas",
+            sum(copiadas.values()),
+            sum(1 for n in copiadas.values() if n),
+        )
+        return copiadas
+    finally:
+        motor_origem.dispose()
+        motor_destino.dispose()
+
+
+def conferir_migracao_de_dados(origem: str, destino: str) -> dict[str, tuple[int, int]]:
+    """Compara as contagens dos dois bancos.  Devolve só o que divergir.
+
+    Existe porque "a migração não deu erro" não é o mesmo que "os dados
+    chegaram". Quem move a escrituração de um escritório precisa de uma
+    conferência que não seja a própria migração se autodeclarando correta.
+    """
+    motor_origem = criar_engine(url=_normalizar(origem))
+    motor_destino = criar_engine(url=_normalizar(destino))
+    try:
+        antes, depois = _contagens(motor_origem), _contagens(motor_destino)
+    finally:
+        motor_origem.dispose()
+        motor_destino.dispose()
+    return {
+        nome: (antes[nome], depois.get(nome, 0))
+        for nome in antes
+        if antes[nome] != depois.get(nome, 0)
+    }

@@ -609,11 +609,60 @@ def cmd_migrar(args):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# migrar-dados
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def cmd_migrar_dados(args):
+    """Copia o conteúdo de um banco para outro (SQLite → PostgreSQL)."""
+    from src.db.migrations import (
+        ErroDeMigracaoDeDados,
+        conferir_migracao_de_dados,
+        migrar_dados,
+    )
+
+    if args.conferir:
+        divergencias = conferir_migracao_de_dados(args.de, args.para)
+        if not divergencias:
+            print("Contagens idênticas nos dois bancos.")
+            return 0
+        print("\nDIVERGÊNCIA entre origem e destino:\n")
+        for tabela, (antes, depois) in sorted(divergencias.items()):
+            print(f"  {tabela:24} origem={antes:<10} destino={depois}")
+        return 1
+
+    print(f"\nMigrando dados\n  de:   {args.de}\n  para: {args.para}\n")
+    try:
+        copiadas = migrar_dados(args.de, args.para, lote=args.lote)
+    except ErroDeMigracaoDeDados as erro:
+        print(f"Recusado: {erro}")
+        return 1
+
+    com_dados = {nome: n for nome, n in copiadas.items() if n}
+    for nome, n in sorted(com_dados.items()):
+        print(f"  {nome:24} {n} linha(s)")
+    print(f"\n{sum(copiadas.values())} linha(s) em {len(com_dados)} tabela(s).")
+
+    divergencias = conferir_migracao_de_dados(args.de, args.para)
+    if divergencias:
+        # Não deveria acontecer — a cópia é transacional.  Se acontecer, o
+        # operador precisa saber ANTES de apontar a produção para o destino.
+        print("\nATENÇÃO: a conferência achou divergência:")
+        for tabela, (antes, depois) in sorted(divergencias.items()):
+            print(f"  {tabela:24} origem={antes:<10} destino={depois}")
+        return 1
+    print("Conferência: contagens idênticas nos dois bancos.")
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # main
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def main():
+def main(argv: list[str] | None = None) -> int:
+    """Ponto de entrada. `argv` explícito existe para o teste poder chamar
+    o comando sem mexer em `sys.argv` do processo."""
     parser = argparse.ArgumentParser(
         prog="sped-hub",
         description="SPED-HUB — Plataforma de conformidade fiscal",
@@ -699,7 +748,23 @@ def main():
     )
     p_mig.add_argument("--db", default="sped_hub.db", help="Banco (URL ou caminho SQLite)")
 
-    args = parser.parse_args()
+    # migrar-dados
+    p_dados = sub.add_parser(
+        "migrar-dados",
+        help="Copiar o conteúdo de um banco para outro (SQLite → PostgreSQL)",
+    )
+    p_dados.add_argument("--de", required=True, help="Banco de origem (URL ou caminho SQLite)")
+    p_dados.add_argument("--para", required=True, help="Banco de destino (URL)")
+    p_dados.add_argument(
+        "--lote", type=int, default=1000, help="Linhas por lote (memória constante)"
+    )
+    p_dados.add_argument(
+        "--conferir",
+        action="store_true",
+        help="Só comparar as contagens dos dois bancos, sem copiar nada",
+    )
+
+    args = parser.parse_args(argv)
 
     if args.comando == "importar-ecd":
         cmd_importar_ecd(args)
@@ -715,9 +780,14 @@ def main():
         cmd_info(args)
     elif args.comando == "migrar":
         cmd_migrar(args)
+    elif args.comando == "migrar-dados":
+        return cmd_migrar_dados(args)
     else:
         parser.print_help()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # `sys.exit` do retorno: sem isso, `python -m src.cli` sempre sai com 0 e
+    # um script de deploy não distingue recusa de sucesso.
+    sys.exit(main())

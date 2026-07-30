@@ -46,6 +46,8 @@ REGISTRO_CI = {
     # A §2.2 tem duas metades: a variável chega ao `Settings` e o campo é
     # lido de fato.  A classe inteira é o alvo porque só uma delas não basta.
     "2.2": "tests/test_regras_projeto.py::TestConfiguracao",
+    # A §3.4 é cobrada em dois lugares: o teste multibackend em si, e a
+    # garantia de que todo teste dependente de Postgres roda no job certo.
     "3.4": "tests/test_multibackend.py",
     "3.5": "tests/test_regras_projeto.py::TestTestes::test_marcador_e2e_fora_da_execucao_padrao",
     "4.1": "tests/test_regras_projeto.py::TestBuild::test_lint_e_format_pinados",
@@ -714,6 +716,75 @@ class TestRoadmap:
         assert (
             not repetidos
         ), f"item do roadmap com o mesmo título de fase concluída em status.md: {repetidos}"
+
+
+def _fora_do_job_de_postgres(nomes: set[str], ci: str) -> list[str]:
+    """Quais desses arquivos não aparecem no texto do workflow.
+
+    Existe como função para poder ser exercitada pelos dois lados: com o CI
+    correto nenhum arquivo fica de fora, então a comparação só seria exercitada
+    negativamente e uma versão quebrada dela passaria igual.
+    """
+    return sorted(nome for nome in nomes if nome not in ci)
+
+
+class TestComparacaoDeCobertura:
+    def test_acha_o_que_esta_fora(self):
+        assert _fora_do_job_de_postgres(
+            {"test_a.py", "test_b.py"}, "run: pytest tests/test_a.py"
+        ) == ["test_b.py"]
+
+    def test_nao_inventa_quando_esta_tudo_dentro(self):
+        assert (
+            _fora_do_job_de_postgres({"test_a.py"}, "run: pytest tests/test_a.py tests/test_c.py")
+            == []
+        )
+
+    def test_conjunto_vazio_nao_acusa_nada(self):
+        assert _fora_do_job_de_postgres(set(), "") == []
+
+
+class TestCoberturaDoPostgres:
+    """§3.4 — teste que depende de Postgres precisa rodar contra Postgres.
+
+    O job `postgres` do CI roda uma lista fixa de arquivos. Arquivo que use
+    `TEST_DATABASE_URL` e não esteja na lista é teste que **nunca** roda contra
+    Postgres: ele passa em todo lugar, pulando, e a diferença de backend que
+    ele existe para pegar nunca é exercitada.
+
+    Foi o que quase aconteceu com `test_migracao_de_dados.py`: a correção das
+    sequências do Postgres — o defeito silencioso daquela migração — ficaria
+    sem verificação em lugar nenhum.
+    """
+
+    CI = REPO / ".github" / "workflows" / "ci.yml"
+
+    def _passo_do_postgres(self) -> str:
+        texto = self.CI.read_text("utf-8")
+        assert "TEST_DATABASE_URL" in texto, "o CI não define TEST_DATABASE_URL"
+        # O comando do passo que roda com a variável definida.
+        return texto
+
+    def test_todo_teste_que_usa_postgres_esta_no_job(self):
+        usam = {
+            arquivo.name
+            for arquivo in sorted((REPO / "tests").glob("test_*.py"))
+            if "TEST_DATABASE_URL" in arquivo.read_text("utf-8")
+        }
+        assert usam, "nenhum teste usa TEST_DATABASE_URL — o padrão mudou?"
+        fora = _fora_do_job_de_postgres(usam, self._passo_do_postgres())
+        assert not fora, (
+            f"teste que depende de Postgres e não está no job `postgres` do CI: {fora} — "
+            "ele passa pulando, e a diferença de backend nunca é exercitada (§3.4)"
+        )
+
+    def test_job_nao_cita_arquivo_inexistente(self):
+        import re
+
+        ci = self._passo_do_postgres()
+        citados = set(re.findall(r"(tests/test_\w+\.py)", ci))
+        ausentes = sorted(c for c in citados if not (REPO / c).exists())
+        assert not ausentes, f"o CI roda arquivo que não existe mais: {ausentes}"
 
 
 class TestTestes:

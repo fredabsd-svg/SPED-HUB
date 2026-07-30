@@ -40,6 +40,5 @@ verificação exige que a razão esteja escrita.
 
 | Item | Situação | Marcador de ausência |
 |---|---|---|
-| Migração de dados SQLite para PostgreSQL | O schema já migra (`sped-hub migrar`); os **dados** não. Hoje o caminho é reimportar as ECDs | `src.db.migrations:migrar_dados` |
 | Rate limiting distribuído | Em memória hoje; múltiplas réplicas exigiriam Redis | `src.ratelimit:RedisRateLimiter` |
 | Executor de importação fora do processo web | A importação roda em thread dentro do servidor. Encerrar job abandonado na subida pressupõe instância única — ver [`status.md`](status.md) | `src.worker_runner:executar_importacao` |

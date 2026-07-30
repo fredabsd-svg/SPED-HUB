@@ -35,6 +35,13 @@ interno da implementação.
   não aparecia em lugar nenhum — o assinante perdia o evento em silêncio e não
   havia como recuperar, nem manualmente.
 
+- **`sped-hub migrar-dados` copia o conteúdo de um banco para outro.** Um
+  escritório rodando em SQLite que quisesse PostgreSQL só tinha o caminho de
+  reimportar todas as ECDs — e perdia usuários, mapeamentos de conta, visões de
+  filtro, chaves de API e o histórico de auditoria, que não vêm de arquivo
+  nenhum. A cópia é tudo-ou-nada, preserva os identificadores, recusa destino
+  que já tenha dados, e confere as contagens no fim.
+
 ### Corrigido
 - **Uma importação interrompida por reinício do sistema deixava de existir em
   silêncio.** O processamento roda dentro do servidor web; reinício,
