@@ -265,12 +265,13 @@
                                 <td>
                                     <span class="badge"
                                           :class="{
-                                              'badge-success': d.status === 'success',
+                                              'badge-success': d.status === 'success' || d.status === 'retried',
                                               'badge-danger': d.status === 'failed',
-                                              'badge-warning': d.status === 'retrying',
+                                              'badge-warning': d.status === 'superseded',
                                               'badge-pending': d.status === 'pending'
                                           }"
-                                          x-text="d.status"></span>
+                                          :title="explicacaoStatus(d.status)"
+                                          x-text="rotuloStatus(d.status)"></span>
                                 </td>
                                 <td x-text="d.status_code || '—'"></td>
                                 <td x-text="d.tentativa"></td>
@@ -347,6 +348,30 @@
                 deliveries: [],
                 webhooks: [],
                 chart: null,
+
+                // O status vem cru do banco. "superseded" não diz nada para
+                // quem opera um escritório contábil; o rótulo diz.
+                rotuloStatus(status) {
+                    return {
+                        success: 'entregue',
+                        retried: 'entregue no reenvio',
+                        superseded: 'tentativa falhou',
+                        failed: 'não entregue',
+                        pending: 'enviando',
+                        retrying: 'sem desfecho',
+                    }[status] || status;
+                },
+
+                explicacaoStatus(status) {
+                    return {
+                        success: 'O assinante respondeu 2xx: o evento chegou.',
+                        retried: 'Falhou na primeira vez e chegou no reenvio manual.',
+                        superseded: 'Esta tentativa falhou e outra foi feita em seguida.',
+                        failed: 'Todas as tentativas falharam — o evento não chegou. Use "Reenviar falhas".',
+                        pending: 'Tentativa em andamento.',
+                        retrying: 'Resíduo de versão anterior: entrega sem desfecho registrado.',
+                    }[status] || '';
+                },
 
                 async init() {
                     await Promise.all([
