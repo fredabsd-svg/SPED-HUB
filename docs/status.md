@@ -39,6 +39,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 33 | Reenvio automático de entrega interrompida | concluída | `tests/test_manutencao.py::TestReenvioAutomatico` | `failed` segue no reenvio manual, por escolha |
 | 34 | Escopo e poder da API Key | concluída | `tests/test_escopo_de_api_key.py` | chave sem dono segue lendo tudo, por retrocompatibilidade |
 | 35 | `docker compose up` funciona na primeira execução | concluída | `tests/test_deploy_config.py::TestEntrypointDoNginxExecutado` | emissão do certificado real segue manual (ver `docs/deploy.md`) |
+| 36 | Worker encerra em vez de girar em vazio com a fila quebrada | concluída | `tests/test_worker_fila_quebrada.py`, `tests/test_migrations.py::TestLoggingSobreviveAMigracao` | — |
 
 ## Limites do comportamento atual
 

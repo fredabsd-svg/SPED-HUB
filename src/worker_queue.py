@@ -189,7 +189,14 @@ class WorkerQueue:
                 try:
                     self._task_queue.put(None, timeout=1)
                 except Exception:
-                    pass
+                    # Fila cheia ou quebrada.  Não é fatal — `_running` já está
+                    # em False e o worker sai pela segunda via —, mas passar em
+                    # silêncio escondia um encerramento incompleto.
+                    logger.warning(
+                        "Não foi possível entregar a pílula de encerramento a um "
+                        "worker; ele sai pelo desligamento da fila",
+                        exc_info=True,
+                    )
 
         if wait:
             for p in self._workers:
@@ -254,8 +261,21 @@ class WorkerQueue:
         while True:
             try:
                 task = task_queue.get(timeout=1)
-            except Exception:
+            except Empty:
+                # Caso normal: nada para fazer neste segundo.  A pílula de
+                # encerramento pode não ter chegado (o `put` do shutdown tem
+                # timeout), então `running` é a segunda via de saída.
+                if not running.value:
+                    logger.info("Worker %d: fila desligada, encerrando", worker_id)
+                    break
                 continue
+            except Exception:
+                # Fila quebrada — fechada, ou processo pai morto.  Aqui o
+                # `timeout=1` NÃO se aplica: o erro vem na hora.  Seguir em
+                # frente era um laço a plena velocidade (1,2 milhão de voltas
+                # por segundo, medido), um núcleo por worker, sem log nenhum.
+                logger.exception("Worker %d: fila de tarefas quebrou, encerrando", worker_id)
+                break
 
             if task is None:  # Poison pill
                 break

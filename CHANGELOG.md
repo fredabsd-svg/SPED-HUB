@@ -9,6 +9,16 @@ interno da implementação.
 ## [Não publicado]
 
 ### Corrigido
+- **Um worker cujo canal de tarefas quebrasse consumia um núcleo inteiro, em
+  silêncio, para sempre.** O laço tratava "fila vazia" e "fila quebrada" do
+  mesmo jeito: esperar um segundo e tentar de novo. Mas numa fila quebrada o
+  erro vem na hora, sem a espera — o que dava 1,2 milhão de voltas por segundo
+  por worker, quatro deles no deploy padrão, sem uma linha de log. Agora o
+  worker registra a falha e encerra. Ele também passou a notar o desligamento
+  da fila mesmo quando o aviso de encerramento não chega até ele.
+- **Aplicar migração emudecia o resto do processo.** A configuração de log do
+  Alembic desativava todos os loggers da aplicação já criados, então nada mais
+  era registrado depois de uma migração.
 - **`docker compose up` não subia numa instalação nova.** O nginx apontava
   direto para o certificado do Let's Encrypt, que ainda não existe na primeira
   execução; ele recusava subir (`cannot load certificate`) e o container

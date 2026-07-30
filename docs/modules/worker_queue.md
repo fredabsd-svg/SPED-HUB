@@ -55,7 +55,14 @@ leitura) e `monitoring` (snapshot).
   processo principal é sobrescrito pelo último evento recebido, não
   compartilhado.
 - Workers ignoram SIGINT (o principal gerencia); shutdown envia um `None` por
-  worker e, se o join estourar o timeout, aplica `terminate()`.
+  worker e, se o join estourar o timeout, aplica `terminate()`.  O `None` pode
+  não chegar — o `put` tem timeout —, então o worker também sai quando vê
+  `_running` em False, e a pílula não entregue vira aviso no log.
+- **Fila vazia e fila quebrada são casos distintos.**  `get(timeout=1)` levanta
+  `Empty` na primeira e `ValueError`/`EOFError`/`OSError` na segunda, sem
+  respeitar o timeout.  Tratar as duas como "espera e tenta de novo" produzia
+  um laço a plena velocidade — um núcleo por worker, sem log.  Fila quebrada
+  agora registra a exceção e encerra o worker.
 - `db_path` é aceito e armazenado, mas a fila em si não o usa — quem abre
   banco é o handler.
 
@@ -64,6 +71,7 @@ leitura) e `monitoring` (snapshot).
 ```bash
 pytest tests/test_fase15.py -k WorkerQueue -q               # enqueue, retry, shutdown
 pytest tests/test_review_regressions.py -k worker -q        # progresso durante running
+pytest tests/test_worker_fila_quebrada.py -q                # fila quebrada não vira laço em vazio
 ```
 
 Os testes toleram lentidão de CI: subir processo num runner de 2 núcleos
