@@ -173,7 +173,8 @@ jobs:
           # O container tem de estar de pé — não reiniciando, não morto.
           test "$(docker inspect -f '{{.State.Running}}' nginx-teste)" = true
           test "$(docker inspect -f '{{.State.Restarting}}' nginx-teste)" = false
-          test "$(docker inspect -f '{{.State.RestartCount}}' nginx-teste)" = 0
+          # `RestartCount` fica na raiz do inspect, não dentro de `.State`.
+          test "$(docker inspect -f '{{.RestartCount}}' nginx-teste)" = 0
 
           # Sem certificado real: avisa que é autoassinado e serve a aplicação
           # em HTTP, sem redirecionar (redirecionar para um HTTPS autoassinado
