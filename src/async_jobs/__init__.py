@@ -28,7 +28,7 @@ from pathlib import Path
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from src.db.models import AsyncJob, criar_engine, get_session, init_db
+from src.db.models import AsyncJob, get_session, init_db_once, obter_engine
 from src.settings import database_reference
 
 logger = logging.getLogger("sped-hub.async_jobs")
@@ -90,8 +90,8 @@ class AsyncJobService:
         self._live_lock = threading.Lock()
 
     def _get_session(self) -> Session:
-        engine = criar_engine(self.db_path)
-        init_db(engine)
+        engine = obter_engine(self.db_path)
+        init_db_once(engine)
         return get_session(engine)
 
     def criar(self, tipo: str, parametros: dict | None = None) -> AsyncJob:

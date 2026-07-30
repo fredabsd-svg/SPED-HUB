@@ -33,7 +33,12 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import RateLimitConfig, criar_engine, get_session, init_db
+from src.db.models import (
+    RateLimitConfig,
+    get_session,
+    init_db_once,
+    obter_engine,
+)
 
 logger = logging.getLogger("sped-hub.ratelimit")
 
@@ -90,8 +95,8 @@ class RateLimiter:
         Returns:
             (limite, janela_em_segundos)
         """
-        engine = criar_engine(self.db_path)
-        init_db(engine)
+        engine = obter_engine(self.db_path)
+        init_db_once(engine)
         session = get_session(engine)
         try:
             config = session.execute(
@@ -239,8 +244,8 @@ class RateLimitService:
         self.db_path = db_path
 
     def _get_session(self) -> Session:
-        engine = criar_engine(self.db_path)
-        init_db(engine)
+        engine = obter_engine(self.db_path)
+        init_db_once(engine)
         return get_session(engine)
 
     def configurar(self, api_key_id: int, limite: int, janela: int) -> dict:

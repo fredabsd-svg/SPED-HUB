@@ -24,9 +24,9 @@ from src.db.models import (
     Lancamento,
     Partida,
     PlanoConta,
-    criar_engine,
     get_session,
-    init_db,
+    init_db_once,
+    obter_engine,
 )
 from src.reports.balanco import BalancoPatrimonial
 from src.reports.dfc import DFC
@@ -44,8 +44,8 @@ def _get_db_path() -> str:
 
 
 def _get_session() -> Session:
-    engine = criar_engine(_get_db_path())
-    init_db(engine)
+    engine = obter_engine(_get_db_path())
+    init_db_once(engine)
     return get_session(engine)
 
 
