@@ -20,6 +20,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -36,6 +37,27 @@ class JobStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    #: O processo que executava o job morreu — reinício, atualização, queda.
+    #: Sem este estado, a linha ficava em `pending` com a mensagem
+    #: "Aguardando processamento..." para sempre: quem enviou a escrituração
+    #: esperava por uma importação que ninguém mais ia executar.
+    INTERRUPTED = "interrupted"
+
+
+#: Estados em que ninguém mais vai mexer no job.  A lista existe porque estava
+#: escrita à mão como `(COMPLETED, FAILED)` em vários pontos — `cancelled` já
+#: ficava de fora, e cada novo estado exigiria caçar todas as ocorrências.
+STATUS_TERMINAIS = (
+    JobStatus.COMPLETED.value,
+    JobStatus.FAILED.value,
+    JobStatus.CANCELLED.value,
+    JobStatus.INTERRUPTED.value,
+)
+
+#: Estados de job que ainda espera ou está executando.  Depois que o processo
+#: que o executava morre, nenhum deles volta a andar sozinho: o executor é uma
+#: thread dentro do processo, não uma fila que alguém varre.
+STATUS_EM_ABERTO = (JobStatus.PENDING.value, JobStatus.PROCESSING.value)
 
 
 @dataclass
@@ -116,6 +138,110 @@ class AsyncJobService:
                 session.commit()
         finally:
             session.close()
+
+    def marcar_em_execucao(self, job_id: int, arquivo_temporario: str | None = None) -> None:
+        """Grava no banco que o job começou, e onde está o arquivo dele.
+
+        A importação assíncrona reporta progresso com `persistir=False` — de
+        propósito, para não escrever no banco a cada bloco lido.  O efeito
+        colateral era a linha continuar dizendo `pending` / 0% /
+        "Aguardando processamento..." durante a importação inteira: o estado
+        real só existia na memória do processo.  Depois de um reinício, o que
+        sobrava no banco era um job que parecia nem ter começado.
+
+        `arquivo_temporario` é o caminho do upload em disco.  Ele é gravado
+        aqui porque o `finally` que o apaga vive numa thread `daemon`, e thread
+        `daemon` é morta no encerramento do interpretador **sem** rodar
+        `finally`: sem o caminho registrado, o arquivo ficava órfão e nada
+        sabia onde procurá-lo.
+        """
+        session = self._get_session()
+        try:
+            job = session.get(AsyncJob, job_id)
+            if not job:
+                return
+            job.status = JobStatus.PROCESSING.value
+            job.mensagem = "Processando..."
+            if arquivo_temporario:
+                parametros = json.loads(job.parametros) if job.parametros else {}
+                parametros["arquivo_temporario"] = arquivo_temporario
+                job.parametros = json.dumps(parametros)
+            session.commit()
+        finally:
+            session.close()
+
+    def recuperar_interrompidos(self) -> int:
+        """Encerra os jobs que o processo anterior deixou em aberto.
+
+        Chamada na subida da aplicação.  O executor de um job é uma thread
+        dentro deste processo, não uma fila que alguém varre: job em aberto no
+        banco quando o processo está subindo é, necessariamente, job que o
+        processo anterior abandonou — nenhum threshold de tempo é preciso, e
+        não há falso positivo.
+
+        Vale para instância única, que é o deploy documentado (o limite por IP
+        e o progresso em memória já pressupõem isso).  Com mais de uma réplica
+        web, a subida de uma marcaria como interrompido o job em andamento da
+        outra; nesse cenário o executor precisaria sair para um worker com
+        posse explícita, e isso está registrado em `docs/status.md`.
+
+        Devolve quantos foram encerrados.  O arquivo de upload de cada um é
+        removido: ele não serve para mais nada e ocupa o volume.
+        """
+        session = self._get_session()
+        try:
+            abertos = list(
+                session.execute(
+                    select(AsyncJob).where(AsyncJob.status.in_(STATUS_EM_ABERTO))
+                ).scalars()
+            )
+            if not abertos:
+                return 0
+            agora = datetime.datetime.now(datetime.UTC)
+            orfaos: list[str] = []
+            # Os ids saem daqui, dentro da sessão: depois do `close()` o objeto
+            # está desanexado e ler qualquer atributo dispara um refresh que
+            # levanta `DetachedInstanceError`.
+            ids = [job.id for job in abertos]
+            for job in abertos:
+                job.status = JobStatus.INTERRUPTED.value
+                job.erro = "Processo encerrado antes de a importação terminar"
+                job.mensagem = (
+                    "Interrompida por reinício do sistema — nada foi gravado. "
+                    "Envie o arquivo novamente."
+                )
+                job.concluido_em = agora
+                if job.parametros:
+                    try:
+                        caminho = json.loads(job.parametros).get("arquivo_temporario")
+                    except (json.JSONDecodeError, TypeError, AttributeError):
+                        caminho = None
+                    if caminho:
+                        orfaos.append(caminho)
+            session.commit()
+        finally:
+            session.close()
+
+        with self._live_lock:
+            for job_id in ids:
+                self._live_progress.pop(job_id, None)
+                self._cancel_tokens.pop(job_id, None)
+
+        for caminho in orfaos:
+            # Falha aqui não pode impedir a aplicação de subir: o job já está
+            # encerrado no banco, e um arquivo a mais no volume é o menor dos
+            # problemas.
+            try:
+                Path(caminho).unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Upload órfão %s não pôde ser removido: %s", caminho, exc)
+
+        logger.warning(
+            "%d job(s) encerrado(s) como interrompido(s): o processo anterior morreu "
+            "durante a importação e quem enviou o arquivo precisa reenviá-lo",
+            len(ids),
+        )
+        return len(ids)
 
     def concluir(self, job_id: int, resultado: dict | None = None):
         """Marca job como concluído."""
@@ -228,7 +354,7 @@ class AsyncJobService:
 
         with self._live_lock:
             live = self._live_progress.get(job_id)
-        if live and info.status not in (JobStatus.COMPLETED.value, JobStatus.FAILED.value):
+        if live and info.status not in STATUS_TERMINAIS:
             info.status = JobStatus.PROCESSING.value
             info.progresso, live_message = live
             if live_message:
@@ -260,7 +386,7 @@ class AsyncJobService:
             live_snapshot = dict(self._live_progress)
         for info in infos:
             live = live_snapshot.get(info.id)
-            if live and info.status not in (JobStatus.COMPLETED.value, JobStatus.FAILED.value):
+            if live and info.status not in STATUS_TERMINAIS:
                 info.status = JobStatus.PROCESSING.value
                 info.progresso, live_message = live
                 if live_message:
@@ -277,7 +403,7 @@ class AsyncJobService:
             result = (
                 session.execute(
                     select(func.count(AsyncJob.id)).where(
-                        AsyncJob.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value]),
+                        AsyncJob.status.in_(STATUS_TERMINAIS),
                         AsyncJob.concluido_em < corte,
                     )
                 ).scalar()
@@ -288,7 +414,7 @@ class AsyncJobService:
 
             session.execute(
                 _delete(AsyncJob).where(
-                    AsyncJob.status.in_([JobStatus.COMPLETED.value, JobStatus.FAILED.value]),
+                    AsyncJob.status.in_(STATUS_TERMINAIS),
                     AsyncJob.concluido_em < corte,
                 )
             )

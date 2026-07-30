@@ -42,6 +42,7 @@ import io
 import logging
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Query, Request, UploadFile
@@ -86,7 +87,35 @@ logger = logging.getLogger("sped-hub.dashboard")
 
 # ── App ────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="SPED-HUB Dashboard", version=APP_VERSION)
+
+@asynccontextmanager
+async def ciclo_de_vida(_app: FastAPI):
+    """Na subida, encerra os jobs que o processo anterior deixou em aberto.
+
+    O executor de uma importação assíncrona é uma thread `daemon` dentro deste
+    processo. Thread `daemon` é morta no encerramento do interpretador sem
+    rodar `finally`, então reinício, atualização ou queda deixavam o job em
+    aberto no banco para sempre — e a mensagem que sobrava era "Aguardando
+    processamento...", que diz a quem enviou a escrituração que ela está na
+    fila. Não estava: ninguém mais ia executá-la.
+
+    Job em aberto enquanto o processo sobe é, por construção, job abandonado —
+    não há fila que alguém varra. Ver `AsyncJobService.recuperar_interrompidos`
+    para a ressalva de múltiplas réplicas.
+    """
+    try:
+        from src.async_jobs import get_async_job_service, init_async_job_service
+
+        init_async_job_service(_db_reference())
+        get_async_job_service().recuperar_interrompidos()
+    except Exception:
+        # Recuperar jobs não pode impedir a aplicação de subir: um job em
+        # aberto a mais é melhor que o escritório sem sistema.
+        logger.exception("Falha ao recuperar jobs interrompidos na subida")
+    yield
+
+
+app = FastAPI(title="SPED-HUB Dashboard", version=APP_VERSION, lifespan=ciclo_de_vida)
 
 # ── API REST v1 ──────────────────────────────────────────────────────────
 app.include_router(api_v1_router)
@@ -887,6 +916,11 @@ async def api_upload_async(request: Request, file: UploadFile = File(...)):
 
     cancel_token = CancelToken()
     job_service.registrar_token(job.id, cancel_token)
+    # Grava no banco que o job começou e onde está o arquivo dele.  O progresso
+    # é reportado com `persistir=False`, então sem isto a linha diria
+    # `pending` / 0% / "Aguardando processamento..." durante a importação
+    # inteira, e um reinício deixaria um job que parece nem ter começado.
+    job_service.marcar_em_execucao(job.id, arquivo_temporario=str(saved.path))
 
     def process_upload():
         session = get_session(obter_engine(db_path))

@@ -32,6 +32,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 26 | Webhooks emitem os eventos documentados | concluída | `tests/test_webhooks_emissao.py` | sem fila persistente; recuperação é manual |
 | 27 | Configuração documentada com efeito real (§2.2) | concluída | `tests/test_config_com_efeito.py`, `tests/test_regras_projeto.py` | `SPED_HUB_SECRET_KEY` segue reservada, por decisão de produto |
 | 28 | Contabilidade de entregas de webhook | concluída | `tests/test_webhooks_entregas_orfas.py`, `tests/test_migrations.py` | o reenvio segue manual e sequencial |
+| 29 | Importação interrompida por reinício é encerrada | concluída | `tests/test_jobs_interrompidos.py` | retomar de onde parou segue fora (§6.1) |
 
 ## Em aberto — decisões de produto
 
@@ -41,6 +42,8 @@ Ver `docs/roadmap.md` para o que ainda não existe.
 | Item | Situação |
 |---|---|
 | Retomada de importação a partir de offset | Exigiria commits parciais, o que viola a §6.1. Precisaria vir com estado explícito de "importação incompleta" que os relatórios respeitem. |
+| Executor de importação assíncrona vive no processo web | A thread `daemon` é morta no encerramento do interpretador. A recuperação na subida resolve o resíduo, mas pressupõe **instância única** — com mais de uma réplica web, a subida de uma encerraria o job em andamento da outra. Mover o executor para um worker com posse explícita do job é decisão de arquitetura. |
+| Retomar importação interrompida de onde parou | O job interrompido pede reenvio do arquivo. Retomar exigiria commits parciais, que a §6.1 proíbe, e um estado de "importação incompleta" que os relatórios respeitassem. |
 | Reenvio de webhook é manual e sequencial | `POST /api/v1/webhooks/retry` é acionado por gente e aguardado dentro da requisição, então o lote é limitado por tempo de requisição (`LOTE_DE_REENVIO`) e o retorno informa quantas ficaram. Evento perdido por queda do processo é recuperável, mas espera alguém clicar. Automatizar exige decidir onde o laço mora — worker, cron ou fila. |
 | Histórico de `WebhookDelivery` cresce sem limite | Não há expurgo. Uma linha por tentativa, e nada as remove. Definir retenção é decisão de produto, não defeito. |
 | `SPED_HUB_SECRET_KEY` sem consumidor | A única reservada que sobrou (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. Ligá-la exigiria decidir *qual* segredo ela é — e hoje nenhum componente precisa de um. |
