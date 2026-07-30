@@ -808,6 +808,73 @@ class TestTestes:
                 ), f"{arquivo.name} usa o marcador e2e sem ser teste de navegador"
 
 
+class TestVersao:
+    """A versão vive em dois arquivos e nada conferia se batem.
+
+    O `release.yml` compara a **tag** com `src/version.py` e recusa a
+    publicação se divergirem — mas o `pyproject.toml` fica de fora. Publicar
+    com `pyproject` atrasado gera um pacote que se declara de outra versão, e
+    isso não aparece em teste nenhum: os dois números são lidos por caminhos
+    diferentes.
+    """
+
+    def test_pyproject_e_codigo_declaram_a_mesma_versao(self):
+        from src.version import APP_VERSION
+
+        do_pyproject = tomllib.loads(PYPROJECT.read_text("utf-8"))["project"]["version"]
+        assert do_pyproject == APP_VERSION, (
+            f"pyproject.toml diz {do_pyproject} e src/version.py diz {APP_VERSION} — "
+            "o pacote publicado se declararia de uma versão que o código não relata"
+        )
+
+    def test_changelog_tem_secao_da_versao_atual_ou_nao_publicado(self):
+        """§1.7 — versão publicada tem seção com data no CHANGELOG.
+
+        Sem isto, um release sai sem ninguém escrever o que mudou nele.
+        """
+        from src.version import APP_VERSION
+
+        changelog = (REPO / "CHANGELOG.md").read_text("utf-8")
+        publicada = f"## [{APP_VERSION}]" in changelog
+        pendente = "## [Não publicado]" in changelog
+        assert publicada or pendente, (
+            f"o CHANGELOG não tem seção para {APP_VERSION} nem seção "
+            "'[Não publicado]' — a versão atual não está descrita em lugar nenhum"
+        )
+
+    def test_secao_de_versao_nao_repete_categoria(self):
+        """Duas "### Segurança" na mesma versão é resíduo de merge.
+
+        Aconteceu na 0.18.0: cinco PRs escreveram no mesmo bloco "[Não
+        publicado]" e o merge empilhou categorias repetidas. Quem lê perde
+        metade da informação, porque para de ler na primeira ocorrência.
+        """
+        import re
+
+        changelog = (REPO / "CHANGELOG.md").read_text("utf-8")
+        blocos = re.split(r"^## \[", changelog, flags=re.M)[1:]
+        repetidas = {}
+        for bloco in blocos:
+            versao = bloco.split("]", 1)[0]
+            categorias = re.findall(r"^### (.+)$", bloco, re.M)
+            duplicadas = {c for c in categorias if categorias.count(c) > 1}
+            if duplicadas:
+                repetidas[versao] = sorted(duplicadas)
+        assert not repetidas, f"categoria repetida na mesma versão do CHANGELOG: {repetidas}"
+
+    def test_versao_publicada_tem_data(self):
+        """Seção de versão sem data não diz quando aquilo foi ao ar."""
+        import re
+
+        changelog = (REPO / "CHANGELOG.md").read_text("utf-8")
+        sem_data = [
+            versao
+            for versao, resto in re.findall(r"^## \[([^\]]+)\](.*)$", changelog, re.M)
+            if versao != "Não publicado" and not re.search(r"\d{4}-\d{2}-\d{2}", resto)
+        ]
+        assert not sem_data, f"versão publicada sem data no CHANGELOG: {sem_data}"
+
+
 class TestBuild:
     def test_lint_e_format_pinados(self):
         """§4.1 — o CI ficou vermelho em 14 execuções seguidas por falta disto."""
