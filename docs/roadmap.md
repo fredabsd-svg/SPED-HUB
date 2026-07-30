@@ -39,7 +39,8 @@ verificação exige que a razão esteja escrita.
 
 Já existem o modelo de dados, o adaptador de NF-e/NFC-e (lendo os dois
 regimes tributários), o importador em lote com deduplicação, a camada
-efetiva (ajustes com reversão por lote) e o motor de classificação — ver
+efetiva (ajustes com reversão por lote), o motor de classificação e as
+alterações em massa com simulação — ver
 [`status.md`](status.md). Sobre a Reforma Tributária, ver
 [`reforma-tributaria.md`](reforma-tributaria.md).
 
@@ -48,7 +49,7 @@ O que falta:
 | Item | Situação | Marcador de ausência |
 |---|---|---|
 | Importação de NFS-e por provedor | Exige um adaptador por provedor municipal | `src.documentos.adaptadores:AdaptadorNFSe` |
-| Alterações em massa com simulação e reversão | — | `src.documentos.massa:SimulacaoDeAlteracao` |
+| Recálculo de totais depois de alteração em massa (§12.5) | Alterar a parcela de um item não recompõe o total do documento | `src.documentos.massa:recalcular` |
 | Geração de EFD ICMS/IPI | Hoje o sistema só **lê** EFD (`src/parsers/efd.py`) | `src.escrituracoes.efd_icms:GeradorEFDICMS` |
 | Geração de EFD-Contribuições | Idem | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes` |
 | Apuração de CBS, IBS e Imposto Seletivo | Os campos são lidos do documento; nenhuma apuração os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS` |

@@ -45,6 +45,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 39 | Central de Documentos Fiscais: modelo em três camadas, adaptador de NF-e e importação em lote | concluída | `tests/test_documentos_fiscais.py`, `tests/test_migrations.py` | NFS-e, classificação, alterações em massa e geradores de SPED seguem no roadmap |
 | 40 | Camada efetiva: ajustes com histórico e reversão por lote | concluída | `tests/test_camada_efetiva.py` | — |
 | 41 | Motor de classificação fiscal com regras, prioridade e conflito | concluída | `tests/test_classificacao_fiscal.py` | nenhuma tela mostra as sugestões ainda; a aplicação é por chamada |
+| 42 | Alterações em massa: seleção, simulação com impacto, proteções e reversão | concluída | `tests/test_alteracoes_em_massa.py` | recálculo de totais (§12.5) segue no roadmap |
 
 ## Limites do comportamento atual
 
