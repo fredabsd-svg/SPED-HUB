@@ -40,7 +40,8 @@ verificação exige que a razão esteja escrita.
 Já existem o modelo de dados, o adaptador de NF-e/NFC-e (lendo os dois
 regimes tributários), o importador em lote com deduplicação, a camada
 efetiva (ajustes com reversão por lote), o motor de classificação, as
-alterações em massa com simulação e o gerador da EFD ICMS/IPI — ver
+alterações em massa com simulação e os geradores da EFD ICMS/IPI e da
+EFD-Contribuições — ver
 [`status.md`](status.md). Sobre a Reforma Tributária, ver
 [`reforma-tributaria.md`](reforma-tributaria.md).
 
@@ -53,7 +54,11 @@ O que falta:
 | Blocos G, H e 1 da EFD ICMS/IPI | O gerador cobre 0, C, E e 9 | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_h` |
 | Documentos de serviço, energia e transporte na EFD (C500, D100) | Só o C100 de mercadorias é gerado | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_d` |
 | Ajustes de apuração pela tabela 5.1.1 (E111) | O E110 é soma direta, sem ajuste nem saldo credor anterior | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_apuracao` |
-| Geração de EFD-Contribuições | Idem | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes` |
+| Blocos A, D, F e I da EFD-Contribuições | O gerador cobre 0, C, M e 9. O bloco A depende da importação de NFS-e, acima | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.bloco_f` |
+| Créditos extemporâneos e ajustes da EFD-Contribuições | Os blocos M são soma direta das saídas menos as entradas | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.ajustes_de_apuracao` |
+| Monofásico, substituição e alíquota por unidade no PIS/Cofins | A apuração usa o valor destacado no documento, qualquer que seja o CST | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |
+| Cooperativa e entidade de folha de salários na EFD-Contribuições | O `IND_NAT_PJ` do 0000 sai fixo como `00` (sociedade empresária em geral), com aviso no resultado | `src.db.models:Empresa.ind_nat_pj` |
+| Tela de cadastro fiscal da empresa | `ind_perfil`, `ind_ativ`, `ind_ativ_contribuicoes` e `cod_inc_trib` só podem ser preenchidos direto no banco | `src.routes.empresas:cadastro_fiscal` |
 | Apuração de CBS, IBS e Imposto Seletivo | Os campos são lidos do documento; nenhuma apuração os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS` |
 | Espelhos antes da geração | — | `src.escrituracoes.espelhos:Espelho` |
 | Excel bidirecional de documentos | — | `src.documentos.planilha:reimportar` |

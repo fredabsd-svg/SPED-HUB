@@ -47,6 +47,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 41 | Motor de classificação fiscal com regras, prioridade e conflito | concluída | `tests/test_classificacao_fiscal.py` | nenhuma tela mostra as sugestões ainda; a aplicação é por chamada |
 | 42 | Alterações em massa: seleção, simulação com impacto, proteções e reversão | concluída | `tests/test_alteracoes_em_massa.py` | recálculo de totais (§12.5) segue no roadmap |
 | 43 | Gerador da EFD ICMS/IPI (blocos 0, C, E, 9) | concluída | `tests/test_gerador_efd_icms.py` | inventário, ativo, serviços, ajustes 5.1.1 e ST seguem fora — ver `docs/modules/escrituracoes.md` |
+| 44 | Gerador da EFD-Contribuições (blocos 0, C, M, 9), com regime e atividade como cadastro obrigatório | concluída | `tests/test_gerador_efd_contribuicoes.py` | no regime cumulativo os créditos das entradas **não** são descontados, e o resultado avisa; o `IND_ATIV` tem tabela própria, diferente da EFD ICMS/IPI; blocos A, D, F e I, créditos extemporâneos e regimes especiais seguem fora |
 
 ## Limites do comportamento atual
 
