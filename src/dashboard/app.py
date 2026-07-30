@@ -37,12 +37,13 @@ API REST v1 (autenticação por X-API-Key):
   GET  /api/v1/ecds/{id}/validar — Validações de integridade
 """
 
+import asyncio
 import datetime
 import io
 import logging
 import sys
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, File, Query, Request, UploadFile
@@ -88,9 +89,83 @@ logger = logging.getLogger("sped-hub.dashboard")
 # ── App ────────────────────────────────────────────────────────────────────
 
 
+def executar_manutencao() -> dict[str, int]:
+    """Expurga histórico operacional vencido.  Devolve o que foi removido.
+
+    Duas tabelas cresciam sem limite. A de jobs tinha o expurgo escrito
+    (`limpar_antigos`) e o docstring do módulo prometia "limpeza automática" —
+    **e nada chamava a função**. A de entregas de webhook não tinha expurgo
+    nenhum, e guarda uma linha por *tentativa*: integração instável enche a
+    tabela rápido.
+
+    `audit_logs` NÃO entra aqui, de propósito. Log de auditoria de escritório
+    contábil é registro de quem mexeu em escrituração fiscal; apagá-lo por
+    conta própria é decisão que o sistema não pode tomar sozinho. A limpeza
+    dele segue manual, por rota de administrador.
+
+    Idempotente e sem estado: rodar duas vezes junto não duplica nada, o que
+    torna seguro haver mais de uma réplica executando.
+    """
+    from src.async_jobs import get_async_job_service
+    from src.webhooks import WebhookService
+
+    cfg = get_settings()
+    referencia = _db_reference()
+    resultado = {"jobs": 0, "entregas_de_webhook": 0}
+
+    # Cada expurgo é isolado: falha em um não pode impedir o outro.
+    try:
+        if cfg.job_retention_hours > 0:
+            resultado["jobs"] = get_async_job_service(referencia).limpar_antigos(
+                horas=cfg.job_retention_hours
+            )
+    except Exception:
+        logger.exception("Expurgo de jobs falhou")
+    try:
+        resultado["entregas_de_webhook"] = WebhookService(referencia).purgar_deliveries()
+    except Exception:
+        logger.exception("Expurgo de entregas de webhook falhou")
+
+    if any(resultado.values()):
+        logger.info(
+            "Manutenção: %d job(s) e %d entrega(s) de webhook removidos",
+            resultado["jobs"],
+            resultado["entregas_de_webhook"],
+        )
+    return resultado
+
+
+async def _laco_de_manutencao() -> None:
+    """Roda a manutenção a cada `SPED_HUB_MAINTENANCE_INTERVAL_MINUTES`.
+
+    O intervalo é relido a cada volta, não fixado na entrada: a instância
+    global nasce no import e congelar configuração ali valeria para o processo
+    inteiro. Intervalo `<= 0` encerra o laço — desligar a manutenção é uma
+    escolha válida (quem prefere cron, por exemplo), e o histórico volta a
+    crescer sem limite.
+
+    O expurgo é síncrono e toca o banco, então vai para um thread: dentro do
+    laço de eventos ele bloquearia toda requisição durante a execução.
+    """
+    while True:
+        intervalo = get_settings().maintenance_interval_minutes
+        if intervalo <= 0:
+            logger.info("Manutenção periódica desligada (intervalo <= 0)")
+            return
+        await asyncio.sleep(intervalo * 60)
+        try:
+            await asyncio.to_thread(executar_manutencao)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # O laço não pode morrer por causa de uma volta ruim: se morrer,
+            # o histórico volta a crescer sem limite e ninguém percebe.
+            logger.exception("Volta da manutenção periódica falhou")
+
+
 @asynccontextmanager
 async def ciclo_de_vida(_app: FastAPI):
-    """Na subida, encerra os jobs que o processo anterior deixou em aberto.
+    """Encerra jobs abandonados na subida e mantém o expurgo periódico rodando.
 
     O executor de uma importação assíncrona é uma thread `daemon` dentro deste
     processo. Thread `daemon` é morta no encerramento do interpretador sem
@@ -102,6 +177,9 @@ async def ciclo_de_vida(_app: FastAPI):
     Job em aberto enquanto o processo sobe é, por construção, job abandonado —
     não há fila que alguém varra. Ver `AsyncJobService.recuperar_interrompidos`
     para a ressalva de múltiplas réplicas.
+
+    A manutenção periódica é o que faz o expurgo de histórico acontecer de
+    fato: o código existia e ninguém o chamava.
     """
     try:
         from src.async_jobs import get_async_job_service, init_async_job_service
@@ -112,7 +190,16 @@ async def ciclo_de_vida(_app: FastAPI):
         # Recuperar jobs não pode impedir a aplicação de subir: um job em
         # aberto a mais é melhor que o escritório sem sistema.
         logger.exception("Falha ao recuperar jobs interrompidos na subida")
-    yield
+
+    manutencao = asyncio.create_task(_laco_de_manutencao())
+    try:
+        yield
+    finally:
+        # Sem o cancelamento, o teste que sobe o app deixa a tarefa pendurada e
+        # o `asyncio` reclama de "task was destroyed but it is pending".
+        manutencao.cancel()
+        with suppress(asyncio.CancelledError):
+            await manutencao
 
 
 app = FastAPI(title="SPED-HUB Dashboard", version=APP_VERSION, lifespan=ciclo_de_vida)

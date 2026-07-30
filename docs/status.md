@@ -34,6 +34,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 28 | Contabilidade de entregas de webhook | concluída | `tests/test_webhooks_entregas_orfas.py`, `tests/test_migrations.py` | o reenvio segue manual e sequencial |
 | 29 | Importação interrompida por reinício é encerrada | concluída | `tests/test_jobs_interrompidos.py` | retomar de onde parou segue fora (§6.1) |
 | 30 | Roadmap com marcador de ausência verificável (§1.13) | concluída | `tests/test_regras_projeto.py::TestRoadmap`, `tests/test_regras_projeto.py::TestResolucaoDeMarcador` | — |
+| 31 | Retenção de histórico que realmente executa | concluída | `tests/test_manutencao.py` | auditoria segue com limpeza manual, por escolha |
 
 ## Limites do comportamento atual
 
@@ -46,8 +47,8 @@ descreve funcionalidade futura (§1.1).
 |---|---|---|
 | Importação interrompida pede reenvio do arquivo | Retomar de onde parou exigiria commits parciais, que a §6.1 proíbe. O job é encerrado com aviso de que nada foi gravado | Retomada de importação interrompida |
 | Encerrar job abandonado na subida pressupõe instância única | O executor é uma thread `daemon` dentro do processo web. Com mais de uma réplica, a subida de uma encerraria o job em andamento da outra. O deploy documentado é de instância única, e o limite por IP já pressupõe isso | Executor de importação fora do processo web |
+| Log de auditoria não é expurgado automaticamente | É o registro de quem mexeu em escrituração fiscal. Apagá-lo por conta própria não é decisão que o sistema possa tomar sozinho; a limpeza é manual, por rota de administrador | — (é escolha, não pendência) |
 | Reenvio de webhook é acionado por gente | `POST /api/v1/webhooks/retry` é aguardado dentro da requisição, então o lote é limitado por tempo de requisição (`LOTE_DE_REENVIO`) e o retorno informa quantas ficaram. Evento perdido por queda do processo é recuperável, mas espera o clique | Reenvio automático em segundo plano |
-| Histórico de `WebhookDelivery` cresce sem limite | Uma linha por tentativa, e nada as remove. Definir retenção é escolher quanto histórico o escritório precisa guardar | Expurgo do histórico de entregas |
 | `SPED_HUB_SECRET_KEY` não tem consumidor | A única variável reservada que sobrou (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. Ligá-la exigiria decidir *qual* segredo ela é, e hoje nenhum componente precisa de um | — |
 
 ## Passivo de documentação de módulo (§1.4)

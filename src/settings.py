@@ -127,6 +127,11 @@ class Settings:
 
     # Observabilidade
     monitoring_retention_hours: int = 24
+    #: Retenção do histórico de jobs de importação, em horas.  0 desliga.
+    job_retention_hours: int = 24
+    #: Intervalo entre execuções do expurgo periódico, em minutos.  0 desliga
+    #: o expurgo por completo — e aí o histórico volta a crescer sem limite.
+    maintenance_interval_minutes: int = 60
     metrics_window_minutes: int = 60
     enable_health_check_db_probe: bool = True
 
@@ -145,6 +150,10 @@ class Settings:
     # Webhooks
     webhook_default_max_retries: int = 3
     webhook_timeout_seconds: int = 10
+    #: Retenção do histórico de entregas de webhook, em dias.  Há uma linha por
+    #: TENTATIVA, não por evento, então a tabela cresce rápido em integração
+    #: instável.  0 desliga o expurgo.
+    webhook_delivery_retention_days: int = 30
     # Permite destino http:// (só para desenvolvimento — em produção o
     # webhook exige https e endereço público).
     webhook_allow_http: bool = False
@@ -230,6 +239,8 @@ _ENV_TO_FIELD: Mapping[str, str] = {
     "SPED_HUB_ECD_CHUNK_BYTES": "ecd_import_chunk_bytes",
     "WORKER_COUNT": "worker_count",
     "SPED_HUB_MONITORING_RETENTION_HOURS": "monitoring_retention_hours",
+    "SPED_HUB_JOB_RETENTION_HOURS": "job_retention_hours",
+    "SPED_HUB_MAINTENANCE_INTERVAL_MINUTES": "maintenance_interval_minutes",
     "SPED_HUB_METRICS_WINDOW_MINUTES": "metrics_window_minutes",
     "SMTP_HOST": "smtp_host",
     "SMTP_PORT": "smtp_port",
@@ -241,6 +252,7 @@ _ENV_TO_FIELD: Mapping[str, str] = {
     "REDIS_URL": "redis_url",
     "SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES": "webhook_default_max_retries",
     "SPED_HUB_WEBHOOK_TIMEOUT": "webhook_timeout_seconds",
+    "SPED_HUB_WEBHOOK_RETENTION_DAYS": "webhook_delivery_retention_days",
     "SPED_HUB_WEBHOOK_ALLOW_HTTP": "webhook_allow_http",
     "SPED_HUB_RATE_LIMIT_DEFAULT": "rate_limit_default",
     "SPED_HUB_RATE_LIMIT_WINDOW": "rate_limit_window_seconds",
@@ -265,6 +277,9 @@ _INT_FIELDS = {
     "ecd_import_chunk_rows",
     "ecd_import_chunk_bytes",
     "monitoring_retention_hours",
+    "maintenance_interval_minutes",
+    "job_retention_hours",
+    "webhook_delivery_retention_days",
     "metrics_window_minutes",
     "smtp_port",
     "webhook_default_max_retries",
