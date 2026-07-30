@@ -154,6 +154,10 @@ class Settings:
     #: TENTATIVA, não por evento, então a tabela cresce rápido em integração
     #: instável.  0 desliga o expurgo.
     webhook_delivery_retention_days: int = 30
+    #: Reenviar sozinho as entregas que o processo abandonou no meio.  Só as
+    #: abandonadas: `failed` esgotou as tentativas e martelar sozinho um
+    #: endpoint quebrado não resolve — ali falta alguém olhar.
+    webhook_auto_retry: bool = True
     # Permite destino http:// (só para desenvolvimento — em produção o
     # webhook exige https e endereço público).
     webhook_allow_http: bool = False
@@ -253,6 +257,7 @@ _ENV_TO_FIELD: Mapping[str, str] = {
     "SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES": "webhook_default_max_retries",
     "SPED_HUB_WEBHOOK_TIMEOUT": "webhook_timeout_seconds",
     "SPED_HUB_WEBHOOK_RETENTION_DAYS": "webhook_delivery_retention_days",
+    "SPED_HUB_WEBHOOK_AUTO_RETRY": "webhook_auto_retry",
     "SPED_HUB_WEBHOOK_ALLOW_HTTP": "webhook_allow_http",
     "SPED_HUB_RATE_LIMIT_DEFAULT": "rate_limit_default",
     "SPED_HUB_RATE_LIMIT_WINDOW": "rate_limit_window_seconds",
@@ -302,6 +307,7 @@ _BOOL_FIELDS = {
     "smtp_use_tls",
     "email_enabled",
     "webhook_allow_http",
+    "webhook_auto_retry",
     "reload",
     "trust_proxy",
     "log_json",

@@ -671,42 +671,66 @@ class WebhookService:
         finally:
             session.close()
 
-    async def retry_failed(self, webhook_id: int | None = None) -> dict:
-        """Reenvia até 100 entregas sem desfecho positivo.
+    async def reenviar_abandonadas(self, webhook_id: int | None = None) -> dict:
+        """Reenvia SÓ as entregas que o processo abandonou no meio.
 
-        Cobre as `failed` (todas as tentativas falharam) e as **abandonadas**
-        (o processo morreu no meio da entrega).  As segundas não tinham
-        caminho de recuperação nenhum, nem automático nem manual.
+        É o caminho automático, chamado pelo laço de manutenção.  A distinção
+        em relação a `failed` é deliberada e é o que torna seguro automatizar:
+
+        * **Abandonada** é entrega cujo orçamento de tentativas nunca foi
+          gasto — o processo morreu antes.  O assinante pode estar
+          perfeitamente no ar.  Reenviar é retomar o que foi interrompido.
+        * **`failed`** é entrega que esgotou todas as tentativas contra um
+          endpoint que respondeu mal em todas.  Reenviar sozinho, de hora em
+          hora, marteliza um endereço quebrado e não resolve nada: ali o que
+          falta é alguém olhar.  Segue no reenvio manual.
+
+        Sem essa separação, automatizar o reenvio seria pior que não ter.
         """
-        session = self._get_session()
-        try:
-            query = select(WebhookDelivery).where(WebhookDelivery.status == STATUS_FALHA)
-            if webhook_id:
-                query = query.where(WebhookDelivery.webhook_id == webhook_id)
-            deliveries = (
-                session.execute(
-                    query.order_by(WebhookDelivery.criado_em.desc()).limit(LOTE_DE_REENVIO)
+        return await self._reenviar(webhook_id, incluir_falhas=False)
+
+    async def retry_failed(self, webhook_id: int | None = None) -> dict:
+        """Reenvio manual: cobre `failed` **e** abandonadas.
+
+        É o botão "Reenviar falhas" do painel.  Diferente do automático, aqui
+        entra também o que esgotou as tentativas: quem clicou sabe que está
+        insistindo num endpoint que já falhou, e essa é a decisão dele.
+        """
+        return await self._reenviar(webhook_id, incluir_falhas=True)
+
+    async def _reenviar(self, webhook_id: int | None, *, incluir_falhas: bool) -> dict:
+        pending: list[dict] = []
+        restantes_falhas = 0
+        if incluir_falhas:
+            session = self._get_session()
+            try:
+                query = select(WebhookDelivery).where(WebhookDelivery.status == STATUS_FALHA)
+                if webhook_id:
+                    query = query.where(WebhookDelivery.webhook_id == webhook_id)
+                deliveries = (
+                    session.execute(
+                        query.order_by(WebhookDelivery.criado_em.desc()).limit(LOTE_DE_REENVIO)
+                    )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-            restantes_falhas = max(
-                0,
-                (session.execute(query.with_only_columns(func.count())).scalar() or 0)
-                - len(deliveries),
-            )
-            pending = [
-                {
-                    "id": delivery.id,
-                    "webhook_id": delivery.webhook_id,
-                    "evento": delivery.evento,
-                    "body": delivery.request_body,
-                    "abandonada": False,
-                }
-                for delivery in deliveries
-            ]
-        finally:
-            session.close()
+                restantes_falhas = max(
+                    0,
+                    (session.execute(query.with_only_columns(func.count())).scalar() or 0)
+                    - len(deliveries),
+                )
+                pending = [
+                    {
+                        "id": delivery.id,
+                        "webhook_id": delivery.webhook_id,
+                        "evento": delivery.evento,
+                        "body": delivery.request_body,
+                        "abandonada": False,
+                    }
+                    for delivery in deliveries
+                ]
+            finally:
+                session.close()
 
         # As abandonadas entram depois das `failed` e dentro do mesmo lote.
         abandonadas = 0

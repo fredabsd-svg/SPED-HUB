@@ -19,7 +19,8 @@ entregas falhas.
 | `WebhookService.registrar / listar / atualizar / remover` | CRUD de `WebhookRegistration`. |
 | `WebhookService.dispatch(evento)` | Envia para os webhooks ativos inscritos, com retry; retorna `{"sucessos", "falhas"}`. |
 | `WebhookService.get_deliveries / get_dashboard_stats` | Histórico e agregados. |
-| `WebhookService.retry_failed(webhook_id=None)` | Reenvia um lote de entregas `failed` **e abandonadas**; devolve `restantes`. |
+| `WebhookService.retry_failed(webhook_id=None)` | Reenvio **manual**: lote de `failed` **e** abandonadas; devolve `restantes`. |
+| `WebhookService.reenviar_abandonadas(webhook_id=None)` | Reenvio **automático**: só o que a queda interrompeu. |
 | `WebhookService.deliveries_abandonadas(webhook_id=None)` | Entregas sem desfecho porque o processo morreu no meio. |
 | `STATUS_DESFECHO` / `STATUS_TERMINAIS` | Vocabulário de `WebhookDelivery.status`. |
 | `LOTE_DE_REENVIO` | Quantas entregas um clique em "Reenviar falhas" processa. |
@@ -81,6 +82,14 @@ consome via essas rotas, não importa o módulo diretamente.
 - **O backoff roda com `asyncio.sleep` dentro do próprio `dispatch`** —
   endpoint lento atrasa o dispatch inteiro (envio sequencial, timeout de 10 s
   por tentativa).
+- **Automático e manual têm escopos diferentes, e isso é o ponto.**
+  `reenviar_abandonadas` (chamado pelo laço de manutenção) só toca entrega cujo
+  orçamento de tentativas nunca foi gasto — o processo morreu antes, e o
+  assinante pode estar perfeitamente no ar. `retry_failed` (o botão do painel)
+  inclui também as `failed`, que responderam mal em **todas** as tentativas:
+  reenviar essas sozinho, de hora em hora, marteliza um endereço quebrado sem
+  resolver nada. Sem essa separação, automatizar o reenvio seria pior que não
+  ter. `SPED_HUB_WEBHOOK_AUTO_RETRY=false` desliga o automático.
 - **`retry_failed` reenvia de fato**: reconstrói o `WebhookEvent` a partir do
   `request_body` persistido (preservando o timestamp original) e passa pelo
   mesmo caminho de envio — há teste garantindo que o payload chega ao envio,
@@ -140,8 +149,8 @@ pytest tests/test_migrations.py -k Reconciliacao -q      # migração dos resíd
   persistente nem retry automático em segundo plano — recuperar exige o
   reenvio manual, que hoje **enxerga** tanto as `failed` quanto as
   abandonadas.
-- Não reenvia sozinho: `POST /api/v1/webhooks/retry` é acionado por gente. Um
-  evento perdido por queda do processo fica esperando alguém clicar.
+- Não reenvia sozinho o que esgotou as tentativas: só o que uma queda
+  interrompeu. `failed` espera o botão do painel, por escolha.
 - Não decide sozinho quando expurgar: `purgar_deliveries` existe, mas quem o
   chama periodicamente é o laço de manutenção do `dashboard.app`. Rodando o
   módulo fora da aplicação (CLI, script), o expurgo não acontece.
