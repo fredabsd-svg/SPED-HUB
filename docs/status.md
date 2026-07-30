@@ -42,6 +42,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 36 | Worker encerra em vez de girar em vazio com a fila quebrada | concluída | `tests/test_worker_fila_quebrada.py`, `tests/test_migrations.py::TestLoggingSobreviveAMigracao` | — |
 | 37 | Registro público fecha depois do primeiro usuário | concluída | `tests/test_registro_publico.py` | tela de gestão de usuários segue fora; a criação é por CLI |
 | 38 | Mensagem de erro chega à tela | concluída | `tests/test_registro_publico.py::TestMensagemDeErroChegaNaTela`, `tests/test_e2e_playwright.py` | — |
+| 39 | Central de Documentos Fiscais: modelo em três camadas, adaptador de NF-e e importação em lote | concluída | `tests/test_documentos_fiscais.py`, `tests/test_migrations.py` | NFS-e, classificação, alterações em massa e geradores de SPED seguem no roadmap |
 
 ## Limites do comportamento atual
 

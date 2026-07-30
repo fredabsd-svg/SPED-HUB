@@ -1,12 +1,11 @@
 """Central de Documentos Fiscais — importação, normalização e tratamento.
 
-**Estado: em construção.**  Hoje este pacote não tem código executável — o que
-existe da Central é o modelo de dados, em :mod:`src.db.models`
-(``DocumentoFiscal``, ``ItemDocumentoFiscal``, ``AjusteFiscal``).  O pacote
-existe para documentar a arquitetura antes de ela ser preenchida, e some ou
-cresce conforme o trabalho seguir.
+**Estado: em construção.**  Existem o modelo de dados (em :mod:`src.db.models`),
+o adaptador de NF-e e o importador em lote.  Faltam os adaptadores de NFS-e, a
+classificação fiscal, as alterações em massa e os geradores de escrituração —
+ver ``docs/roadmap.md``.
 
-O fluxo que ele vai abrigar:
+O fluxo que ele abriga:
 
     XML → adaptador → documento normalizado → (ajustes) → escrituração
 
@@ -30,5 +29,45 @@ parser único viraria uma cascata de condicionais que ninguém altera sem
 quebrar outro município.  Cada adaptador converterá a sua origem para a mesma
 estrutura, e o resto do sistema só conhecerá essa.
 
-Sobre CBS, IBS e Imposto Seletivo, ver [`docs/reforma-tributaria.md`].
+Sobre CBS, IBS e Imposto Seletivo, ver ``docs/reforma-tributaria.md``.
 """
+
+from src.documentos.adaptadores import (
+    ADAPTADORES,
+    Adaptador,
+    AdaptadorNFe,
+    DocumentoNormalizado,
+    ItemNormalizado,
+    OrigemNaoReconhecida,
+    XMLPerigoso,
+    adaptador_para,
+    carregar_xml,
+    registrar_adaptador,
+)
+from src.documentos.importador import (
+    Desfecho,
+    ImportadorDeDocumentos,
+    Ocorrencia,
+    PoliticaDeDuplicidade,
+    ResultadoImportacao,
+    Sentido,
+)
+
+__all__ = [
+    "ADAPTADORES",
+    "Adaptador",
+    "AdaptadorNFe",
+    "Desfecho",
+    "DocumentoNormalizado",
+    "ImportadorDeDocumentos",
+    "ItemNormalizado",
+    "Ocorrencia",
+    "OrigemNaoReconhecida",
+    "PoliticaDeDuplicidade",
+    "ResultadoImportacao",
+    "Sentido",
+    "XMLPerigoso",
+    "adaptador_para",
+    "carregar_xml",
+    "registrar_adaptador",
+]

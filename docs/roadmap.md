@@ -37,16 +37,16 @@ verificação exige que a razão esteja escrita.
 
 ## Central de Documentos Fiscais e suíte fiscal
 
-O modelo de dados existe (`DocumentoFiscal`, `ItemDocumentoFiscal`,
-`AjusteFiscal`, migração `d5969a68dba0`), com os campos da Reforma Tributária
-já previstos — ver [`reforma-tributaria.md`](reforma-tributaria.md). O que
-falta é tudo o que opera sobre ele.
+Já existem o modelo de dados, o adaptador de NF-e/NFC-e (lendo os dois
+regimes tributários) e o importador em lote com deduplicação — ver
+[`status.md`](status.md). Sobre a Reforma Tributária, ver
+[`reforma-tributaria.md`](reforma-tributaria.md).
+
+O que falta:
 
 | Item | Situação | Marcador de ausência |
 |---|---|---|
-| Importação de XML de NF-e | O modelo recebe o documento; nada o lê ainda | `src.documentos.adaptadores:AdaptadorNFe` |
 | Importação de NFS-e por provedor | Exige um adaptador por provedor municipal | `src.documentos.adaptadores:AdaptadorNFSe` |
-| Deduplicação na importação | A restrição única da chave existe no banco; o tratamento do conflito, não | `src.documentos.importador:ImportadorDeDocumentos` |
 | Camada efetiva (normalizado + ajustes) | `AjusteFiscal` grava; nada calcula o valor resultante | `src.documentos.ajustes:valor_efetivo` |
 | Motor de classificação fiscal | — | `src.documentos.classificacao:MotorDeClassificacao` |
 | Alterações em massa com simulação e reversão | — | `src.documentos.massa:SimulacaoDeAlteracao` |
