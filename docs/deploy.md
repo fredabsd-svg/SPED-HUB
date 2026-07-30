@@ -27,7 +27,11 @@ cp .env.example .env
 Ajuste no mínimo:
 
 - `DATABASE_URL` — PostgreSQL em produção.  Ver [`migrations.md`](migrations.md).
-- `SPED_HUB_ALLOWED_HOSTS` — o domínio real, **não** `*`.
+- `SPED_HUB_ALLOWED_HOSTS` — o domínio real, **não** `*`.  Requisição com
+  `Host` fora da lista recebe 400.  Aceita curinga de subdomínio
+  (`*.escritorio.com.br`, que cobre o domínio nu também) e lista separada por
+  vírgula.  `localhost`/`127.0.0.1` seguem aceitos: é o `Host` do
+  `HEALTHCHECK` do container.
 - `SPED_HUB_LOG_JSON=true` — se houver coletor de logs.
 - `SMTP_*` / `EMAIL_FROM` — se e-mail transacional for usado.
 - `SPED_HUB_MAX_UPLOAD_MB` — precisa ser **≤** `client_max_body_size` do

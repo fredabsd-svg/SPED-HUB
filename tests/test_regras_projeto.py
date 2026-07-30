@@ -41,7 +41,9 @@ REGISTRO_CI = {
     "1.9": "tests/test_regras_projeto.py::TestDocumentacao::test_arquivo_gerado_declara_fonte_existente",
     "1.12": "tests/test_regras_projeto.py::TestDocumentacao::test_cabecalho_de_arquitetura",
     "2.1": "tests/test_regras_projeto.py::TestConfiguracao::test_ninguem_le_ambiente_fora_de_settings",
-    "2.2": "tests/test_regras_projeto.py::TestConfiguracao::test_variavel_documentada_tem_consumidor",
+    # A §2.2 tem duas metades: a variável chega ao `Settings` e o campo é
+    # lido de fato.  A classe inteira é o alvo porque só uma delas não basta.
+    "2.2": "tests/test_regras_projeto.py::TestConfiguracao",
     "3.4": "tests/test_multibackend.py",
     "3.5": "tests/test_regras_projeto.py::TestTestes::test_marcador_e2e_fora_da_execucao_padrao",
     "4.1": "tests/test_regras_projeto.py::TestBuild::test_lint_e_format_pinados",
@@ -58,6 +60,34 @@ MARCAS = ("[CI]", "[REVISÃO]", "[ADOÇÃO]")
 
 ESTADOS_DE_FASE = {"não iniciada", "em andamento", "concluída", "bloqueada"}
 ESTADOS_DE_ARQUITETURA = {"especificado", "parcialmente implementado", "implementado"}
+
+
+def variaveis_reservadas(texto: str) -> set[str]:
+    """Variáveis do `.env.example` marcadas RESERVADO no comentário logo acima.
+
+    O bloco de comentário considerado é só o **contíguo** imediatamente antes
+    da linha da variável.  Uma janela de N caracteres para trás, que era a
+    implementação anterior, contamina as variáveis seguintes: as três linhas
+    depois de `SPED_HUB_SECRET_KEY` (`HOST`, `PORT`, `RELOAD`) ficavam
+    dispensadas da §2.2 sem que ninguém tivesse dito isso.
+    """
+    reservadas: set[str] = set()
+    linhas = texto.splitlines()
+    for i, linha in enumerate(linhas):
+        achado = re.match(r"^#?\s*([A-Z][A-Z0-9_]+)=", linha)
+        if not achado:
+            continue
+        bloco: list[str] = []
+        for anterior in reversed(linhas[:i]):
+            if anterior.lstrip().startswith("#") and not re.match(
+                r"^#\s*[A-Z][A-Z0-9_]+=", anterior.strip()
+            ):
+                bloco.append(anterior)
+            else:
+                break
+        if any("RESERVADO" in linha_do_bloco for linha_do_bloco in bloco):
+            reservadas.add(achado.group(1))
+    return reservadas
 
 
 def _secoes_das_regras() -> list[tuple[str, str, str]]:
@@ -401,17 +431,84 @@ class TestConfiguracao:
         conhecidas = set(mod._ENV_TO_FIELD) | set(mod._LEGACY_ALIASES) | {"SPED_HUB_DB"}
         texto = ENV_EXAMPLE.read_text("utf-8")
 
-        reservadas = {
-            achado.group(1)
-            for achado in re.finditer(r"^#?\s*([A-Z][A-Z0-9_]+)=", texto, re.M)
-            if "RESERVADO" in texto[max(0, achado.start() - 400) : achado.start()]
-        }
+        reservadas = variaveis_reservadas(texto)
 
         documentadas = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", texto, re.M))
         sem_consumidor = sorted(documentadas - conhecidas - reservadas)
         assert not sem_consumidor, (
             f"variável em .env.example sem consumidor: {sem_consumidor} — "
             "quem configura acredita ter configurado algo (§2.2)"
+        )
+
+    def test_campo_de_settings_com_env_var_tem_consumidor_real(self):
+        """§2.2 — o lado que `test_variavel_documentada_tem_consumidor` não vê.
+
+        Aquele teste só confirma que a variável chega ao `Settings`.  Chegar ao
+        `Settings` e ninguém ler o campo é o mesmo defeito visto de outro
+        ângulo, e foi assim que sete variáveis documentadas passaram meses sem
+        efeito — entre elas `SPED_HUB_ALLOWED_HOSTS`, que o `docs/deploy.md`
+        manda configurar como passo de endurecimento.
+
+        Um campo conta como consumido quando é lido em `src/` fora do
+        `settings.py`, ou quando uma `@property` do próprio `Settings` que o
+        lê é consumida lá fora (é o caso de `cors_origins` e
+        `max_upload_bytes`).  Campo sem variável de ambiente fica de fora: a
+        §2.2 fala de configuração documentada, não de atributo interno.
+        """
+        from dataclasses import fields
+
+        from src import settings as mod
+
+        campos = {f.name for f in fields(mod.Settings)}
+        settings_py = REPO / "src" / "settings.py"
+
+        arvore = ast.parse(settings_py.read_text("utf-8"), filename=str(settings_py))
+        classe = next(
+            no for no in arvore.body if isinstance(no, ast.ClassDef) and no.name == "Settings"
+        )
+        propriedades = {
+            membro.name: {
+                no.attr
+                for no in ast.walk(membro)
+                if isinstance(no, ast.Attribute) and no.attr in campos
+            }
+            for membro in classe.body
+            if isinstance(membro, ast.FunctionDef)
+            and any(isinstance(d, ast.Name) and d.id == "property" for d in membro.decorator_list)
+        }
+
+        lidos_fora: set[str] = set()
+        for arquivo in sorted((REPO / "src").rglob("*.py")):
+            if arquivo == settings_py:
+                continue
+            for no in ast.walk(ast.parse(arquivo.read_text("utf-8"), filename=str(arquivo))):
+                if isinstance(no, ast.Attribute):
+                    lidos_fora.add(no.attr)
+                elif isinstance(no, ast.keyword) and no.arg:
+                    lidos_fora.add(no.arg)
+
+        def consumido(campo: str) -> bool:
+            if campo in lidos_fora:
+                return True
+            return any(
+                campo in lidos and nome in lidos_fora for nome, lidos in propriedades.items()
+            )
+
+        reservados = {
+            mod._ENV_TO_FIELD[nome]
+            for nome in variaveis_reservadas(ENV_EXAMPLE.read_text("utf-8"))
+            if nome in mod._ENV_TO_FIELD
+        }
+        # `_LEGACY_ALIASES` mapeia nome-de-variável para nome-de-variável, não
+        # para campo: os alvos já estão em `_ENV_TO_FIELD`.
+        configuraveis = set(mod._ENV_TO_FIELD.values())
+
+        sem_consumidor = sorted(
+            campo for campo in configuraveis - reservados if not consumido(campo)
+        )
+        assert not sem_consumidor, (
+            f"campo de Settings com variável de ambiente e sem leitor: {sem_consumidor} — "
+            "a variável chega à configuração e não muda comportamento nenhum (§2.2)"
         )
 
     def test_variavel_consumida_esta_documentada(self):
@@ -429,6 +526,21 @@ class TestConfiguracao:
         assert (
             not nao_documentadas
         ), f"variável consumida por settings.py e ausente de .env.example: {nao_documentadas}"
+
+    def test_marca_reservado_nao_vaza_para_a_variavel_seguinte(self):
+        """A dispensa da §2.2 tem de ser explícita, não herdada por vizinhança.
+
+        Com uma janela de N caracteres para trás, as variáveis logo abaixo de
+        uma RESERVADO ficavam dispensadas de calado.
+        """
+        texto = (
+            "# RESERVADO: nenhum componente consome esta chave hoje.\n"
+            "# SPED_HUB_SECRET_KEY=change-me\n"
+            "\n"
+            "SPED_HUB_HOST=127.0.0.1\n"
+            "SPED_HUB_PORT=8000\n"
+        )
+        assert variaveis_reservadas(texto) == {"SPED_HUB_SECRET_KEY"}
 
     def test_reservada_declara_que_ninguem_consome(self):
         texto = ENV_EXAMPLE.read_text("utf-8")

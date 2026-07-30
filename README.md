@@ -91,7 +91,7 @@ desenvolvimento):
 | `DATABASE_URL` | URL SQLAlchemy (`sqlite:///./sped_hub.db`, `postgresql+psycopg://...`) | `sqlite:///./sped_hub.db` |
 | `SPED_HUB_DB` | Alias legado: caminho SQLite puro (sobrescrito por `DATABASE_URL`) | — |
 | `SPED_HUB_LOG_LEVEL` | `DEBUG`/`INFO`/`WARNING`/`ERROR` | `INFO` |
-| `SPED_HUB_ALLOWED_HOSTS` | CSV de hosts confiáveis | `*` |
+| `SPED_HUB_ALLOWED_HOSTS` | CSV de domínios aceitos no `Host` (`*` = qualquer; `*.dominio` cobre subdomínios e o domínio nu; loopback sempre aceito) | `*` |
 | `SPED_HUB_HOST` / `SPED_HUB_PORT` / `SPED_HUB_RELOAD` | Bind do uvicorn | `127.0.0.1` / `8000` / `false` |
 | `SPED_HUB_MAX_UPLOAD_MB` | Tamanho máximo de upload (MB) | `200` |
 | `SPED_HUB_MAX_UPLOAD_BYTES` | Override legado em bytes (vence o `_MB`) | — |

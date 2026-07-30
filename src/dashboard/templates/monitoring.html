@@ -39,6 +39,11 @@
         </div>
         <div class="monitor-actions">
             <select class="form-select" x-model.number="minutes" @change="load()">
+                {# A janela configurada entra na lista quando não é um dos
+                   presets, senão o select abriria sem opção selecionada. #}
+                {% if janela_minutos not in [15, 60, 360, 1440] %}
+                <option :value="{{ janela_minutos }}">Últimos {{ janela_minutos }} min (padrão)</option>
+                {% endif %}
                 <option :value="15">Últimos 15 min</option>
                 <option :value="60">Última hora</option>
                 <option :value="360">Últimas 6 horas</option>
@@ -164,7 +169,7 @@ function monitoringApp() {
         data: null,
         error: '',
         loading: false,
-        minutes: 60,
+        minutes: {{ janela_minutos }},
         autoRefresh: true,
         timer: null,
         init() {

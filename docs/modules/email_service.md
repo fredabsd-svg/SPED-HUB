@@ -45,10 +45,17 @@ Consumido por `dashboard.app` (rotas `/api/email/*`) e `monitoring`
 - **Nome de anexo é sanitizado com `Path(...).name`** — `"../relatorio.pdf"`
   vira `"relatorio.pdf"` no MIME. `dados` que não sejam `bytes` levantam
   `TypeError` antes de montar a mensagem.
-- **Modo `"auto"` só vira `"smtp"` com usuário E senha configurados**; caso
-  contrário cai em `"log"`. **A flag `EMAIL_ENABLED` existe em settings e
-  não é lida por este módulo** — violação da §2.2, registrada em
-  `docs/status.md`.
+- **`EMAIL_ENABLED=false` desliga o envio de verdade**, mesmo com credencial
+  SMTP completa. É o que protege homologação apontada para o SMTP de produção
+  de mandar mensagem a cliente real do escritório. Antes a flag era
+  documentada e ignorada, e o modo era decidido só pela presença de
+  credenciais (§2.2).
+- **Modo explícito no construtor vence a flag.** `EmailService(modo="smtp")`
+  usa SMTP mesmo com `EMAIL_ENABLED=false`: a flag governa o modo `"auto"`,
+  não veta quem pediu um modo por código — se vetasse, seria impossível
+  exercitar o caminho de envio em teste.
+- **Modo `"auto"` só vira `"smtp"` com a flag ligada E usuário E senha
+  configurados**; caso contrário cai em `"log"`.
 - Histórico em memória com `threading.Lock` e teto de 100 — some no restart
   e não é compartilhado entre processos.
 
@@ -66,5 +73,5 @@ pytest tests/test_review_regressions.py -k email -q         # falha registrada, 
 - Não valida endereço de destinatário nem faz rate limiting de envio.
 - Não usa SMTP_SSL (porta 465); só STARTTLS opcional.
 - Não renderiza templates HTML: os "templates" são texto plano.
-- Não lê `EMAIL_ENABLED`: desligar envio de verdade exige não configurar
-  credenciais (modo log) ou `modo="log"`.
+- `EMAIL_ENABLED=false` não impede que o `EmailService` seja construído em
+  modo `"smtp"` por código — só governa a decisão automática.

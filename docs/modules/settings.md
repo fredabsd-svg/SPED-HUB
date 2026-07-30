@@ -47,8 +47,21 @@ Consumido por: `db.models`, `db.migrations`, `logging_config`, `uploads`,
 - **Aliases legados** (`SMTP_PASS` → `SMTP_PASSWORD`, `SMTP_FROM` →
   `EMAIL_FROM`) existem porque o `docker-compose.yml` sempre passou os nomes
   antigos.
-- `SPED_HUB_SECRET_KEY` e `SPED_HUB_DEBUG` são lidos e **não têm consumidor**.
-  Estão marcados como reservados em `.env.example` (§2.2).
+- **Campo aqui não é o mesmo que configuração com efeito.** Chegar ao
+  `Settings` e ninguém ler é a §2.2 vista de outro ângulo, e foi assim que
+  sete variáveis documentadas passaram meses sem mudar comportamento nenhum.
+  `tests/test_regras_projeto.py::TestConfiguracao` cobra as duas metades (há
+  leitor? — por AST, contando `@property` como leitor indireto) e
+  `tests/test_config_com_efeito.py` cobra o efeito observável.
+- `SPED_HUB_SECRET_KEY` é a **única** reservada: é lida e não tem consumidor,
+  e está marcada como tal em `.env.example`. Sessões e tokens usam CSPRNG; o
+  webhook assina com o segredo do próprio registro. `SPED_HUB_DEBUG` era a
+  outra e foi **removida** — knob que não faz nada não deveria existir.
+- **Quem lê configuração num objeto de vida longa lê no uso, não no
+  `__init__`.** `metrics_collector` e o limiter global nascem no import;
+  resolver settings ali congela o valor para o processo inteiro (é o defeito
+  que o `worker_runner` carrega). Por isso `MetricsCollector.retention_hours`
+  é `@property` e `ratelimit.limite_padrao()` é função.
 
 ## Como testar isoladamente
 

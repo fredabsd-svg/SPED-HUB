@@ -30,6 +30,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 24 | Identidade "Tinta & Latão" no dashboard web | concluída | `tests/test_identidade_dashboard.py`, `tests/test_e2e_playwright.py` | — |
 | 25 | Recusa de ECD com hierarquia cíclica (ADR 0006) | concluída | `tests/test_hierarquia_ciclica.py` | bancos legados seguem cobertos pela validação (h) |
 | 26 | Webhooks emitem os eventos documentados | concluída | `tests/test_webhooks_emissao.py` | sem fila persistente nem dead-letter |
+| 27 | Configuração documentada com efeito real (§2.2) | concluída | `tests/test_config_com_efeito.py`, `tests/test_regras_projeto.py` | `SPED_HUB_SECRET_KEY` segue reservada, por decisão de produto |
 
 ## Em aberto — decisões de produto
 
@@ -39,10 +40,7 @@ Ver `docs/roadmap.md` para o que ainda não existe.
 | Item | Situação |
 |---|---|
 | Retomada de importação a partir de offset | Exigiria commits parciais, o que viola a §6.1. Precisaria vir com estado explícito de "importação incompleta" que os relatórios respeitem. |
-| `SPED_HUB_SECRET_KEY` sem consumidor | Documentada como reservada (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. |
-| `SPED_HUB_DEBUG` sem consumidor | Documentada como reservada (§2.2). O campo é lido e coagido, mas nenhum componente muda de comportamento por causa dele. Remover exige decidir se o projeto quer um modo de diagnóstico. |
-| `EMAIL_ENABLED` sem efeito | O modo do e-mail é decidido pela presença de credenciais SMTP, não pela flag. Marcada como reservada até ser ligada (§2.2). |
-| `SPED_HUB_MONITORING_RETENTION_HOURS` sem efeito | A retenção real é 24 h de janela + teto de 20.000 eventos, fixos no código. Marcada como reservada até ser ligada (§2.2). |
+| `SPED_HUB_SECRET_KEY` sem consumidor | A única reservada que sobrou (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. Ligá-la exigiria decidir *qual* segredo ela é — e hoje nenhum componente precisa de um. |
 
 ## Passivo de documentação de módulo (§1.4)
 

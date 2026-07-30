@@ -69,7 +69,7 @@ from src.ecd_importer import ECDImportError, ECDImportService
 from src.email_service import get_email_service
 from src.filters.engine import FilterCriteria
 from src.logging_config import configurar_logging
-from src.monitoring import build_operational_snapshot, metrics_collector
+from src.monitoring import build_operational_snapshot, janela_padrao_minutos, metrics_collector
 from src.parsers.ecf import ECFParser
 from src.parsers.efd import EFDParser
 from src.ratelimit import get_ip_limiter, init_limiter, ip_do_request
@@ -136,6 +136,62 @@ _PUBLIC_API_PATHS = {
     "/api/register",
     "/api/health/full",
 }
+
+
+# Nomes de loopback ficam sempre liberados, independentemente do allowlist:
+# o HEALTHCHECK do container chama `http://localhost:8000/api/v1/health`, e
+# recusar esse Host marcaria o container como não saudável para sempre — o
+# mesmo defeito que a 0.16.0 já corrigiu por outro caminho.  Liberar loopback
+# não ajuda atacante: um link `http://localhost/...` não leva a nada para ele.
+_HOSTS_SEMPRE_ACEITOS = {"localhost", "127.0.0.1", "[::1]", "::1", "testserver"}
+
+
+def _host_permitido(host: str, permitidos: tuple[str, ...]) -> bool:
+    """Compara o Host recebido com o allowlist, aceitando `*` e `*.dominio`."""
+    if "*" in permitidos:
+        return True
+    # A porta não entra na comparação: o allowlist documenta domínio.
+    host = host.strip().lower()
+    if host.startswith("["):  # IPv6 literal: [::1]:8000
+        host = host.split("]")[0] + "]"
+    elif ":" in host:
+        host = host.split(":", 1)[0]
+    if not host or host in _HOSTS_SEMPRE_ACEITOS:
+        return True
+    for permitido in permitidos:
+        permitido = permitido.strip().lower()
+        if not permitido:
+            continue
+        if permitido.startswith("*."):
+            if host == permitido[2:] or host.endswith(permitido[1:]):
+                return True
+        elif host == permitido:
+            return True
+    return False
+
+
+@app.middleware("http")
+async def validar_host(request: Request, call_next):
+    """Recusa Host desconhecido quando `SPED_HUB_ALLOWED_HOSTS` não é `*`.
+
+    A variável era documentada em `.env.example`, no README e no
+    `docs/deploy.md` — que manda pôr o domínio real, "**não** `*`", como
+    passo de endurecimento — e nenhum componente a lia.  Quem seguia o guia
+    de deploy acreditava ter restringido o Host e não havia restrição
+    nenhuma (§2.2).
+
+    Lido a cada requisição, não no import: as fixtures trocam configuração em
+    runtime, e `add_middleware` congelaria o valor no import do módulo.
+    """
+    permitidos = get_settings().allowed_hosts
+    if not _host_permitido(request.headers.get("host", ""), permitidos):
+        # A resposta não ecoa o allowlist: não é informação para quem
+        # está sondando qual domínio responde aqui.
+        return JSONResponse(
+            {"status": "erro", "mensagem": "Host não permitido"},
+            status_code=400,
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -1605,6 +1661,10 @@ async def monitoring_page(request: Request):
                 "usuario": usuario,
                 "current_page": "monitoring",
                 "app_version": APP_VERSION,
+                # A janela que a página abre selecionada é a configurada, não
+                # um literal no template — senão a variável valeria só para
+                # quem chama a API direto.
+                "janela_minutos": janela_padrao_minutos(),
             }
         )
     )
@@ -1613,9 +1673,14 @@ async def monitoring_page(request: Request):
 @app.get("/api/monitoring/summary")
 async def api_monitoring_summary(
     request: Request,
-    minutes: int = Query(60, ge=1, le=1440),
+    minutes: int | None = Query(None, ge=1, le=1440),
 ):
-    """Snapshot agregado de saúde, tráfego e serviços internos."""
+    """Snapshot agregado de saúde, tráfego e serviços internos.
+
+    Sem ``minutes``, vale a janela de ``SPED_HUB_METRICS_WINDOW_MINUTES``.  O
+    default fica em ``None`` de propósito: um literal aqui seria avaliado no
+    import do módulo e ignoraria a configuração.
+    """
     usuario = await get_usuario_atual(request)
     if not usuario:
         return JSONResponse({"status": "erro", "mensagem": "Não autenticado"}, status_code=401)
