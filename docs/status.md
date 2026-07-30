@@ -35,6 +35,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 29 | Importação interrompida por reinício é encerrada | concluída | `tests/test_jobs_interrompidos.py` | retomar de onde parou segue fora (§6.1) |
 | 30 | Roadmap com marcador de ausência verificável (§1.13) | concluída | `tests/test_regras_projeto.py::TestRoadmap`, `tests/test_regras_projeto.py::TestResolucaoDeMarcador` | — |
 | 31 | Retenção de histórico que realmente executa | concluída | `tests/test_manutencao.py` | auditoria segue com limpeza manual, por escolha |
+| 32 | Migração de dados entre bancos (`sped-hub migrar-dados`) | concluída | `tests/test_migracao_de_dados.py` | exercitada contra PostgreSQL real no CI |
 
 ## Limites do comportamento atual
 

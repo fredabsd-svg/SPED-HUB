@@ -28,6 +28,34 @@ outro módulo constrói engine ou decide entre `create_all` e `alembic upgrade`.
 | `revisao_head()` / `revisao_atual(engine)` | Comparação de revisão. |
 | `alembic_config(url=None)` | `Config` pronto, com a URL escapada. |
 
+### Migração de dados (`db.migrations`)
+
+| Símbolo | Para quê |
+|---|---|
+| `migrar_dados(origem, destino, *, lote=1000)` | Copia o conteúdo inteiro preservando ids; recusa destino ocupado ou sem schema. |
+| `conferir_migracao_de_dados(origem, destino)` | Compara as contagens; devolve só o que divergir. |
+| `ErroDeMigracaoDeDados` | Recusa ou interrupção — nada foi gravado. |
+
+- **Preservar id é obrigatório, não conveniência.** As chaves estrangeiras do
+  banco inteiro apontam para eles; renumerar exigiria reescrever cada
+  referência em `partidas`, `saldos_periodicos` e `lancamentos`.
+- **A sequência do Postgres é o defeito silencioso desta migração.** Linhas
+  chegam com id explícito, a sequência continua em 1, e a migração parece ter
+  dado certo. O erro só aparece quando o escritório cadastra a próxima empresa
+  e recebe violação de chave primária. `_corrigir_sequencias` roda `setval` em
+  toda PK inteira; `COALESCE(..., 0)` cobre tabela vazia, onde `MAX(id)` é NULL
+  e `setval(NULL)` levantaria erro.
+- **Tudo ou nada.** A cópia roda em uma transação no destino. Meia escrituração
+  migrada é pior que nenhuma, porque parece completa — e é dela que sairia um
+  balanço errado.
+- **Destino precisa estar vazio.** Migrar sobre banco com dados misturaria a
+  escrituração de dois lugares; a recusa acontece antes de qualquer escrita.
+- **Memória constante.** As linhas saem em lotes (`stream_results` +
+  `fetchmany`): `partidas` de uma ECD real não cabe em memória. Há teste
+  contando os INSERTs emitidos, porque contar linhas copiadas passaria mesmo
+  sem o fatiamento.
+- A ordem de cópia vem de `Base.metadata.sorted_tables` — pai antes de filho.
+
 ## Depende de / quem depende
 
 Depende de `src.settings` (URL, echo) e do Alembic.

@@ -80,10 +80,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,postgres]"
 
+      # A lista é fixa de propósito (o resto da suíte já roda no job `test`),
+      # mas arquivo de teste que use TEST_DATABASE_URL e não apareça aqui é
+      # teste que nunca roda contra Postgres — e ninguém percebe, porque ele
+      # "passa" pulando. `TestCoberturaDoPostgres` no test_regras_projeto.py
+      # falha se algum ficar de fora.
       - name: Run portability and migration suites against PostgreSQL
         env:
           TEST_DATABASE_URL: postgresql+psycopg://sped:sped@localhost:5432/sped_hub_test
-        run: pytest tests/test_multibackend.py tests/test_migrations.py -v --tb=short
+        run: pytest tests/test_multibackend.py tests/test_migrations.py tests/test_migracao_de_dados.py -v --tb=short
 
   # Fluxo completo em navegador real (ADR 0005).  Ficou fora do CI enquanto a
   # causa das falhas era desconhecida; ela era um laço infinito no dashboard,
