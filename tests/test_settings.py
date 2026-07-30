@@ -27,7 +27,6 @@ def _limpar_ambiente_para_settings(monkeypatch):
     """Garante que cada teste começa limpo das variáveis lidas em settings."""
     chaves = [
         "SPED_HUB_ENV",
-        "SPED_HUB_DEBUG",
         "SPED_HUB_SECRET_KEY",
         "DATABASE_URL",
         "SPED_HUB_DB",
@@ -126,11 +125,11 @@ class TestSettingsEnvOverrides:
         assert cfg.database_url == "postgresql+psycopg://u@h/db"
 
     def test_booleans_e_inteiros(self, monkeypatch):
-        monkeypatch.setenv("SPED_HUB_DEBUG", "true")
+        monkeypatch.setenv("SPED_HUB_DB_ECHO", "true")
         monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_MB", "300")
         monkeypatch.setenv("SPED_HUB_MONITORING_RETENTION_HOURS", "12")
         cfg = get_settings()
-        assert cfg.debug is True
+        assert cfg.database_echo is True
         assert cfg.max_upload_mb == 300
         assert cfg.monitoring_retention_hours == 12
 
@@ -284,7 +283,7 @@ class TestSettingsImports:
 
 
 class TestCoercaoBooleana:
-    """Todo campo booleano precisa de coerção, não só ``debug``.
+    """Todo campo booleano precisa de coerção.
 
     Sem ela, ``SPED_HUB_DB_ECHO=false`` virava a *string* ``"false"`` — que é
     verdadeira em Python.  Como esse campo alimenta o ``echo`` do SQLAlchemy,
@@ -294,7 +293,6 @@ class TestCoercaoBooleana:
     @pytest.mark.parametrize(
         "env_key,campo",
         [
-            ("SPED_HUB_DEBUG", "debug"),
             ("SPED_HUB_DB_ECHO", "database_echo"),
             ("SMTP_USE_TLS", "smtp_use_tls"),
             ("EMAIL_ENABLED", "email_enabled"),

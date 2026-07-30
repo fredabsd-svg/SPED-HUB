@@ -82,9 +82,22 @@ class EmailService:
         self._max_history = 100
         self._history_lock = threading.Lock()
 
-        # Detecta modo
+        # Detecta modo.
+        #
+        # `EMAIL_ENABLED=false` desliga o envio de verdade — antes a variável
+        # era documentada e ignorada: quem a punha em `false` com credenciais
+        # SMTP configuradas continuava disparando e-mail. Num ambiente de
+        # homologação apontado para o SMTP de produção, isso é e-mail real
+        # chegando ao cliente do escritório.
+        #
+        # O modo explícito ("smtp" ou "log" no construtor) vence a flag: ela
+        # é a chave-geral do modo automático, não um veto sobre quem pediu
+        # um modo por código.
         if self._modo == "auto":
-            self._modo = "smtp" if self._user and self._password else "log"
+            if not cfg.email_enabled:
+                self._modo = "log"
+            else:
+                self._modo = "smtp" if self._user and self._password else "log"
 
         logger.info(
             "EmailService iniciado em modo '%s' (host=%s, from=%s)",

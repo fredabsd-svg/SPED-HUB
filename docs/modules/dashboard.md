@@ -46,8 +46,21 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   403** — não vaza que ela existe. Listagens passam por
   `aplicar_escopo_empresas`; o upload grava o `escritorio_id` do usuário
   logado.
-- **Três middlewares em camadas**: métricas (sem query string nem payload),
-  rate limit por IP e auth. O escopo `login` tem cota própria, bem mais
+- **`SPED_HUB_ALLOWED_HOSTS` valida o cabeçalho `Host`.** Fora da lista, 400;
+  `*` aceita qualquer um. Aceita curinga de subdomínio (`*.dominio`, que
+  também cobre o domínio nu) e ignora a porta. Antes a variável era
+  documentada em três lugares — inclusive no `docs/deploy.md`, que manda pôr o
+  domínio real "**não** `*`" como passo de endurecimento — e **nada a lia**:
+  quem seguia o guia acreditava ter restringido o Host (§2.2).
+- **Loopback é sempre aceito**, fora da lista. O `HEALTHCHECK` do container
+  chama `http://localhost:8000/api/v1/health`; recusar esse `Host` marcaria o
+  container como não saudável para sempre — o mesmo defeito que a 0.16.1 já
+  corrigiu por outro caminho. Liberar loopback não ajuda atacante: um link
+  `http://localhost/...` não leva a nada para ele.
+- **Quatro middlewares em camadas**: métricas (sem query string nem payload),
+  rate limit por IP, validação de `Host` e auth. A validação de `Host` fica
+  por dentro das métricas de propósito: requisição recusada continua visível
+  no painel. O escopo `login` tem cota própria, bem mais
   apertada — `/api/login` e `/api/register` são públicos, então sem limite
   por IP varrer senhas não custaria nada. Os headers `X-RateLimit-*` usam
   `setdefault` para não sobrescrever a cota anunciada pelo limitador por API

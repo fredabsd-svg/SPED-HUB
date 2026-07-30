@@ -33,6 +33,19 @@ from src.db.models import (
 from src.version import APP_VERSION
 
 
+def janela_padrao_minutos() -> int:
+    """Janela padrão das métricas, de ``SPED_HUB_METRICS_WINDOW_MINUTES``.
+
+    Lida a cada chamada, não no import: o coletor global nasce no import do
+    módulo e congelar configuração aí valeria para o processo inteiro.  Antes
+    a janela era 60 minutos fixos no código e a variável não tinha consumidor
+    (§2.2).
+    """
+    from src.settings import get_settings
+
+    return max(1, get_settings().metrics_window_minutes)
+
+
 @dataclass(frozen=True)
 class RequestMetric:
     timestamp: float
@@ -45,10 +58,35 @@ class RequestMetric:
 class MetricsCollector:
     """Coletor thread-safe de métricas HTTP em janela limitada."""
 
-    def __init__(self, max_events: int = 20_000):
+    def __init__(self, max_events: int = 20_000, retention_hours: int | None = None):
+        """`retention_hours=None` faz a retenção vir das settings a cada snapshot.
+
+        Antes a retenção era 24 h fixas no código e
+        `SPED_HUB_MONITORING_RETENTION_HOURS` não tinha consumidor: quem a
+        configurava não mudava nada (§2.2).
+
+        A leitura acontece no snapshot, não aqui: a instância global nasce no
+        import do módulo, e resolver configuração no import congela o valor
+        para o processo inteiro — é o defeito que o `worker_runner` carrega e
+        que não vale repetir. Passar o argumento explicitamente fixa o valor,
+        que é o que o teste quer.
+
+        O teto de eventos (`max_events`) vale em paralelo: sob tráfego alto
+        ele encurta a janela efetiva, e é o que protege a memória.
+        """
+        self._retention_hours = retention_hours
         self._events: deque[RequestMetric] = deque(maxlen=max_events)
         self._lock = threading.Lock()
         self.started_at = time.time()
+
+    @property
+    def retention_hours(self) -> int:
+        """Retenção efetiva: o valor fixado no construtor ou o configurado."""
+        if self._retention_hours is not None:
+            return max(1, int(self._retention_hours))
+        from src.settings import get_settings
+
+        return max(1, get_settings().monitoring_retention_hours)
 
     def record(self, method: str, path: str, status_code: int, duration_ms: float) -> None:
         normalized_path = normalize_path(path)
@@ -62,8 +100,15 @@ class MetricsCollector:
         with self._lock:
             self._events.append(event)
 
-    def snapshot(self, minutes: int = 60) -> dict:
-        minutes = max(1, min(int(minutes), 24 * 60))
+    def snapshot(self, minutes: int | None = None) -> dict:
+        """``minutes=None`` usa a janela padrão configurada.
+
+        A janela pedida não pode exceder a retenção configurada: dados mais
+        antigos que ela já não são confiáveis (o deque pode ter descartado).
+        """
+        if minutes is None:
+            minutes = janela_padrao_minutos()
+        minutes = max(1, min(int(minutes), self.retention_hours * 60))
         now = time.time()
         cutoff = now - minutes * 60
         with self._lock:
@@ -233,12 +278,23 @@ def build_operational_snapshot(
     collector: MetricsCollector,
     *,
     db_path: str,
-    minutes: int = 60,
+    minutes: int | None = None,
 ) -> dict:
-    """Agrega métricas HTTP e dos serviços sem depender de rede externa."""
+    """Agrega métricas HTTP e dos serviços sem depender de rede externa.
+
+    ``minutes=None`` usa a janela padrão configurada
+    (``SPED_HUB_METRICS_WINDOW_MINUTES``).
+    """
     from src.cache import get_cache
     from src.email_service import get_email_service
     from src.worker_queue import get_worker_queue
+
+    # Resolve e limita a janela uma vez só: as métricas HTTP e as do banco
+    # precisam falar do mesmo período, senão o painel compara coisas
+    # diferentes lado a lado.
+    if minutes is None:
+        minutes = janela_padrao_minutos()
+    minutes = max(1, min(int(minutes), collector.retention_hours * 60))
 
     queue = get_worker_queue()
     worker_metrics = {

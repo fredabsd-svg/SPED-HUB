@@ -14,6 +14,7 @@ exceder.
 |---|---|
 | `RateLimiter` / `get_limiter(db_path)` / `init_limiter(db_path)` | Limite por API Key. |
 | `RateLimitInfo` | Limite, restante e instante de reset. |
+| `limite_padrao()` | Cota de chave sem configuração própria, de `SPED_HUB_RATE_LIMIT_DEFAULT` / `_WINDOW`. |
 | `RateLimitService` | CRUD da configuração por chave (tabela `RateLimitConfig`). |
 | `IPRateLimiter` / `get_ip_limiter()` | Limite por IP. |
 | `IPRateLimitInfo` | Mesma informação, para o limite por IP. |
@@ -42,6 +43,15 @@ Consumido por `api` (rotas e middleware) e por `dashboard.app`.
   todos os usuários daquele endereço; a cota de login
   (`SPED_HUB_RATE_LIMIT_LOGIN`, 10/min) é apertada de propósito, porque é o
   que impede varredura de senhas.
+- **A cota global é configurável e é lida a cada consulta.**
+  `SPED_HUB_RATE_LIMIT_DEFAULT` / `SPED_HUB_RATE_LIMIT_WINDOW` valem para
+  chave sem `RateLimitConfig` própria; cota gravada no banco vence a variável.
+  Antes o fallback eram as constantes `DEFAULT_LIMITE`/`DEFAULT_JANELA` e as
+  duas variáveis, documentadas, não tinham consumidor (§2.2). A leitura fica
+  em `limite_padrao()`, não no import: o limiter global nasce com a aplicação.
+- **`DEFAULT_LIMITE`/`DEFAULT_JANELA` sobraram como defaults do dataclass**
+  `RateLimitInfo`, que todo caminho real sobrescreve. Não são mais a cota
+  efetiva — não use como referência.
 - **A contagem é em memória**: não persiste entre reinícios nem é
   compartilhada entre réplicas. Aceitável em instância única; múltiplas
   réplicas exigiriam Redis.

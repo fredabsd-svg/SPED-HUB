@@ -17,10 +17,35 @@ interno da implementação.
   PDF ou planilha gerada em arquivo.
 - `SPED_HUB_WEBHOOK_TIMEOUT` e `SPED_HUB_WEBHOOK_DEFAULT_MAX_RETRIES` passaram
   a ter efeito — antes eram documentadas e ignoradas.
+- **`EMAIL_ENABLED=false` passou a desligar o envio de verdade**, mesmo com
+  credencial SMTP configurada. Antes o modo era decidido só pela presença de
+  usuário e senha: uma homologação apontada para o SMTP de produção mandava
+  e-mail real para o cliente do escritório.
+- `SPED_HUB_MONITORING_RETENTION_HOURS` passou a limitar a janela de métricas
+  (antes 24 h fixas no código) e `SPED_HUB_METRICS_WINDOW_MINUTES` passou a
+  ser o período que o painel de monitoramento abre selecionado.
+- `SPED_HUB_RATE_LIMIT_DEFAULT` e `SPED_HUB_RATE_LIMIT_WINDOW` passaram a
+  valer para API Key sem cota própria cadastrada. Antes a cota era 100/60 s
+  fixos e configurar as variáveis não mudava nada. Cota gravada no banco
+  continua prevalecendo.
 
 ### Corrigido
 - Um webhook com a lista de eventos corrompida no banco impedia a entrega
   para **todos** os outros webhooks.
+
+### Segurança
+- **`SPED_HUB_ALLOWED_HOSTS` passou a valer.** A aplicação agora recusa
+  requisição com `Host` fora da lista configurada. A variável era documentada
+  no README, no `.env.example` e no guia de deploy — que manda trocar o `*`
+  pelo domínio real como passo de endurecimento de produção — e nenhum
+  componente a lia: quem seguia o guia acreditava ter restringido o acesso e
+  não havia restrição nenhuma. `localhost` e `127.0.0.1` seguem aceitos, para
+  não quebrar a verificação de saúde do container.
+
+### Removido
+- `SPED_HUB_DEBUG`, que era lida e não mudava comportamento de nada. Estava
+  documentada como reservada; uma opção que não faz nada não deveria existir.
+  Com isso, a única variável reservada que resta é `SPED_HUB_SECRET_KEY`.
 
 ### Segurança
 - O evento de relatório informa formato, nome do arquivo, empresa e período —

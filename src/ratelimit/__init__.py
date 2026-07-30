@@ -4,7 +4,9 @@ Sistema de rate limiting para API Keys com janela deslizante.
 
 Funcionamento:
   - Cada API Key pode ter uma configuração de rate limit (limite/janela)
-  - Sem configuração, usa o default global (100 req/60s)
+  - Sem configuração, usa o default global
+    (``SPED_HUB_RATE_LIMIT_DEFAULT`` req / ``SPED_HUB_RATE_LIMIT_WINDOW`` s,
+    por omissão 100 req/60 s)
   - Contagem em memória (sliding window) com reset automático
   - Headers X-RateLimit-* nas respostas
   - HTTP 429 quando excede o limite
@@ -35,9 +37,27 @@ from src.db.models import RateLimitConfig, criar_engine, get_session, init_db
 
 logger = logging.getLogger("sped-hub.ratelimit")
 
-# Defaults globais
+# Defaults globais de último recurso.  O valor que vale em runtime vem de
+# ``SPED_HUB_RATE_LIMIT_DEFAULT`` / ``SPED_HUB_RATE_LIMIT_WINDOW`` via
+# :func:`limite_padrao` — estas constantes só cobrem os campos do dataclass,
+# que são sobrescritos em todo caminho real.
 DEFAULT_LIMITE = 100  # requisições por janela
 DEFAULT_JANELA = 60  # segundos
+
+
+def limite_padrao() -> tuple[int, int]:
+    """Cota global para API Key sem configuração própria: ``(limite, janela)``.
+
+    Lido a cada chamada, não no import: o limiter global é criado junto com a
+    aplicação e resolver configuração no import congelaria o valor para o
+    processo inteiro.  Antes as constantes acima eram usadas direto e
+    ``SPED_HUB_RATE_LIMIT_DEFAULT`` não tinha consumidor — quem a configurava
+    não mudava cota nenhuma (§2.2).
+    """
+    from src.settings import get_settings
+
+    cfg = get_settings()
+    return max(1, cfg.rate_limit_default), max(1, cfg.rate_limit_window_seconds)
 
 
 @dataclass
@@ -79,7 +99,7 @@ class RateLimiter:
             ).scalar_one_or_none()
             if config:
                 return config.limite, config.janela
-            return DEFAULT_LIMITE, DEFAULT_JANELA
+            return limite_padrao()
         finally:
             session.close()
 

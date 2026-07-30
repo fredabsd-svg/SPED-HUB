@@ -88,7 +88,6 @@ class Settings:
 
     # Ambiente
     env: str = "dev"  # dev | test | prod
-    debug: bool = False
     # RESERVADO: nenhum componente consome esta chave hoje.  Sessões e tokens
     # usam ``secrets.token_hex`` (CSPRNG, dispensa chave) e a assinatura de
     # webhook usa o segredo por registro.  Mantida para quando surgir uma
@@ -215,7 +214,6 @@ class Settings:
 # :func:`_read_env` com regra de precedência em relação a ``DATABASE_URL``.
 _ENV_TO_FIELD: Mapping[str, str] = {
     "SPED_HUB_ENV": "env",
-    "SPED_HUB_DEBUG": "debug",
     "SPED_HUB_SECRET_KEY": "secret_key",
     "DATABASE_URL": "database_url",
     "SPED_HUB_DB_ECHO": "database_echo",
@@ -283,9 +281,8 @@ _INT_FIELDS = {
 
 # Campos booleanos precisam de coerção explícita: sem isto, ``EMAIL_ENABLED=false``
 # vira a *string* ``"false"``, que é verdadeira em Python — desligar a opção a
-# ligava.  Valia para todos os booleanos menos ``debug``.
+# ligava.
 _BOOL_FIELDS = {
-    "debug",
     "database_echo",
     "smtp_use_tls",
     "email_enabled",
