@@ -35,6 +35,27 @@ verificação exige que a razão esteja escrita.
 | Integração com Domínio, Questor e Alterdata | Contrato e documentação das APIs | `externo` — depende de contrato com os fornecedores |
 | Validação com ECDs reais de clientes | A importação foi exercitada com arquivos sintéticos de até 240 mil registros. Arquivos reais trazem variações de leiaute que só aparecem em campo | `externo` — depende de arquivo real de cliente, que não pode ser versionado |
 
+## Central de Documentos Fiscais e suíte fiscal
+
+Já existem o modelo de dados, o adaptador de NF-e/NFC-e (lendo os dois
+regimes tributários) e o importador em lote com deduplicação — ver
+[`status.md`](status.md). Sobre a Reforma Tributária, ver
+[`reforma-tributaria.md`](reforma-tributaria.md).
+
+O que falta:
+
+| Item | Situação | Marcador de ausência |
+|---|---|---|
+| Importação de NFS-e por provedor | Exige um adaptador por provedor municipal | `src.documentos.adaptadores:AdaptadorNFSe` |
+| Camada efetiva (normalizado + ajustes) | `AjusteFiscal` grava; nada calcula o valor resultante | `src.documentos.ajustes:valor_efetivo` |
+| Motor de classificação fiscal | — | `src.documentos.classificacao:MotorDeClassificacao` |
+| Alterações em massa com simulação e reversão | — | `src.documentos.massa:SimulacaoDeAlteracao` |
+| Geração de EFD ICMS/IPI | Hoje o sistema só **lê** EFD (`src/parsers/efd.py`) | `src.escrituracoes.efd_icms:GeradorEFDICMS` |
+| Geração de EFD-Contribuições | Idem | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes` |
+| Apuração de CBS, IBS e Imposto Seletivo | Os campos são lidos do documento; nenhuma apuração os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS` |
+| Espelhos antes da geração | — | `src.escrituracoes.espelhos:Espelho` |
+| Excel bidirecional de documentos | — | `src.documentos.planilha:reimportar` |
+
 ## Dívida técnica conhecida
 
 | Item | Situação | Marcador de ausência |
