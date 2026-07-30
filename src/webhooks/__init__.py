@@ -49,6 +49,49 @@ EVENTOS_DISPONIVEIS = [
 BACKOFF_BASE = 2
 BACKOFF_MAX = 60
 
+# ── Vocabulário de `WebhookDelivery.status` ────────────────────────────────
+#
+# Cada linha de `WebhookDelivery` é UMA TENTATIVA, não um evento.  A distinção
+# importa: sem ela, uma entrega que só funcionou na 3ª tentativa aparecia como
+# "1 sucesso em 3 entregas" e o painel anunciava 33% de sucesso para uma
+# integração que estava funcionando.
+#
+#   pending     — tentativa em voo.
+#   success     — a tentativa recebeu 2xx: o evento CHEGOU.
+#   superseded  — a tentativa falhou e outra a seguiu.  Estado TERMINAL e
+#                 histórico: não é desfecho do evento e não é reenviável.
+#   failed      — a última tentativa falhou: o evento NÃO chegou.  É o único
+#                 desfecho negativo, e o que o reenvio manual procura.
+#   retried     — entrega `failed` que foi reenviada à mão e o reenvio chegou.
+#
+# `retrying` foi RETIRADO.  Ele era escrito em toda tentativa que falhava e
+# nunca mais tocado, o que deixava linhas presas nele para sempre: não eram
+# desfecho, não eram reenviáveis e ninguém as resolvia.  Linha nesse estado
+# hoje é resíduo de versão anterior — a migração as reconcilia.
+STATUS_EM_VOO = "pending"
+STATUS_SUCESSO = "success"
+STATUS_SUPERADA = "superseded"
+STATUS_FALHA = "failed"
+STATUS_REENVIADA = "retried"
+
+# Estados que encerram o destino de um evento.  `superseded` e `pending` não
+# entram: o primeiro é histórico de tentativa, o segundo ainda não terminou.
+STATUS_DESFECHO = (STATUS_SUCESSO, STATUS_FALHA, STATUS_REENVIADA)
+
+# Estados terminais — nenhum processo vai voltar a mexer na linha.
+STATUS_TERMINAIS = (*STATUS_DESFECHO, STATUS_SUPERADA)
+
+# Quantas entregas um clique em "Reenviar falhas" processa.
+#
+# O reenvio é sequencial e `POST /api/v1/webhooks/retry` o aguarda dentro da
+# requisição.  Cada entrega custa, no pior caso, todas as tentativas
+# esgotando o timeout mais os backoffs — ~36 s com a configuração padrão.  O
+# lote era de 100, o que dá quase uma hora de requisição aberta contra um
+# endpoint morto: o navegador do operador desiste, o trabalho continua no
+# servidor, e ele clica de novo.  Com 20, o pior caso cabe em minutos e o
+# retorno informa quantas ficaram — clicar de novo drena o resto.
+LOTE_DE_REENVIO = 20
+
 
 def validate_webhook_url(url: str, *, resolve: bool = False) -> str:
     """Valida URL e bloqueia alvos locais/privados para reduzir risco de SSRF."""
@@ -256,7 +299,7 @@ class WebhookService:
             total_success = (
                 session.execute(
                     select(func.count(WebhookDelivery.id)).where(
-                        WebhookDelivery.status == "success"
+                        WebhookDelivery.status.in_((STATUS_SUCESSO, STATUS_REENVIADA))
                     )
                 ).scalar()
                 or 0
@@ -264,7 +307,22 @@ class WebhookService:
 
             total_failed = (
                 session.execute(
-                    select(func.count(WebhookDelivery.id)).where(WebhookDelivery.status == "failed")
+                    select(func.count(WebhookDelivery.id)).where(
+                        WebhookDelivery.status == STATUS_FALHA
+                    )
+                ).scalar()
+                or 0
+            )
+
+            # Denominador da taxa: desfechos de evento, não tentativas.  Cada
+            # tentativa é uma linha, então contar linhas fazia uma entrega que
+            # só funcionou na 3ª tentativa valer 1 sucesso em 3 — o painel
+            # anunciava 33% para uma integração que estava entregando.
+            total_desfechos = (
+                session.execute(
+                    select(func.count(WebhookDelivery.id)).where(
+                        WebhookDelivery.status.in_(STATUS_DESFECHO)
+                    )
                 ).scalar()
                 or 0
             )
@@ -283,17 +341,14 @@ class WebhookService:
                 session.execute(
                     select(func.count(WebhookDelivery.id)).where(
                         WebhookDelivery.criado_em >= ontem,
-                        WebhookDelivery.status == "success",
+                        WebhookDelivery.status.in_((STATUS_SUCESSO, STATUS_REENVIADA)),
                     )
                 ).scalar()
                 or 0
             )
 
-            # Taxa de sucesso
             taxa_sucesso = (
-                round((total_success / total_deliveries * 100), 1)
-                if total_deliveries > 0
-                else 100.0
+                round((total_success / total_desfechos * 100), 1) if total_desfechos > 0 else 100.0
             )
 
             return {
@@ -393,32 +448,40 @@ class WebhookService:
 
                 if 200 <= response.status_code < 300:
                     self._atualizar_delivery(
-                        delivery.id, "success", response.status_code, response.text[:2000]
+                        delivery.id, STATUS_SUCESSO, response.status_code, response.text[:2000]
                     )
                     self._atualizar_webhook_stats(wh.id, sucesso=True)
                     return True
-                else:
-                    last_error = f"HTTP {response.status_code}"
-                    self._atualizar_delivery(
-                        delivery.id,
-                        "retrying",
-                        response.status_code,
-                        response.text[:2000],
-                        f"HTTP {response.status_code}",
-                    )
-
+                last_error = f"HTTP {response.status_code}"
+                erro_desta = last_error
+                codigo_desta = response.status_code
+                corpo_desta = response.text[:2000]
             except Exception as exc:
                 last_error = str(exc)[:500]
-                self._atualizar_delivery(delivery.id, "retrying", error=last_error)
+                erro_desta = last_error
+                codigo_desta = None
+                corpo_desta = None
 
-            # Backoff antes do próximo retry
-            if tentativa < max_tentativas:
-                delay = min(BACKOFF_BASE**tentativa, BACKOFF_MAX)
-                await asyncio.sleep(delay)
+            # A tentativa falhou.  O desfecho dela já é conhecido AQUI: se
+            # ainda há tentativa pela frente, esta foi superada; se era a
+            # última, o evento não chegou.  Marcar tudo como "retrying" e só
+            # depois corrigir a última era o que deixava as anteriores presas.
+            ultima = tentativa == max_tentativas
+            self._atualizar_delivery(
+                delivery.id,
+                STATUS_FALHA if ultima else STATUS_SUPERADA,
+                codigo_desta,
+                corpo_desta,
+                erro_desta,
+            )
+            if ultima:
+                self._atualizar_webhook_stats(wh.id, sucesso=False)
+                return False
 
-        # Todas as tentativas falharam
-        self._atualizar_delivery(delivery.id, "failed", error=last_error)
-        self._atualizar_webhook_stats(wh.id, sucesso=False)
+            await asyncio.sleep(min(BACKOFF_BASE**tentativa, BACKOFF_MAX))
+
+        # Inalcançável: o `return` da última tentativa fecha o laço.  Fica como
+        # rede, não como caminho — `max_tentativas` é sempre >= 1.
         return False
 
     def _criar_delivery(
@@ -461,7 +524,10 @@ class WebhookService:
                     d.response_body = response_body
                 if error:
                     d.error_message = error
-                if status in ("success", "failed"):
+                # `superseded` também conclui: aquela tentativa terminou.
+                # Ficar sem `concluido_em` era o que fazia a linha parecer em
+                # andamento para sempre no histórico do painel.
+                if status in STATUS_TERMINAIS:
                     d.concluido_em = datetime.datetime.now(datetime.UTC)
                 session.commit()
         finally:
@@ -481,17 +547,103 @@ class WebhookService:
         finally:
             session.close()
 
-    async def retry_failed(self, webhook_id: int | None = None) -> dict:
-        """Reenvia de fato até 100 entregas com falha."""
+    def _segundos_para_abandono(self, wh: WebhookRegistration | None) -> int:
+        """Quanto tempo uma entrega pode ficar sem desfecho antes de ser órfã.
+
+        Tem de ser folgado acima do pior caso legítimo de UMA entrega — todas
+        as tentativas esgotando o timeout, mais todos os backoffs — senão o
+        reenvio dispara sobre uma entrega que ainda está em voo e o assinante
+        recebe o evento duas vezes.  Daí a margem de 3×, e um piso de 5 min.
+        """
+        cfg = get_settings()
+        tentativas = max(1, (wh.max_retries if wh else 0) or cfg.webhook_default_max_retries)
+        timeout = max(1, cfg.webhook_timeout_seconds)
+        backoff = sum(min(BACKOFF_BASE**n, BACKOFF_MAX) for n in range(1, tentativas))
+        return max(300, (tentativas * timeout + backoff) * 3)
+
+    def deliveries_abandonadas(self, webhook_id: int | None = None) -> list[WebhookDelivery]:
+        """Entregas que ficaram sem desfecho porque o processo morreu no meio.
+
+        A entrega roda em thread, com `asyncio.sleep` entre as tentativas.  Um
+        restart, um deploy ou um crash no meio disso deixa a linha em
+        `pending` (morreu durante o POST) ou `superseded` (morreu no backoff,
+        e a tentativa seguinte nunca aconteceu).  Nos dois casos o evento não
+        chegou, não existe linha `failed`, e o reenvio manual — que procura
+        `failed` — não via nada: o assinante perdia o evento em silêncio e
+        **nem manualmente** era possível recuperar.
+
+        Uma entrega lógica é o conjunto de tentativas do mesmo
+        `(webhook_id, request_body)` — o `request_body` carrega o timestamp do
+        evento, então identifica a emissão.  O conjunto é órfão quando nenhuma
+        das linhas alcançou desfecho e a mais recente já passou do limite de
+        abandono daquele webhook.
+        """
         session = self._get_session()
         try:
-            query = select(WebhookDelivery).where(WebhookDelivery.status == "failed")
+            query = select(WebhookDelivery).where(
+                WebhookDelivery.status.notin_(STATUS_DESFECHO),
+                WebhookDelivery.request_body.is_not(None),
+            )
+            if webhook_id:
+                query = query.where(WebhookDelivery.webhook_id == webhook_id)
+            candidatas = list(session.execute(query).scalars())
+            if not candidatas:
+                return []
+
+            # Um desfecho em qualquer tentativa encerra a entrega lógica.
+            desfecho = select(WebhookDelivery.webhook_id, WebhookDelivery.request_body).where(
+                WebhookDelivery.status.in_(STATUS_DESFECHO)
+            )
+            if webhook_id:
+                desfecho = desfecho.where(WebhookDelivery.webhook_id == webhook_id)
+            resolvidas = set(session.execute(desfecho).all())
+
+            agora = datetime.datetime.now(datetime.UTC)
+            por_entrega: dict[tuple[int, str], list[WebhookDelivery]] = {}
+            for linha in candidatas:
+                chave = (linha.webhook_id, linha.request_body)
+                if chave in resolvidas:
+                    continue
+                por_entrega.setdefault(chave, []).append(linha)
+
+            orfas = []
+            for (wh_id, _), tentativas in por_entrega.items():
+                mais_recente = max(tentativas, key=lambda linha: linha.tentativa)
+                criado = mais_recente.criado_em
+                if criado is None:
+                    continue
+                if criado.tzinfo is None:
+                    criado = criado.replace(tzinfo=datetime.UTC)
+                limite = self._segundos_para_abandono(self._get_webhook(wh_id))
+                if (agora - criado).total_seconds() >= limite:
+                    orfas.append(mais_recente)
+            return orfas
+        finally:
+            session.close()
+
+    async def retry_failed(self, webhook_id: int | None = None) -> dict:
+        """Reenvia até 100 entregas sem desfecho positivo.
+
+        Cobre as `failed` (todas as tentativas falharam) e as **abandonadas**
+        (o processo morreu no meio da entrega).  As segundas não tinham
+        caminho de recuperação nenhum, nem automático nem manual.
+        """
+        session = self._get_session()
+        try:
+            query = select(WebhookDelivery).where(WebhookDelivery.status == STATUS_FALHA)
             if webhook_id:
                 query = query.where(WebhookDelivery.webhook_id == webhook_id)
             deliveries = (
-                session.execute(query.order_by(WebhookDelivery.criado_em.desc()).limit(100))
+                session.execute(
+                    query.order_by(WebhookDelivery.criado_em.desc()).limit(LOTE_DE_REENVIO)
+                )
                 .scalars()
                 .all()
+            )
+            restantes_falhas = max(
+                0,
+                (session.execute(query.with_only_columns(func.count())).scalar() or 0)
+                - len(deliveries),
             )
             pending = [
                 {
@@ -499,11 +651,40 @@ class WebhookService:
                     "webhook_id": delivery.webhook_id,
                     "evento": delivery.evento,
                     "body": delivery.request_body,
+                    "abandonada": False,
                 }
                 for delivery in deliveries
             ]
         finally:
             session.close()
+
+        # As abandonadas entram depois das `failed` e dentro do mesmo lote.
+        abandonadas = 0
+        restantes_abandonadas = 0
+        if len(pending) < LOTE_DE_REENVIO:
+            ja_incluidas = {item["id"] for item in pending}
+            for orfa in self.deliveries_abandonadas(webhook_id):
+                if len(pending) >= LOTE_DE_REENVIO:
+                    restantes_abandonadas += 1
+                    continue
+                if orfa.id in ja_incluidas:
+                    continue
+                pending.append(
+                    {
+                        "id": orfa.id,
+                        "webhook_id": orfa.webhook_id,
+                        "evento": orfa.evento,
+                        "body": orfa.request_body,
+                        "abandonada": True,
+                    }
+                )
+                abandonadas += 1
+            if abandonadas:
+                logger.warning(
+                    "%d entrega(s) de webhook sem desfecho recuperada(s): o processo "
+                    "morreu no meio da entrega e o assinante não recebeu o evento",
+                    abandonadas,
+                )
 
         reenviados = 0
         sucessos = 0
@@ -525,7 +706,9 @@ class WebhookService:
                 falhas += 1
                 continue
 
-            self._atualizar_delivery(delivery["id"], "retrying")
+            # A linha de origem NÃO é posta em estado não-terminal aqui.  Era
+            # o que fazia o reenvio criar um órfão novo quando o processo
+            # morria durante ele: a linha ficava em `retrying` para sempre.
             reenviados += 1
             try:
                 delivered = await self._enviar_com_retry(webhook, event)
@@ -534,16 +717,20 @@ class WebhookService:
                 delivered = False
             if delivered:
                 sucessos += 1
-                self._atualizar_delivery(delivery["id"], "retried")
+                self._atualizar_delivery(delivery["id"], STATUS_REENVIADA)
             else:
                 falhas += 1
-                self._atualizar_delivery(delivery["id"], "failed")
+                self._atualizar_delivery(delivery["id"], STATUS_FALHA)
 
         return {
             "reenviados": reenviados,
             "sucessos": sucessos,
             "falhas": falhas,
             "total_falhas": len(pending),
+            "abandonadas_recuperadas": abandonadas,
+            # Truncamento silencioso leria como "processei tudo".  O painel
+            # mostra este número para o operador saber que falta clicar.
+            "restantes": restantes_falhas + restantes_abandonadas,
         }
 
     def _get_webhook(self, webhook_id: int) -> WebhookRegistration | None:

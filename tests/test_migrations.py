@@ -100,6 +100,43 @@ def _retrato(engine) -> dict:
     return retrato
 
 
+def _migrar_para(url: str, revisao: str) -> None:
+    """Leva `url` até `revisao` exata, injetando a conexão.
+
+    Não dá para usar `command.upgrade(alembic_config(url), ...)` direto: o
+    `alembic/env.py` sobrescreve `sqlalchemy.url` com `database_reference()`,
+    então a migração iria para o banco configurado do processo — o real, em
+    desenvolvimento — e não para o de teste.  Injetar a conexão em
+    `cfg.attributes` é o caminho que o `env.py` respeita, o mesmo que
+    `upgrade_head` usa.
+    """
+    from alembic import command
+    from src.db.migrations import alembic_config
+
+    engine = criar_engine(url=url)
+    cfg = alembic_config(url)
+    try:
+        with engine.begin() as conexao:
+            cfg.attributes["connection"] = conexao
+            command.upgrade(cfg, revisao)
+    finally:
+        engine.dispose()
+
+
+def _desmigrar_para(url: str, revisao: str) -> None:
+    from alembic import command
+    from src.db.migrations import alembic_config
+
+    engine = criar_engine(url=url)
+    cfg = alembic_config(url)
+    try:
+        with engine.begin() as conexao:
+            cfg.attributes["connection"] = conexao
+            command.downgrade(cfg, revisao)
+    finally:
+        engine.dispose()
+
+
 class TestRevisoes:
     def test_existe_uma_head(self):
         assert revisao_head(), "nenhuma revisão encontrada em alembic/versions"
@@ -192,3 +229,127 @@ class TestUpgrade:
             assert upgrade_head(banco.url) == revisao_head()
         finally:
             engine.dispose()
+
+
+@pytest.mark.parametrize("banco", BACKENDS, indirect=True)
+class TestReconciliacaoDeDeliveries:
+    """A revisão `a1c7f2b9e40d` conserta dados, não schema.
+
+    Bancos em uso carregam linhas de `webhook_deliveries` presas em
+    `retrying`: toda tentativa que falhava era marcada assim e nunca mais
+    tocada.  Elas não eram desfecho do evento, não eram reenviáveis e ninguém
+    as resolvia.  Migrar sem reconciliá-las deixaria o painel mentindo e as
+    entregas perdidas invisíveis para sempre.
+    """
+
+    @staticmethod
+    def _semear_presas(url: str) -> None:
+        """Um banco como o de antes da revisão, com os dois casos que importam."""
+        from sqlalchemy import text
+
+        engine = criar_engine(url=url)
+        try:
+            with engine.begin() as conexao:
+                conexao.execute(
+                    text(
+                        "INSERT INTO webhooks (url, eventos, descricao, ativo, "
+                        "max_retries, total_envios, total_falhas, criado_em) "
+                        "VALUES ('https://destino.exemplo/hook', '[\"ecd.importada\"]', "
+                        "'', true, 3, 0, 0, '2026-07-01 00:00:00')"
+                    )
+                )
+                wh_id = conexao.execute(text("SELECT id FROM webhooks")).scalar()
+                # `concluido_em` acompanha o que a versão anterior gravava:
+                # ela o preenchia em `success`/`failed` e deixava NULL em
+                # `retrying` — que era justamente o sinal de linha presa.
+                linhas = [
+                    # Entrega que terminou: a tentativa presa é só histórico.
+                    ("retrying", '{"dados":{"ecd_id":1}}', 1, None),
+                    ("success", '{"dados":{"ecd_id":1}}', 2, "2026-07-01 00:00:05"),
+                    # Entrega abandonada: nenhuma tentativa alcançou desfecho.
+                    ("retrying", '{"dados":{"ecd_id":2}}', 1, None),
+                    # Linha antiga sem corpo: não dá para agrupar com segurança.
+                    ("retrying", None, 1, None),
+                ]
+                for status, corpo, tentativa, concluido in linhas:
+                    conexao.execute(
+                        text(
+                            "INSERT INTO webhook_deliveries (webhook_id, evento, status, "
+                            "request_body, tentativa, criado_em, concluido_em) "
+                            "VALUES (:w, 'ecd.importada', :s, :b, :t, "
+                            "'2026-07-01 00:00:00', :c)"
+                        ),
+                        {"w": wh_id, "s": status, "b": corpo, "t": tentativa, "c": concluido},
+                    )
+        finally:
+            engine.dispose()
+
+    @staticmethod
+    def _estados(url: str) -> list[tuple]:
+        from sqlalchemy import text
+
+        engine = criar_engine(url=url)
+        try:
+            with engine.connect() as conexao:
+                return [
+                    (linha[0], linha[1], linha[2] is not None)
+                    for linha in conexao.execute(
+                        text(
+                            "SELECT status, request_body, concluido_em FROM webhook_deliveries "
+                            "ORDER BY id"
+                        )
+                    )
+                ]
+        finally:
+            engine.dispose()
+
+    def test_reconcilia_presas_conforme_a_entrega_terminou_ou_nao(self, banco):
+        _migrar_para(banco.url, "6e470dce13c0")
+        self._semear_presas(banco.url)
+
+        _migrar_para(banco.url, "a1c7f2b9e40d")
+
+        estados = self._estados(banco.url)
+        assert [e[0] for e in estados] == [
+            "superseded",  # entrega 1 terminou: tentativa vira histórico
+            "success",  # intacta
+            "failed",  # entrega 2 nunca terminou: precisa ficar reenviável
+            "failed",  # sem corpo: ramo conservador, visível ao reenvio
+        ]
+        assert "retrying" not in {e[0] for e in estados}
+
+    def test_toda_linha_reconciliada_ganha_concluido_em(self, banco):
+        """Sem isso, o histórico do painel a mostra em andamento para sempre."""
+        _migrar_para(banco.url, "6e470dce13c0")
+        self._semear_presas(banco.url)
+
+        _migrar_para(banco.url, "a1c7f2b9e40d")
+
+        assert all(concluido for _, _, concluido in self._estados(banco.url))
+
+    def test_downgrade_nao_esconde_entrega_perdida(self, banco):
+        """Voltar a `retrying` o que virou `failed` sumiria com o evento de novo.
+
+        Perder entrega é pior que carregar uma linha a mais no histórico, então
+        o downgrade só desfaz o que era exclusivo da migração.
+        """
+        _migrar_para(banco.url, "6e470dce13c0")
+        self._semear_presas(banco.url)
+        _migrar_para(banco.url, "a1c7f2b9e40d")
+
+        _desmigrar_para(banco.url, "6e470dce13c0")
+
+        estados = [e[0] for e in self._estados(banco.url)]
+        assert estados.count("failed") == 2, "as perdidas seguem visíveis ao reenvio"
+        assert estados.count("retrying") == 1, "só a superada volta ao estado antigo"
+
+    def test_migracao_e_idempotente(self, banco):
+        _migrar_para(banco.url, "6e470dce13c0")
+        self._semear_presas(banco.url)
+        _migrar_para(banco.url, "a1c7f2b9e40d")
+        antes = self._estados(banco.url)
+
+        _desmigrar_para(banco.url, "6e470dce13c0")
+        _migrar_para(banco.url, "a1c7f2b9e40d")
+
+        assert self._estados(banco.url) == antes

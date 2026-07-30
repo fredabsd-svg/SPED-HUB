@@ -29,7 +29,29 @@ interno da implementação.
   fixos e configurar as variáveis não mudava nada. Cota gravada no banco
   continua prevalecendo.
 
+- O reenvio manual de webhook passou a recuperar **entregas interrompidas por
+  queda do sistema**. Antes ele só via as que esgotaram todas as tentativas;
+  uma entrega cortada no meio por reinício, atualização ou queda do servidor
+  não aparecia em lugar nenhum — o assinante perdia o evento em silêncio e não
+  havia como recuperar, nem manualmente.
+
 ### Corrigido
+- **A taxa de sucesso dos webhooks estava errada.** Ela contava tentativas em
+  vez de entregas, então um evento que chegou na terceira tentativa aparecia
+  como uma entrega bem-sucedida em três. Uma integração instável mas
+  funcionando era anunciada no painel com 33% de sucesso.
+- O histórico de entregas acumulava linhas paradas em "retrying" para sempre:
+  toda tentativa que falhava ficava nesse estado e nunca era resolvida. O
+  painel as mostrava como se ainda estivessem em andamento. Bancos existentes
+  são reconciliados na atualização, e o que ficou sem desfecho volta a ser
+  reenviável.
+- Um clique em "Reenviar falhas" com muitas entregas pendentes e o endereço do
+  assinante fora do ar deixava a requisição aberta por quase uma hora — o
+  navegador desistia e o trabalho seguia no servidor sem ninguém saber. O
+  reenvio agora processa um lote por vez e informa quantas ficaram.
+- Os estados de entrega no painel deixaram de aparecer em inglês cru: agora
+  dizem "entregue", "não entregue", "entregue no reenvio", com explicação ao
+  passar o mouse.
 - Um webhook com a lista de eventos corrompida no banco impedia a entrega
   para **todos** os outros webhooks.
 

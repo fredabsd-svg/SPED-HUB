@@ -367,6 +367,9 @@ class TestWebhookSecurityRegression:
             "sucessos": 1,
             "falhas": 0,
             "total_falhas": 1,
+            # A entrega semeada é `failed`, não órfã, e o lote cobriu tudo.
+            "abandonadas_recuperadas": 0,
+            "restantes": 0,
         }
         assert seen == [(webhook.id, "ecd.importada", {"ecd_id": 42})]
 
