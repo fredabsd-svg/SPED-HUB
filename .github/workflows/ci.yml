@@ -193,4 +193,24 @@ jobs:
           fi
 
           docker rm -f nginx-teste
+
+          # Mesmo cenário, mas com o entrypoint em CRLF — o que o Git no
+          # Windows entrega por padrão.  Sem normalização, o shebang vira
+          # `#!/bin/sh\r`, o kernel não acha o interpretador e o container
+          # morre com "no such file or directory" apontando para o script que
+          # está lá.  Nenhum outro job veria: todos rodam em Linux.
+          sed -i 's/$/\r/' deploy/nginx/entrypoint.sh
+          docker build -t sped-hub-nginx-crlf ./deploy/nginx
+          docker run -d --name nginx-crlf --network sped-hub-teste \
+            -e SPED_HUB_DOMINIO=exemplo.teste \
+            -v "$PWD/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            sped-hub-nginx-crlf
+          sleep 10
+          docker logs nginx-crlf
+          test "$(docker inspect -f '{{.State.Running}}' nginx-crlf)" = true
+          test "$(docker inspect -f '{{.RestartCount}}' nginx-crlf)" = 0
+          docker logs nginx-crlf 2>&1 | grep -q AUTOASSINADO
+          git checkout deploy/nginx/entrypoint.sh
+
+          docker rm -f nginx-crlf
           docker network rm sped-hub-teste

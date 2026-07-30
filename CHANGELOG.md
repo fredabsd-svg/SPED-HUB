@@ -6,6 +6,17 @@ Atualizado ao fim de cada fase, não só em release (§1.7).
 As entradas descrevem o efeito para quem usa o sistema, não o detalhe
 interno da implementação.
 
+## [Não publicado]
+
+### Corrigido
+- **Quem constrói no Windows não conseguia subir o nginx.** O Git converte a
+  quebra de linha dos arquivos ao baixar o repositório, e o script que o
+  container executa parava de funcionar por causa disso — com uma mensagem que
+  culpava o arquivo errado (`no such file or directory`, apontando para um
+  arquivo que está lá). O container ficava reiniciando sem parar. Nenhuma
+  verificação automática pegava: todas rodam em Linux, onde a conversão não
+  acontece.
+
 ## [0.19.0] — 2026-07-30
 
 ### Adicionado
