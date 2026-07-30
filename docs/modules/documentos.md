@@ -28,11 +28,19 @@ As três camadas que a suíte separa:
 | `PoliticaDeDuplicidade` | `IGNORAR` (padrão), `SUBSTITUIR`, `ERRO`. |
 | `Desfecho` | `importado`, `duplicado`, `substituido`, `rejeitado`. |
 | `Sentido` | `entrada` / `saida`, relativo à empresa que escritura. |
+| `valor_efetivo(alvo, campo, ajustes)` | O valor que vai para o SPED. Recebe os ajustes já carregados. |
+| `efetivo(session, documento)` | `VisaoEfetiva` do documento inteiro, numa consulta só. |
+| `aplicar_ajuste(session, ...)` | Registra a alteração; devolve `None` se o valor já era o efetivo. |
+| `desfazer_lote(session, lote)` | Apaga os ajustes do lote; devolve quantos saíram. |
+| `historico(session, doc, campo=None)` | Os ajustes que alcançam o campo, em ordem. |
+| `novo_lote()` | Identificador para desfazer uma massa inteira. |
+| `ORIGEM_REGRA` / `ORIGEM_USUARIO` | Separa sugestão de decisão. |
 
 ## O que não faz
 
 Não classifica, não altera em massa e não gera escrituração — ver
-`docs/roadmap.md`. Não lê NFS-e: cada provedor municipal precisa do seu
+`docs/roadmap.md`. A camada efetiva existe, mas nada além dos testes a
+consome ainda: nenhuma tela a mostra e nenhum gerador a lê. Não lê NFS-e: cada provedor municipal precisa do seu
 adaptador. Não valida códigos fiscais contra as tabelas oficiais, e **não
 calcula tributo nenhum**: os valores de CBS, IBS e IS são lidos do XML, nunca
 presumidos.
@@ -48,6 +56,19 @@ dependência nova. Quem depende: nada ainda; o dashboard não expõe a Central.
   coluna faria as três camadas divergirem no primeiro `UPDATE` escrito fora do
   fluxo. Calculando, desfazer um lote é apagar seus ajustes, e "por que este
   registro saiu assim?" se responde listando os ajustes daquele campo.
+- **`valor_efetivo` recebe os ajustes, não os busca.** Buscar por campo daria
+  uma consulta para cada um dos 68 campos de cada item — a geração de um mês
+  viraria centenas de milhares de consultas.
+- **A ordem é `(criado_em, id)`.** O `id` não é redundante: um lote de
+  alteração em massa nasce todo no mesmo instante, e sem o desempate qual
+  ajuste vale passaria a depender da ordem em que o banco devolveu as linhas.
+- **Ajuste que não muda nada não é gravado.** Poluiria o histórico e faria a
+  simulação de uma massa relatar impacto que não existe.
+- **`valor_anterior` é o efetivo, não o normalizado.** O segundo ajuste de um
+  campo parte de onde o primeiro deixou; gravar o normalizado faria o
+  histórico mentir.
+- **Valor de ajuste que não converte para o tipo da coluna vira aviso, não
+  exceção.** Um ajuste corrompido não pode impedir o mês inteiro de sair.
 - **`AjusteFiscal` é aditivo.** Cada linha guarda o valor anterior, a origem
   (`regra` ou `usuario`) e o lote. Nenhum ajuste sobrescreve outro; o efetivo
   é o mais recente que alcança o campo.
