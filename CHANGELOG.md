@@ -8,6 +8,11 @@ interno da implementação.
 
 ## [Não publicado]
 
+### Adicionado
+- `sped-hub usuario criar` e `sped-hub usuario listar`, para administrar as
+  contas do painel. Sem `--senha`, a senha é pedida sem eco, para não ficar no
+  histórico do shell.
+
 ### Corrigido
 - **Um worker cujo canal de tarefas quebrasse consumia um núcleo inteiro, em
   silêncio, para sempre.** O laço tratava "fila vazia" e "fila quebrada" do
@@ -40,6 +45,19 @@ interno da implementação.
   a cada subida.
 
 ### Segurança
+- **Qualquer pessoa que alcançasse o servidor criava conta e via a
+  escrituração de todos os clientes.** A tela de registro era pública e sem
+  restrição, e é o único caminho que existe para criar usuário. Numa
+  instalação de escritório único ninguém tem escritório — nem o contador que
+  se cadastra primeiro, nem as empresas que ele importa —, então toda conta
+  nova caía no mesmo grupo e enxergava tudo: as empresas, as escriturações, os
+  relatórios. Como o servidor de produção fica publicado na internet com
+  domínio e certificado, bastava conhecer o endereço.
+  O registro segue aberto enquanto não existe nenhum usuário, para criar o
+  administrador inicial, e fecha em seguida. As contas seguintes são criadas
+  por quem administra o servidor, com `sped-hub usuario criar`. Quem quiser o
+  auto-serviço de volta — rede interna fechada, por exemplo — liga
+  `SPED_HUB_REGISTRO_ABERTO=true`.
 - **Uma chave de API entregue a um integrador dava a ele controle da
   instância.** Ela podia criar novas chaves para si — e revogar a original não
   tirava o acesso —, listar e revogar as chaves do escritório, derrubando as

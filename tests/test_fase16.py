@@ -162,7 +162,9 @@ class TestMonitoringEndpoints:
 
         auth = AuthService(db_path)
         first = auth.registrar("first@fase16.test", "First", "senha123")
-        second = auth.registrar("second@fase16.test", "Second", "senha123")
+        # Pelo administrador: o registro público fecha depois do primeiro
+        # usuário (ver tests/test_registro_publico.py).
+        second = auth.criar_usuario("second@fase16.test", "Second", "senha123")
         assert first.admin is True
         assert second.admin is False
 

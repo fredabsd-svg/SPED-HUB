@@ -573,6 +573,14 @@ async def api_register(request: Request):
     try:
         auth = get_auth()
         usuario = auth.registrar(email=email, nome=nome, senha=senha)
+    except ValueError as e:
+        # Registro fechado é recusa de permissão, não erro de preenchimento:
+        # devolver 400 faria a tela pedir para o visitante corrigir o formulário.
+        if "fechado" in str(e).lower():
+            return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=403)
+        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=400)
+
+    try:
         usuario_id = usuario.id
         # Registra auditoria
         svc = get_audit_service()

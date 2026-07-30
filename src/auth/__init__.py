@@ -23,6 +23,7 @@ from src.db.models import (
     obter_engine,
     truncar_para_coluna,
 )
+from src.settings import get_settings
 
 logger = logging.getLogger("sped-hub.auth")
 
@@ -192,10 +193,67 @@ class AuthService:
         finally:
             session.close()
 
+    SENHA_MINIMA = 6
+
     def registrar(
         self, email: str, nome: str, senha: str, escritorio_id: int | None = None
     ) -> Usuario:
-        """Registra um novo usuário."""
+        """Auto-serviço do `/register`.  Só antes de existir o primeiro usuário.
+
+        Este é o caminho **público**: qualquer um que alcance o servidor chega
+        nele.  Deixá-lo aberto entregava a escrituração dos clientes, porque
+        numa instalação de escritório único ninguém tem `escritorio_id` — nem o
+        contador, nem as empresas que ele importa — e o escopo, corretamente,
+        põe todos no mesmo grupo.  Bastava se registrar para entrar nele.
+
+        Segue aberto enquanto não há usuário nenhum, senão não haveria como
+        criar o primeiro administrador.  Depois disso, quem cria usuário é o
+        administrador, por :meth:`criar_usuario` (`sped-hub usuario criar`) —
+        ou o auto-serviço volta, por escolha explícita, com
+        ``SPED_HUB_REGISTRO_ABERTO=true``.
+        """
+        return self._inserir(
+            email=email,
+            nome=nome,
+            senha=senha,
+            escritorio_id=escritorio_id,
+            somente_se_vazio=not get_settings().registro_aberto,
+        )
+
+    def criar_usuario(
+        self,
+        email: str,
+        nome: str,
+        senha: str,
+        escritorio_id: int | None = None,
+        admin: bool = False,
+    ) -> Usuario:
+        """Criação por quem administra a instalação.  Não é rota web.
+
+        Chega pelo `sped-hub usuario criar`, que exige acesso ao servidor —
+        é o que substitui o auto-serviço fechado em :meth:`registrar`.
+        """
+        return self._inserir(
+            email=email,
+            nome=nome,
+            senha=senha,
+            escritorio_id=escritorio_id,
+            somente_se_vazio=False,
+            admin=admin,
+        )
+
+    def _inserir(
+        self,
+        email: str,
+        nome: str,
+        senha: str,
+        escritorio_id: int | None,
+        somente_se_vazio: bool,
+        admin: bool | None = None,
+    ) -> Usuario:
+        if len(senha) < self.SENHA_MINIMA:
+            raise ValueError(f"Senha deve ter no mínimo {self.SENHA_MINIMA} caracteres")
+
         session = self._get_session()
         try:
             existente = session.execute(
@@ -204,15 +262,24 @@ class AuthService:
             if existente:
                 raise ValueError("Email já cadastrado")
 
+            # A contagem fica dentro da mesma transação do INSERT: sem isso,
+            # dois registros simultâneos numa instalação virgem leem zero os
+            # dois e criam dois administradores.
+            primeiro = session.execute(select(func.count(Usuario.id))).scalar_one() == 0
+            if somente_se_vazio and not primeiro:
+                raise ValueError(
+                    "Registro público fechado — peça a um administrador para criar "
+                    "sua conta (`sped-hub usuario criar`)"
+                )
+
             senha_hash, salt = Usuario.hash_senha(senha)
-            is_first_user = session.execute(select(func.count(Usuario.id))).scalar_one() == 0
             usuario = Usuario(
                 email=email,
                 nome=nome,
                 senha_hash=senha_hash,
                 salt=salt,
                 escritorio_id=escritorio_id,
-                admin=is_first_user,
+                admin=primeiro if admin is None else (admin or primeiro),
             )
             session.add(usuario)
             session.commit()

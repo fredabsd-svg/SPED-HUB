@@ -7,6 +7,9 @@ Subcomandos:
     validar        — Executa validações de integridade
     filtros        — Gerencia visões salvas de filtros
     info           — Exibe informações do banco
+    migrar         — Aplica migrações de schema (Alembic)
+    migrar-dados   — Copia o conteúdo de um banco para outro
+    usuario        — Cria e lista usuários do painel
 """
 
 import argparse
@@ -609,6 +612,75 @@ def cmd_migrar(args):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# usuario
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def cmd_usuario(args):
+    """Cria e lista usuários do painel.
+
+    Existe porque o `/register` da web fecha depois do primeiro usuário: com
+    ele aberto, qualquer um que alcance o servidor criava conta e caía no mesmo
+    grupo do contador, enxergando a escrituração dos clientes.  Quem administra
+    o servidor passa por aqui — `docker compose exec web sped-hub usuario criar`.
+    """
+    import getpass
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from src.auth import AuthService
+    from src.db.models import Usuario
+    from src.settings import database_reference
+
+    engine = criar_engine(args.db) if args.db else criar_engine()
+
+    if args.acao == "listar":
+        try:
+            with Session(engine) as sessao:
+                usuarios = sessao.execute(select(Usuario).order_by(Usuario.id)).scalars().all()
+                if not usuarios:
+                    print("Nenhum usuário. O primeiro se cria em /register.")
+                    return 0
+                print(f"\n{'ID':>4}  {'E-mail':38} {'Admin':6} {'Escritório':10} Nome")
+                for u in usuarios:
+                    escritorio = str(u.escritorio_id) if u.escritorio_id else "—"
+                    print(
+                        f"{u.id:>4}  {u.email:38} {'sim' if u.admin else 'não':6} "
+                        f"{escritorio:10} {u.nome}"
+                    )
+                print()
+            return 0
+        finally:
+            engine.dispose()
+
+    engine.dispose()
+    faltando = [n for n, v in (("--email", args.email), ("--nome", args.nome)) if not v]
+    if faltando:
+        print(f"ERRO: {' e '.join(faltando)} são obrigatórios em `usuario criar`.")
+        return 1
+
+    senha = args.senha or getpass.getpass("Senha do novo usuário: ")
+
+    caminho = args.db or database_reference()
+    try:
+        usuario = AuthService(db_path=caminho).criar_usuario(
+            email=args.email,
+            nome=args.nome,
+            senha=senha,
+            escritorio_id=args.escritorio,
+            admin=args.admin,
+        )
+    except ValueError as erro:
+        print(f"ERRO: {erro}")
+        return 1
+
+    papel = "administrador" if usuario.admin else "usuário"
+    print(f"Criado {papel} #{usuario.id}: {usuario.email}")
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # migrar-dados
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -764,6 +836,19 @@ def main(argv: list[str] | None = None) -> int:
         help="Só comparar as contagens dos dois bancos, sem copiar nada",
     )
 
+    # usuario
+    p_usr = sub.add_parser("usuario", help="Criar e listar usuários do painel")
+    p_usr.add_argument("acao", choices=["criar", "listar"], help="criar | listar")
+    p_usr.add_argument("--email", help="E-mail de login (obrigatório em `criar`)")
+    p_usr.add_argument("--nome", help="Nome exibido (obrigatório em `criar`)")
+    p_usr.add_argument(
+        "--senha",
+        help="Senha inicial; sem ela, é pedida sem eco no terminal",
+    )
+    p_usr.add_argument("--admin", action="store_true", help="Cria como administrador")
+    p_usr.add_argument("--escritorio", type=int, help="ID do escritório dono")
+    p_usr.add_argument("--db", default=None, help="Banco (URL ou caminho SQLite)")
+
     args = parser.parse_args(argv)
 
     if args.comando == "importar-ecd":
@@ -782,6 +867,8 @@ def main(argv: list[str] | None = None) -> int:
         cmd_migrar(args)
     elif args.comando == "migrar-dados":
         return cmd_migrar_dados(args)
+    elif args.comando == "usuario":
+        return cmd_usuario(args)
     else:
         parser.print_help()
     return 0

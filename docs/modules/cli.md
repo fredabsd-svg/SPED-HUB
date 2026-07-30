@@ -22,6 +22,8 @@ Subcomandos (entry point `sped-hub = "src.cli:main"` no pyproject; também
 | `filtros listar\|salvar\|mostrar [--nome --criterios]` | Visões salvas de filtros (JSON). |
 | `info [--db]` | Contagens do banco e últimas 5 ECDs. |
 | `migrar [status\|aplicar\|adotar] [--db]` | Migrações Alembic; `status` é o default. |
+| `migrar-dados --de --para [--lote --conferir]` | Copia o conteúdo de um banco para outro. |
+| `usuario criar\|listar [--email --nome --senha --admin --escritorio --db]` | Contas do painel. Sem `--senha`, pede sem eco. |
 
 ## Depende de / quem depende
 
@@ -46,6 +48,14 @@ importa a CLI.
 - **`migrar --db` aceita caminho de arquivo OU URL**; o default funciona como
   sentinela — quando não passado, vale `DATABASE_URL`. Os demais subcomandos
   tratam `--db` como caminho SQLite.
+- **`usuario criar` existe porque o `/register` fecha.** O registro público
+  só vale enquanto não há usuário nenhum — é o bootstrap do administrador.
+  Depois dele, qualquer um que alcançasse o servidor criaria conta e cairia no
+  mesmo grupo do contador, enxergando a escrituração dos clientes: numa
+  instalação de escritório único ninguém tem `escritorio_id`, nem os usuários
+  nem as empresas. Quem cria conta a partir daí é quem tem acesso ao servidor.
+- **`usuario criar` sem `--senha` pergunta sem eco** (`getpass`): senha em
+  argumento de linha de comando fica no histórico do shell e no `ps`.
 - **`migrar aplicar` roda sob advisory lock** (via `db.migrations`): réplicas
   subindo juntas não aplicam a mesma migração em paralelo. `migrar adotar` só
   carimba banco pré-existente, sem executar migração.
