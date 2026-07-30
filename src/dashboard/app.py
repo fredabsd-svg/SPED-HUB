@@ -111,7 +111,7 @@ def executar_manutencao() -> dict[str, int]:
 
     cfg = get_settings()
     referencia = _db_reference()
-    resultado = {"jobs": 0, "entregas_de_webhook": 0}
+    resultado = {"jobs": 0, "entregas_de_webhook": 0, "webhooks_reenviados": 0}
 
     # Cada expurgo é isolado: falha em um não pode impedir o outro.
     try:
@@ -126,11 +126,30 @@ def executar_manutencao() -> dict[str, int]:
     except Exception:
         logger.exception("Expurgo de entregas de webhook falhou")
 
+    # Reenvio automático só do que o processo abandonou — nunca do que esgotou
+    # as tentativas.  Roda depois do expurgo: a entrega abandonada nunca é
+    # expurgada, então a ordem não muda o conjunto, mas trabalhar sobre a
+    # tabela já enxuta é mais barato.
+    try:
+        if cfg.webhook_auto_retry:
+            recuperacao = asyncio.run(WebhookService(referencia).reenviar_abandonadas())
+            resultado["webhooks_reenviados"] = recuperacao["sucessos"]
+            if recuperacao["reenviados"]:
+                logger.warning(
+                    "Reenvio automático de webhook: %d entrega(s) retomada(s), "
+                    "%d com sucesso — o processo havia morrido no meio delas",
+                    recuperacao["reenviados"],
+                    recuperacao["sucessos"],
+                )
+    except Exception:
+        logger.exception("Reenvio automático de webhook falhou")
+
     if any(resultado.values()):
         logger.info(
-            "Manutenção: %d job(s) e %d entrega(s) de webhook removidos",
+            "Manutenção: %d job(s) e %d entrega(s) removidos, %d webhook(s) reenviado(s)",
             resultado["jobs"],
             resultado["entregas_de_webhook"],
+            resultado["webhooks_reenviados"],
         )
     return resultado
 

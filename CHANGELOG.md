@@ -41,6 +41,11 @@ interno da implementação.
   filtro, chaves de API e o histórico de auditoria, que não vêm de arquivo
   nenhum. A cópia é tudo-ou-nada, preserva os identificadores, recusa destino
   que já tenha dados, e confere as contagens no fim.
+- **Entrega de webhook interrompida por queda do sistema passou a ser retomada
+  sozinha.** Antes ela era recuperável, mas esperava alguém clicar em "Reenviar
+  falhas". Vale só para o que a queda interrompeu: entrega que já respondeu mal
+  em todas as tentativas continua esperando intervenção, porque insistir de
+  hora em hora num endereço quebrado não resolve nada.
 
 ### Corrigido
 - **Uma importação interrompida por reinício do sistema deixava de existir em

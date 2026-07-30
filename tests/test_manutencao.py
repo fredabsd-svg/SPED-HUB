@@ -580,3 +580,135 @@ def test_docstring_do_modulo_nao_promete_o_que_nao_faz():
         assert (
             "manutenção" in doc.lower() or "manutencao" in doc.lower()
         ), "o módulo promete limpeza automática sem apontar quem a executa"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4. Reenvio automático — só do que a queda interrompeu
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _semear_abandonada(referencia: str, webhook_id: int, ecd_id: int = 7) -> None:
+    """Entrega que o processo deixou pela metade: `pending` e antiga."""
+    engine = criar_engine(referencia)
+    with get_session(engine) as sessao:
+        sessao.add(
+            WebhookDelivery(
+                webhook_id=webhook_id,
+                evento="ecd.importada",
+                status="pending",
+                request_body=json.dumps(
+                    {
+                        "evento": "ecd.importada",
+                        "dados": {"ecd_id": ecd_id},
+                        "timestamp": "2026-01-01T00:00:00+00:00",
+                        "webhook_id": webhook_id,
+                    }
+                ),
+                tentativa=1,
+                criado_em=_dias_atras(1),
+            )
+        )
+        sessao.commit()
+
+
+def _cliente_que_aceita(registro: list):
+    class Cliente:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            registro.append(json)
+
+            class R:
+                status_code = 200
+                text = ""
+
+            return R()
+
+    return Cliente
+
+
+class TestReenvioAutomatico:
+    def test_entrega_abandonada_e_retomada_sozinha(self, referencia, webhooks, monkeypatch):
+        """Antes ela esperava alguém clicar em "Reenviar falhas"."""
+        wh = webhooks.registrar(url="https://destino.exemplo/hook", eventos=["ecd.importada"])
+        _semear_abandonada(referencia, wh.id)
+        enviados: list = []
+        monkeypatch.setattr(wh_mod.httpx, "AsyncClient", _cliente_que_aceita(enviados))
+
+        resultado = app_mod.executar_manutencao()
+
+        assert resultado["webhooks_reenviados"] == 1
+        assert enviados and enviados[0]["dados"] == {"ecd_id": 7}
+        assert webhooks.deliveries_abandonadas() == [], "segue abandonada depois do reenvio"
+
+    def test_entrega_que_esgotou_tentativas_nao_e_reenviada(
+        self, referencia, webhooks, monkeypatch
+    ):
+        """A distinção que torna seguro automatizar.
+
+        `failed` respondeu mal em TODAS as tentativas. Reenviar sozinho, de
+        hora em hora, marteliza um endereço quebrado e não resolve — ali o que
+        falta é alguém olhar. Automatizar sem essa separação seria pior que não
+        ter reenvio automático.
+        """
+        wh = webhooks.registrar(url="https://destino.exemplo/hook", eventos=["ecd.importada"])
+        _semear_entregas(referencia, wh.id, [("failed", 1, 9)])
+        enviados: list = []
+        monkeypatch.setattr(wh_mod.httpx, "AsyncClient", _cliente_que_aceita(enviados))
+
+        resultado = app_mod.executar_manutencao()
+
+        assert enviados == [], "o automático martelou um endpoint que já falhou em tudo"
+        assert resultado["webhooks_reenviados"] == 0
+
+    def test_reenvio_manual_continua_cobrindo_as_falhas(self, referencia, webhooks, monkeypatch):
+        """O botão do painel é outra coisa: quem clicou sabe que está insistindo."""
+        wh = webhooks.registrar(url="https://destino.exemplo/hook", eventos=["ecd.importada"])
+        _semear_entregas(referencia, wh.id, [("failed", 1, 9)])
+        enviados: list = []
+        monkeypatch.setattr(wh_mod.httpx, "AsyncClient", _cliente_que_aceita(enviados))
+
+        resultado = asyncio.run(webhooks.retry_failed())
+
+        assert resultado["sucessos"] == 1
+        assert enviados, "o manual precisa alcançar o que o automático não alcança"
+
+    def test_configuracao_desliga_o_reenvio_automatico(self, referencia, webhooks, monkeypatch):
+        wh = webhooks.registrar(url="https://destino.exemplo/hook", eventos=["ecd.importada"])
+        _semear_abandonada(referencia, wh.id)
+        enviados: list = []
+        monkeypatch.setattr(wh_mod.httpx, "AsyncClient", _cliente_que_aceita(enviados))
+        monkeypatch.setenv("SPED_HUB_WEBHOOK_AUTO_RETRY", "false")
+        reset_settings_cache()
+
+        assert app_mod.executar_manutencao()["webhooks_reenviados"] == 0
+        assert enviados == []
+        assert len(webhooks.deliveries_abandonadas()) == 1, "segue recuperável à mão"
+
+    def test_falha_no_reenvio_nao_impede_os_expurgos(self, referencia, webhooks, monkeypatch):
+        _semear_job_antigo(referencia)
+
+        async def explodir(self, webhook_id=None):
+            raise RuntimeError("rede indisponível")
+
+        monkeypatch.setattr(WebhookService, "reenviar_abandonadas", explodir)
+
+        resultado = app_mod.executar_manutencao()
+
+        assert resultado["jobs"] == 1
+        assert resultado["webhooks_reenviados"] == 0
+
+    def test_sem_abandonada_nao_faz_requisicao(self, referencia, webhooks, monkeypatch):
+        """O caso comum: a manutenção roda de hora em hora e não há nada a fazer."""
+        enviados: list = []
+        monkeypatch.setattr(wh_mod.httpx, "AsyncClient", _cliente_que_aceita(enviados))
+
+        assert app_mod.executar_manutencao()["webhooks_reenviados"] == 0
+        assert enviados == []
