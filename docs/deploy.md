@@ -131,6 +131,27 @@ docker compose ps          # migrate deve estar "exited (0)", o resto "healthy"
 
 `web` e `worker` só sobem depois que `migrate` termina com sucesso.
 
+### Primeiro acesso e contas
+
+Abra `/register` e crie a **primeira** conta: ela vira administrador.  Depois
+disso o registro público fecha, e é para fechar mesmo — numa instalação de
+escritório único, toda conta cai no mesmo grupo e enxerga a escrituração dos
+clientes.  Com `/register` aberto, bastaria alcançar o servidor.
+
+As contas seguintes saem daqui:
+
+```bash
+docker compose exec web sped-hub usuario criar \
+    --email colega@escritorio.com.br --nome "Colega"      # pede a senha sem eco
+docker compose exec web sped-hub usuario criar \
+    --email socio@escritorio.com.br --nome "Sócio" --admin
+docker compose exec web sped-hub usuario listar
+```
+
+Se o auto-serviço fizer sentido no seu caso — rede interna fechada, por
+exemplo —, `SPED_HUB_REGISTRO_ABERTO=true` no `.env` reabre o `/register`.
+Com o servidor publicado na internet, não faça isso.
+
 ## 5. Conferir antes de liberar
 
 ```bash

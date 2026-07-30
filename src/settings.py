@@ -107,6 +107,11 @@ class Settings:
     # mascarada nos dois formatos (ver src/logging_config.py).
     log_json: bool = False
     allowed_hosts: tuple[str, ...] = field(default_factory=lambda: ("*",))
+    # Auto-serviço no `/register`.  Fechado por padrão: com ele aberto,
+    # qualquer um que alcance o servidor cria conta e cai no mesmo grupo do
+    # contador — e enxerga a escrituração dos clientes.  O primeiro usuário
+    # é sempre permitido, senão não há como criar o administrador inicial.
+    registro_aberto: bool = False
 
     # Servidor (uvicorn)
     host: str = "127.0.0.1"
@@ -236,6 +241,7 @@ _ENV_TO_FIELD: Mapping[str, str] = {
     "SPED_HUB_PORT": "port",
     "SPED_HUB_RELOAD": "reload",
     "SPED_HUB_ALLOWED_HOSTS": "allowed_hosts",
+    "SPED_HUB_REGISTRO_ABERTO": "registro_aberto",
     "SPED_HUB_MAX_UPLOAD_MB": "max_upload_mb",
     "SPED_HUB_MAX_UPLOAD_BYTES": "max_upload_bytes_override",
     "SPED_HUB_UPLOAD_DIR": "upload_dir",
@@ -311,6 +317,7 @@ _BOOL_FIELDS = {
     "reload",
     "trust_proxy",
     "log_json",
+    "registro_aberto",
 }
 
 

@@ -40,6 +40,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 34 | Escopo e poder da API Key | concluída | `tests/test_escopo_de_api_key.py` | chave sem dono segue lendo tudo, por retrocompatibilidade |
 | 35 | `docker compose up` funciona na primeira execução | concluída | `tests/test_deploy_config.py::TestEntrypointDoNginxExecutado` | emissão do certificado real segue manual (ver `docs/deploy.md`) |
 | 36 | Worker encerra em vez de girar em vazio com a fila quebrada | concluída | `tests/test_worker_fila_quebrada.py`, `tests/test_migrations.py::TestLoggingSobreviveAMigracao` | — |
+| 37 | Registro público fecha depois do primeiro usuário | concluída | `tests/test_registro_publico.py` | tela de gestão de usuários segue fora; a criação é por CLI |
+| 38 | Mensagem de erro chega à tela | concluída | `tests/test_registro_publico.py::TestMensagemDeErroChegaNaTela`, `tests/test_e2e_playwright.py` | — |
 
 ## Limites do comportamento atual
 
@@ -56,6 +58,7 @@ descreve funcionalidade futura (§1.1).
 | Entrega de webhook que esgotou as tentativas espera intervenção | O reenvio automático retoma só o que uma queda interrompeu no meio. Entrega que respondeu mal em **todas** as tentativas não é reenviada sozinha: martelar de hora em hora um endereço quebrado não resolve, e ali o que falta é alguém olhar. O botão "Reenviar falhas" alcança essas, e é aguardado dentro da requisição — daí o lote limitado por tempo (`LOTE_DE_REENVIO`) | — (é escolha, não pendência) |
 | Chave de API sem dono lê todos os escritórios | Toda chave criada antes da coluna `escritorio_id` ficou com dono nulo, e nulo significa "chave de instância". Preenchê-las com um escritório arbitrário quebraria integração em produção; com o errado, seria pior — a integração pararia de ver os dados certos sem explicação. Chave nova deve ser criada com dono | — (é escolha de retrocompatibilidade) |
 | `SPED_HUB_SECRET_KEY` não tem consumidor | A única variável reservada que sobrou (§2.2). Sessões e tokens usam CSPRNG; o webhook assina com o segredo do próprio registro. Ligá-la exigiria decidir *qual* segredo ela é, e hoje nenhum componente precisa de um | — |
+| Criar usuário depois do primeiro exige acesso ao servidor | O `/register` é público: enquanto esteve aberto, qualquer um que alcançasse o servidor criava conta e caía no mesmo grupo do contador — numa instalação de escritório único ninguém tem `escritorio_id`, nem os usuários nem as empresas importadas. Fechá-lo foi a correção; a alternativa (tela de convite com papel e escritório) é trabalho de front-end que ninguém pediu ainda. `sped-hub usuario criar` resolve o caso real | Tela de gestão de usuários no painel |
 | A primeira subida usa certificado autoassinado, e o navegador reclama | O certificado do Let's Encrypt só pode ser emitido depois de o nginx responder na porta 80 no domínio real, com DNS já apontado — nada disso existe quando alguém roda `docker compose up` pela primeira vez. Antes o nginx recusava subir; agora ele sobe, avisa no log que é autoassinado e serve em `http://localhost/`. A emissão do certificado real é um comando manual, documentado em `docs/deploy.md` | — (é escolha: emitir sozinho exigiria domínio e DNS que o sistema não tem como adivinhar) |
 
 ## Passivo de documentação de módulo (§1.4)

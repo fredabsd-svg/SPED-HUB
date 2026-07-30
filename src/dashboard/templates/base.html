@@ -394,8 +394,16 @@
             }
             if (corpo && corpo.status === "erro" && corpo.mensagem) {
                 // Erro de credencial vira mensagem legível em vez de JSON.
+                //
+                // `shouldSwap` é o que faz a mensagem aparecer, e é o que
+                // faltava: em resposta 4xx o HTMX não faz swap nenhum por
+                // padrão, então este ramo montava o alerta e o descartava.
+                // Efeito para quem usava: errar a senha no login não mostrava
+                // nada — a tela ficava parada, sem dizer o que houve.
+                // `isError` sozinho só evita o log de erro no console.
                 evento.detail.serverResponse =
                     '<div class="alert alert-error">' + escapar(corpo.mensagem) + "</div>";
+                evento.detail.shouldSwap = true;
                 evento.detail.isError = false;
                 return;
             }

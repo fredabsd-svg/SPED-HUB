@@ -275,6 +275,37 @@ def _encerrar(proc) -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+@pytest.fixture(scope="module")
+def contador(db_path, live_server):
+    """O administrador da instalação, criado fora do navegador.
+
+    Antes cada teste criava seu usuário pelo `/register`. Isso deixou de
+    funcionar quando o registro público passou a fechar depois do primeiro
+    usuário — e já era frágil: banco e servidor são de módulo, então quem
+    conseguia se registrar dependia da ordem em que os testes rodassem.
+
+    Criando aqui, o estado é o de uma instalação em uso — administrador
+    existente, registro fechado — para todos os testes, em qualquer ordem.
+    """
+    from src.auth import AuthService
+
+    auth = AuthService(db_path=db_path)
+    try:
+        auth.registrar(email="contador@e2e.teste", nome="Contador E2E", senha="senha123")
+    except ValueError:
+        pass  # outro módulo já criou o primeiro; segue válido
+    return {"email": "contador@e2e.teste", "senha": "senha123"}
+
+
+def _entrar(page, live_server, contador):
+    """Login pela tela, até o dashboard."""
+    page.goto(f"{live_server}/login")
+    page.fill("input[name='email']", contador["email"])
+    page.fill("input[name='senha']", contador["senha"])
+    page.click("button[type='submit']")
+    page.wait_for_url(f"{live_server}/", timeout=30000)
+
+
 class TestE2ELogin:
     """Testes de login/logout com browser real."""
 
@@ -292,8 +323,8 @@ class TestE2ELogin:
             assert page.locator("input[name='senha']").is_visible()
             browser.close()
 
-    def test_registro_e_login(self, live_server):
-        """Fluxo completo: registro → login → dashboard."""
+    def test_login_leva_ao_dashboard(self, live_server, contador):
+        """O caminho de quem já tem conta."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 executable_path=CHROMIUM,
@@ -302,24 +333,34 @@ class TestE2ELogin:
             context = browser.new_context()
             page = context.new_page()
 
-            # Registro
-            page.goto(f"{live_server}/register")
-            page.fill("input[name='email']", "e2e@teste.com")
-            page.fill("input[name='nome']", "Usuário E2E")
-            page.fill("input[name='senha']", "senha123")
-            page.click("button[type='submit']")
-
-            # Aguarda redirect para login
-            page.wait_for_url(f"{live_server}/login", timeout=30000)
-
-            # Login
-            page.fill("input[name='email']", "e2e@teste.com")
-            page.fill("input[name='senha']", "senha123")
-            page.click("button[type='submit']")
-
-            # Aguarda redirect para dashboard
-            page.wait_for_url(f"{live_server}/", timeout=30000)
+            _entrar(page, live_server, contador)
             assert page.url == f"{live_server}/"
+
+            browser.close()
+
+    def test_registro_fechado_diz_o_motivo_na_tela(self, live_server, contador):
+        """Com administrador já criado, o `/register` recusa — e explica.
+
+        Recusar sem dizer nada seria pior que não recusar: o visitante clica em
+        "Criar Conta" e a tela fica parada, sem pista do que aconteceu.
+        """
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                executable_path=CHROMIUM,
+                headless=True,
+            )
+            page = browser.new_context().new_page()
+
+            page.goto(f"{live_server}/register")
+            page.fill("input[name='email']", "estranho@gmail.com")
+            page.fill("input[name='nome']", "Estranho")
+            page.fill("input[name='senha']", "senha123")
+            page.click("button[type='submit']")
+            page.wait_for_selector("#register-result .alert-error", timeout=10000)
+
+            mensagem = page.inner_text("#register-result").strip()
+            assert "fechado" in mensagem.lower(), mensagem
+            assert page.url.endswith("/register"), "não deveria ter navegado"
 
             browser.close()
 
@@ -336,8 +377,13 @@ class TestE2ELogin:
             page.fill("input[name='senha']", "errada")
             page.click("button[type='submit']")
 
-            # Deve permanecer na página de login
-            time.sleep(1)
+            # A mensagem é o que este teste passou a cobrar.  Ele só conferia a
+            # URL, e por isso não viu que o alerta de erro NUNCA aparecia:
+            # o handler de HTMX montava o texto e o descartava, porque em
+            # resposta 4xx não há swap sem `shouldSwap`.  Quem errava a senha
+            # via a tela parada, sem explicação nenhuma.
+            page.wait_for_selector("#login-result .alert-error", timeout=10000)
+            assert "inválid" in page.inner_text("#login-result").lower()
             assert "login" in page.url.lower()
             browser.close()
 
@@ -357,7 +403,7 @@ class TestE2EUpload:
             assert "login" in page.url.lower()
             browser.close()
 
-    def test_upload_ecd(self, live_server, ecd_factory):
+    def test_upload_ecd(self, live_server, ecd_factory, contador):
         """Upload de ECD via interface web."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -367,18 +413,7 @@ class TestE2EUpload:
             context = browser.new_context()
             page = context.new_page()
 
-            # Registra e faz login
-            page.goto(f"{live_server}/register")
-            page.fill("input[name='email']", "upload_e2e@teste.com")
-            page.fill("input[name='nome']", "Upload E2E")
-            page.fill("input[name='senha']", "senha123")
-            page.click("button[type='submit']")
-            page.wait_for_url(f"{live_server}/login", timeout=30000)
-
-            page.fill("input[name='email']", "upload_e2e@teste.com")
-            page.fill("input[name='senha']", "senha123")
-            page.click("button[type='submit']")
-            page.wait_for_url(f"{live_server}/", timeout=30000)
+            _entrar(page, live_server, contador)
 
             # Navega para upload
             page.goto(f"{live_server}/upload")
@@ -410,7 +445,7 @@ class TestE2EUpload:
 class TestE2EDashboard:
     """Testes do dashboard com browser real."""
 
-    def test_dashboard_com_dados(self, live_server, ecd_factory):
+    def test_dashboard_com_dados(self, live_server, ecd_factory, contador):
         """Dashboard mostra dados após upload."""
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -420,18 +455,7 @@ class TestE2EDashboard:
             context = browser.new_context()
             page = context.new_page()
 
-            # Registra e faz login
-            page.goto(f"{live_server}/register")
-            page.fill("input[name='email']", "dash_e2e@teste.com")
-            page.fill("input[name='nome']", "Dashboard E2E")
-            page.fill("input[name='senha']", "senha123")
-            page.click("button[type='submit']")
-            page.wait_for_url(f"{live_server}/login", timeout=30000)
-
-            page.fill("input[name='email']", "dash_e2e@teste.com")
-            page.fill("input[name='senha']", "senha123")
-            page.click("button[type='submit']")
-            page.wait_for_url(f"{live_server}/", timeout=30000)
+            _entrar(page, live_server, contador)
 
             # Faz upload via API (mais rápido)
             import httpx

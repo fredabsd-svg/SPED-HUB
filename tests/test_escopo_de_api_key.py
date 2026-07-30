@@ -304,9 +304,12 @@ class TestAdministracaoExigeSessao:
 
     def test_usuario_comum_nao_administra(self, cenario):
         cliente = cenario["cliente"]
-        cliente.post(
-            "/api/register",
-            data={"email": "comum@escritorio.local", "nome": "Comum", "senha": "senha123"},
+        # Pelo administrador, não pelo `/api/register`: o registro público
+        # fecha depois do primeiro usuário (ver tests/test_registro_publico.py).
+        from src.auth import AuthService
+
+        AuthService(db_path=cenario["referencia"]).criar_usuario(
+            email="comum@escritorio.local", nome="Comum", senha="senha123"
         )
         cliente.post("/api/login", data={"email": "comum@escritorio.local", "senha": "senha123"})
 
