@@ -47,11 +47,18 @@ from src.escrituracoes.base import (
     formatar_valor,
 )
 from src.escrituracoes.efd_contribuicoes import (
-    ATIVIDADES,
+    ATIVIDADES_CONTRIBUICOES,
+    NATUREZAS_PJ,
     REGIMES,
     GeradorEFDContribuicoes,
 )
-from src.escrituracoes.efd_icms import BLOCOS, COD_VER, GeradorEFDICMS
+from src.escrituracoes.efd_icms import (
+    ATIVIDADES_ICMS,
+    BLOCOS,
+    COD_VER,
+    PERFIS,
+    GeradorEFDICMS,
+)
 from src.escrituracoes.espelhos import (
     Conferencia,
     Espelho,
@@ -75,12 +82,15 @@ from src.escrituracoes.reforma import (
 
 __all__ = [
     "ANO_DE_TESTE",
-    "ATIVIDADES",
+    "ATIVIDADES_CONTRIBUICOES",
+    "ATIVIDADES_ICMS",
     "BLOCOS",
     "COD_VER",
     "EFD_CONTRIBUICOES",
     "EFD_ICMS",
     "MODALIDADES_DE_FRETE",
+    "NATUREZAS_PJ",
+    "PERFIS",
     "REGIMES",
     "TIPOS",
     "ApuracaoIBSCBS",

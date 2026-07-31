@@ -206,6 +206,15 @@ class Empresa(Base):
     # outro campo declararia como prestador de serviços toda empresa de
     # comércio que respondeu "1 = outros" pensando na EFD ICMS/IPI.
     ind_ativ_contribuicoes: Mapped[str | None] = mapped_column(String(1))
+
+    # IND_NAT_PJ do 0000 da EFD-Contribuições: a natureza da pessoa jurídica.
+    # Ao contrário dos campos acima, este tem default — `00`, sociedade
+    # empresária em geral, que é a imensa maioria — e por isso o gerador não
+    # recusa quando falta; avisa. Cooperativa (01) e entidade que apura sobre a
+    # folha (02) apuram por outra regra, e o validador aceita o enquadramento
+    # errado porque não tem como saber.
+    ind_nat_pj: Mapped[str | None] = mapped_column(String(2))
+
     escritorio_id: Mapped[int | None] = mapped_column(
         ForeignKey("escritorios.id"), nullable=True, index=True
     )

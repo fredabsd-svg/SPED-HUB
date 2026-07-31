@@ -54,7 +54,10 @@ existisse.
 | `CampoObrigatorioAusente` | Falta cadastro sem o qual o arquivo sairia errado. |
 | `COD_VER` | Versão do leiaute da EFD ICMS/IPI declarada no 0000. |
 | `REGIMES` | Os valores válidos de `cod_inc_trib` (registro 0110). |
-| `ATIVIDADES` | Os valores válidos de `ind_ativ_contribuicoes` (IND_ATIV do 0000). |
+| `ATIVIDADES_CONTRIBUICOES` | Os valores válidos de `ind_ativ_contribuicoes` (IND_ATIV do 0000). |
+| `ATIVIDADES_ICMS` | Os valores válidos de `ind_ativ` — tabela **diferente** da de cima. |
+| `PERFIS` | Os valores válidos de `ind_perfil` (IND_PERFIL do 0000). |
+| `NATUREZAS_PJ` | Os valores válidos de `ind_nat_pj` (IND_NAT_PJ do 0000). |
 | `espelho(resultado, tipo=)` | O arquivo em forma de leitura, antes de gerar; levanta `TipoSemLeiaute`. |
 | `Espelho.texto()` / `.divergencias()` | O espelho legível; as conferências que falharam. |
 | `Conferencia` / `LinhaDocumento` | Uma conferência com `ok` e detalhe; um documento do arquivo. |
@@ -147,6 +150,19 @@ arquivadas.
   descobre.
 - **`modFrete` fora da tabela não é repassado.** O grupo `transp` vem de quem
   emitiu a nota; não há razão para confiar nele mais do que na ausência dele.
+- **Nenhuma tabela de código se chama só `ATIVIDADES`.** `IND_ATIV` existe nas
+  duas escriturações com o mesmo nome e tabelas diferentes — na EFD ICMS/IPI é
+  binário, na EFD-Contribuições são seis valores e o `1` quer dizer prestador
+  de serviços. Um nome sem a obrigação é o convite exato para o erro, e por
+  isso são `ATIVIDADES_ICMS` e `ATIVIDADES_CONTRIBUICOES`.
+- **`ind_nat_pj` tem default; os outros campos de cadastro não.** `00`
+  (sociedade empresária em geral) vale para a imensa maioria, então exigir a
+  resposta de todo mundo travaria quem não tem o que declarar — o gerador usa
+  o default e avisa. Já `ind_perfil`, `ind_ativ`, `ind_ativ_contribuicoes` e
+  `cod_inc_trib` não têm palpite razoável, e por isso fazem o gerador **parar**.
+- **`IND_NAT_PJ` 03, 04 e 05 exigem o registro 0035**, que identifica a SCP e
+  que este gerador não escreve. Declarar uma dessas naturezas produz aviso
+  dizendo isso; as demais não.
 - **No regime cumulativo não há crédito.** A empresa que apura pelo lucro
   presumido paga PIS e Cofins sobre a receita e não desconta nada das compras.
   Um gerador que somasse os créditos das entradas ali produziria contribuição a

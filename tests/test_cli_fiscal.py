@@ -1521,3 +1521,125 @@ class TestTransmitida:
         saida = capsys.readouterr().out
         assert codigo == 1
         assert "--escrituracao" in saida
+
+
+class TestCadastroFiscal:
+    """Os campos que o validador do Fisco não confere.
+
+    Errar aqui produz arquivo aceito e intimação meses depois, e até agora só
+    dava para preenchê-los escrevendo direto no banco.
+    """
+
+    def _cadastro(self, url, *extras, empresa="1"):
+        return main(["fiscal", "cadastro", "--empresa", empresa, "--db", url, *extras])
+
+    def test_sem_campos_e_diagnostico(self, banco, capsys):
+        assert self._cadastro(banco) == 0
+
+        saida = capsys.readouterr().out
+        assert "Cadastro fiscal" in saida
+        assert "ind_ativ_contribuicoes" in saida
+
+    def test_diz_o_que_falta_para_cada_obrigacao(self, banco, capsys):
+        """É a resposta a "por que a geração recusou?", antes de tentar gerar."""
+        with _sessao(banco) as sessao:
+            empresa = sessao.get(Empresa, 1)
+            empresa.ind_perfil = None
+            empresa.ind_ativ = None
+            sessao.commit()
+
+        self._cadastro(banco)
+
+        saida = capsys.readouterr().out
+        linha = next(ln for ln in saida.splitlines() if "EFD ICMS/IPI" in ln)
+        assert "FALTA ind_perfil, ind_ativ" in linha
+
+    def test_empresa_completa_aparece_como_pronta(self, banco, capsys):
+        self._cadastro(banco)
+
+        saida = capsys.readouterr().out
+        assert "EFD ICMS/IPI         pronta para gerar" in saida
+        assert "EFD-Contribuições    pronta para gerar" in saida
+
+    def test_grava_o_campo_informado(self, banco, capsys):
+        assert self._cadastro(banco, "--ind-nat-pj", "01") == 0
+
+        with _sessao(banco) as sessao:
+            assert sessao.get(Empresa, 1).ind_nat_pj == "01"
+
+    def test_mostra_a_descricao_e_nao_so_o_codigo(self, banco, capsys):
+        """Ninguém erra "01"; erra o significado de "01"."""
+        self._cadastro(banco, "--ind-nat-pj", "01")
+
+        saida = capsys.readouterr().out
+        assert "sociedade cooperativa" in saida
+
+    def test_campo_nao_informado_nao_e_apagado(self, banco, capsys):
+        """Informar um campo não pode zerar os outros."""
+        self._cadastro(banco, "--ind-nat-pj", "01")
+
+        with _sessao(banco) as sessao:
+            assert sessao.get(Empresa, 1).ind_perfil == "A"
+
+    def test_valor_fora_da_tabela_e_recusado_com_a_tabela(self, banco, capsys):
+        codigo = self._cadastro(banco, "--cod-inc-trib", "9")
+
+        saida = capsys.readouterr().out
+        assert codigo == 1, "1 é erro; 2 nesta CLI quer dizer que divergiu"
+        assert "não cumulativo" in saida and "cumulativo" in saida
+
+    def test_valor_invalido_nao_grava_nada(self, banco, capsys):
+        """A recusa é antes do commit, senão gravaria metade."""
+        self._cadastro(banco, "--ind-nat-pj", "01", "--cod-inc-trib", "9")
+
+        with _sessao(banco) as sessao:
+            assert sessao.get(Empresa, 1).ind_nat_pj is None
+
+    def test_valor_ja_no_banco_fora_da_tabela_e_sinalizado(self, banco, capsys):
+        """Cadastro escrito à mão antes deste comando pode estar errado."""
+        with _sessao(banco) as sessao:
+            sessao.get(Empresa, 1).ind_nat_pj = "77"
+            sessao.commit()
+
+        self._cadastro(banco)
+
+        assert "VALOR FORA DA TABELA" in capsys.readouterr().out
+
+    def test_as_duas_tabelas_de_ind_ativ_aparecem_separadas(self, banco, capsys):
+        """O mesmo nome de campo com tabelas diferentes já custou um defeito."""
+        self._cadastro(banco)
+
+        saida = capsys.readouterr().out
+        assert "ind_ativ " in saida
+        assert "ind_ativ_contribuicoes" in saida
+
+    def test_empresa_e_obrigatoria(self, banco, capsys):
+        codigo = main(["fiscal", "cadastro", "--db", banco])
+
+        assert codigo == 1
+        assert "--empresa" in capsys.readouterr().out
+
+    def test_nem_o_objeto_em_memoria_recebe_valor_de_lote_recusado(self, banco, capsys):
+        """A conferência é de todos os campos antes de atribuir qualquer um.
+
+        Sem isso a garantia dependeria de a sessão ser descartada ao levantar
+        — verdade hoje na CLI, e não uma propriedade da função.
+        """
+        with _sessao(banco) as sessao:
+            empresa = sessao.get(Empresa, 1)
+            # `ind_perfil` vem ANTES de `cod_inc_trib` na ordem do cadastro:
+            # é o único que uma atribuição prematura alcançaria antes de a
+            # recusa acontecer. Conferir um campo posterior não provaria nada.
+            args = mock.Mock(
+                empresa=1,
+                ind_perfil="B",
+                ind_ativ=None,
+                ind_ativ_contribuicoes=None,
+                cod_inc_trib="9",
+                ind_nat_pj=None,
+            )
+
+            with pytest.raises(ValueError, match="cod_inc_trib"):
+                cli_fiscal._cadastro(sessao, args)
+
+            assert empresa.ind_perfil == "A", "o valor anterior sobrevive"

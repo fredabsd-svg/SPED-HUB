@@ -68,12 +68,23 @@ COD_VER = "018"
 
 BLOCOS = ("0", "C", "E", "9")
 
-_PERFIS = {"A", "B", "C"}
-# IND_ATIV do 0000 desta escrituração: binário, 0=industrial e 1=outros.  Não
-# confundir com o IND_ATIV da EFD-Contribuições, que tem o mesmo nome e outra
-# tabela — lá o "1" quer dizer prestador de serviços.  São dois campos de
-# cadastro separados; ver `src.escrituracoes.efd_contribuicoes.ATIVIDADES`.
-_ATIVIDADES = {"0", "1"}
+# IND_PERFIL do 0000 — o perfil de enquadramento, que decide o nível de
+# detalhe exigido no arquivo.
+PERFIS = {
+    "A": "apresentação de todos os documentos, registro a registro",
+    "B": "apresentação por totais no período",
+    "C": "apresentação por totais mensais (perfil reduzido)",
+}
+
+# IND_ATIV do 0000 desta escrituração: binário.  O nome traz a obrigação de
+# propósito — existe `ATIVIDADES_CONTRIBUICOES` com o MESMO nome de campo e
+# outra tabela, onde "1" quer dizer prestador de serviços.  São dois campos de
+# cadastro separados, e chamar qualquer um dos dois só de `ATIVIDADES` é o
+# convite exato para o erro.
+ATIVIDADES_ICMS = {
+    "0": "industrial ou equiparado a industrial",
+    "1": "outros",
+}
 
 
 class GeradorEFDICMS(GeradorBase):
@@ -119,9 +130,9 @@ class GeradorEFDICMS(GeradorBase):
 
     def _conferir_cadastro(self) -> None:
         faltando = []
-        if self.empresa.ind_perfil not in _PERFIS:
+        if self.empresa.ind_perfil not in PERFIS:
             faltando.append("ind_perfil (A, B ou C)")
-        if self.empresa.ind_ativ not in _ATIVIDADES:
+        if self.empresa.ind_ativ not in ATIVIDADES_ICMS:
             faltando.append("ind_ativ (0=industrial, 1=outros)")
         if not self.empresa.ie:
             faltando.append("ie (inscrição estadual)")

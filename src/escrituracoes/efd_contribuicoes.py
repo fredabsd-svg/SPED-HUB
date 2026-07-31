@@ -64,10 +64,12 @@ REGIMES = {
 # Regimes em que a empresa desconta crédito das aquisições.
 _COM_CREDITO = {"1", "3"}
 
-# IND_ATIV do registro 0000.  Note que a tabela é OUTRA, não a da EFD ICMS/IPI:
-# lá a resposta é binária, aqui são seis valores.  Daí o campo do cadastro ser
-# separado — ver o comentário em `Empresa.ind_ativ_contribuicoes`.
-ATIVIDADES = {
+# IND_ATIV do registro 0000.  O nome traz a obrigação de propósito: existe um
+# `ATIVIDADES_ICMS` com o MESMO nome de campo e outra tabela, e chamar um dos
+# dois só de `ATIVIDADES` é o convite exato para o erro que já custou caro —
+# lá a resposta é binária, aqui são seis valores e o "1" quer dizer prestador
+# de serviços.  Ver o comentário em `Empresa.ind_ativ_contribuicoes`.
+ATIVIDADES_CONTRIBUICOES = {
     "0": "industrial ou equiparado a industrial",
     "1": "prestador de serviços",
     "2": "atividade de comércio",
@@ -76,11 +78,25 @@ ATIVIDADES = {
     "9": "outros",
 }
 
-# IND_NAT_PJ do 0000: 00 = sociedade empresária em geral, 01 = cooperativa,
-# 02 = entidade que apura o PIS/Pasep sobre a folha de salários.  Fica fixo no
-# caso geral, e o resultado avisa — cooperativa e entidade de folha são
-# minoria identificável, e quem tem uma sabe que tem.
+# IND_NAT_PJ do 0000 — a natureza da pessoa jurídica.
+NATUREZAS_PJ = {
+    "00": "sociedade empresária em geral",
+    "01": "sociedade cooperativa",
+    "02": "entidade que apura o PIS/Pasep sobre a folha de salários",
+    "03": "pessoa jurídica em geral, sócia ostensiva de SCP",
+    "04": "sociedade cooperativa sócia ostensiva de SCP",
+    "05": "sociedade em conta de participação (SCP)",
+}
+
+# O valor usado quando a empresa não declarou natureza.  É o caso da imensa
+# maioria, e por isso é default e não recusa — mas sai com aviso, porque
+# cooperativa e entidade de folha apuram por outra regra e o validador aceita
+# o enquadramento errado sem reclamar.
 IND_NAT_PJ_GERAL = "00"
+
+# Naturezas que exigem o registro 0035 (identificação da SCP), que este
+# gerador não escreve.
+_COM_SCP = {"03", "04", "05"}
 
 
 class GeradorEFDContribuicoes(GeradorBase):
@@ -124,6 +140,33 @@ class GeradorEFDContribuicoes(GeradorBase):
         self._avisar_frete_sem_modalidade()
         return self._resultado
 
+    def _natureza_pj(self) -> str:
+        """O IND_NAT_PJ do cadastro, ou o geral com aviso.
+
+        Não recusa quando falta, ao contrário do regime e da atividade: aqui há
+        um default que vale para a imensa maioria, e exigir a resposta de todo
+        mundo por causa da minoria travaria quem não tem o que declarar. Mas o
+        silêncio é dito em voz alta — cooperativa e entidade de folha apuram
+        por outra regra, e o validador aceita o enquadramento errado.
+        """
+        natureza = self.empresa.ind_nat_pj
+        if natureza not in NATUREZAS_PJ:
+            self._resultado.avisos.append(
+                f"a empresa não declarou a natureza jurídica: o 0000 saiu com "
+                f"IND_NAT_PJ={IND_NAT_PJ_GERAL} ({NATUREZAS_PJ[IND_NAT_PJ_GERAL]}). "
+                "Cooperativa e entidade que apura sobre a folha apuram por outra "
+                "regra — informe com `sped-hub fiscal cadastro --ind-nat-pj`"
+            )
+            return IND_NAT_PJ_GERAL
+
+        if natureza in _COM_SCP:
+            self._resultado.avisos.append(
+                f"IND_NAT_PJ={natureza} ({NATUREZAS_PJ[natureza]}) exige o registro "
+                "0035, que identifica a SCP e que este gerador NÃO escreve — "
+                "complemente à mão antes de transmitir"
+            )
+        return natureza
+
     def _conferir_cadastro(self) -> None:
         """Cadastro que o arquivo declara e o validador não tem como conferir."""
         if self.empresa.cod_inc_trib not in REGIMES:
@@ -133,8 +176,8 @@ class GeradorEFDContribuicoes(GeradorBase):
                 "descontar, e errar nele produz arquivo estruturalmente válido com "
                 "contribuição errada"
             )
-        if self.empresa.ind_ativ_contribuicoes not in ATIVIDADES:
-            tabela = ", ".join(f"{c}={d}" for c, d in sorted(ATIVIDADES.items()))
+        if self.empresa.ind_ativ_contribuicoes not in ATIVIDADES_CONTRIBUICOES:
+            tabela = ", ".join(f"{c}={d}" for c, d in sorted(ATIVIDADES_CONTRIBUICOES.items()))
             raise CampoObrigatorioAusente(
                 f"a empresa {self.empresa.nome!r} não tem ind_ativ_contribuicoes "
                 f"({tabela}) — é o enquadramento que o 0000 declara, e o validador "
@@ -197,13 +240,8 @@ class GeradorEFDContribuicoes(GeradorBase):
             e.uf,
             e.cod_mun,
             "",  # SUFRAMA
-            IND_NAT_PJ_GERAL,
+            self._natureza_pj(),
             e.ind_ativ_contribuicoes,
-        )
-        self._resultado.avisos.append(
-            f"o 0000 declara IND_NAT_PJ={IND_NAT_PJ_GERAL} (sociedade empresária em "
-            "geral) — cooperativa (01) e entidade que apura sobre a folha de "
-            "salários (02) precisam ser corrigidas à mão antes de transmitir"
         )
         self._add("0001", "0")
         # O registro que declara o regime — e portanto se há crédito.

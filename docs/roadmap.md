@@ -59,8 +59,8 @@ O que falta:
 | Blocos A, D, F e I da EFD-Contribuições | O gerador cobre 0, C, M e 9. O bloco A depende da importação de NFS-e, acima | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.bloco_f` |
 | Créditos extemporâneos e ajustes da EFD-Contribuições | Os blocos M são soma direta das saídas menos as entradas | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.ajustes_de_apuracao` |
 | Monofásico, substituição e alíquota por unidade no PIS/Cofins | A apuração usa o valor destacado no documento, qualquer que seja o CST | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |
-| Cooperativa e entidade de folha de salários na EFD-Contribuições | O `IND_NAT_PJ` do 0000 sai fixo como `00` (sociedade empresária em geral), com aviso no resultado | `src.db.models:Empresa.ind_nat_pj` |
-| Tela de cadastro fiscal da empresa | `ind_perfil`, `ind_ativ`, `ind_ativ_contribuicoes` e `cod_inc_trib` só podem ser preenchidos direto no banco | `src.routes.empresas:cadastro_fiscal` |
+| Tela de cadastro fiscal da empresa | O cadastro é preenchido por `sped-hub fiscal cadastro`, que valida contra as tabelas oficiais; falta a tela | `src.routes.empresas:cadastro_fiscal` |
+| Registro 0035 (identificação da SCP) na EFD-Contribuições | Exigido quando `IND_NAT_PJ` é 03, 04 ou 05; o gerador avisa e não escreve | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.registro_0035` |
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
 | Monofásico, diferimento, crédito presumido e split payment | Os campos são lidos do documento; a apuração é soma direta e não os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
 | Excel bidirecional de documentos | — | `src.documentos.planilha:reimportar` |

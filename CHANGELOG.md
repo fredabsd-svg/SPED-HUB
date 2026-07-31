@@ -9,6 +9,22 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **O cadastro fiscal da empresa deixou de exigir acesso ao banco.** Os campos
+  que decidem o enquadramento declarado no arquivo — perfil, indicador de
+  atividade (que tem tabela diferente em cada escrituração), regime de
+  apuração e natureza jurídica — só podiam ser preenchidos escrevendo direto
+  no banco de dados, o que na prática deixava a geração de EFD fora do alcance
+  de quem não é programador. `sped-hub fiscal cadastro --empresa 1` mostra o
+  que está preenchido, o que cada obrigação ainda exige e o significado de
+  cada código; com os campos, preenche, recusando valor fora da tabela e
+  mostrando a tabela inteira na recusa.
+- **Cooperativa e entidade que apura sobre a folha podem ser declaradas.** A
+  EFD-Contribuições saía sempre como "sociedade empresária em geral", e o
+  validador aceita porque não tem como saber — o erro só apareceria depois. As
+  seis naturezas jurídicas agora são cadastráveis; quando a empresa não
+  declara, o comportamento é o de antes (o geral, com aviso). As três
+  naturezas de sociedade em conta de participação avisam que o registro que
+  identifica a SCP não é gerado.
 - **Agora dá para dizer qual arquivo foi o entregue.** O sistema guardava todas
   as gerações do mês — a primeira, a de depois da correção, a que se fez só
   para conferir — e não sabia qual delas foi transmitida. `sped-hub fiscal
