@@ -49,6 +49,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 43 | Gerador da EFD ICMS/IPI (blocos 0, C, E, 9) | concluída | `tests/test_gerador_efd_icms.py` | inventário, ativo, serviços, ajustes 5.1.1 e ST seguem fora — ver `docs/modules/escrituracoes.md` |
 | 44 | Gerador da EFD-Contribuições (blocos 0, C, M, 9), com regime e atividade como cadastro obrigatório | concluída | `tests/test_gerador_efd_contribuicoes.py` | no regime cumulativo os créditos das entradas **não** são descontados, e o resultado avisa; o `IND_ATIV` tem tabela própria, diferente da EFD ICMS/IPI; blocos A, D, F e I, créditos extemporâneos e regimes especiais seguem fora |
 | 45 | Terceira camada: a escrituração arquivada — o arquivo que efetivamente saiu | concluída | `tests/test_escrituracao_arquivada.py` | o conteúdo é guardado, não reconstruído, e a linha nunca é alterada; nenhuma tela mostra o histórico ainda |
+| 47 | Apuração de CBS, IBS e Imposto Seletivo | concluída | `tests/test_apuracao_reforma.py` | o IS **não** gera crédito e as duas parcelas do IBS são apuradas em separado; o total de 2026 não é o valor a recolher, e o resultado avisa. Monofásico, diferimento e split payment seguem fora |
 | 46 | `sped-hub fiscal`: a cadeia da Central pela linha de comando | concluída | `tests/test_cli_fiscal.py` | regras, importar, listar, classificar, alterar, desfazer, gerar e conferir. `classificar` e `alterar` **não gravam** sem que se peça; gerar **sempre** arquiva; `conferir` sai com 2 quando o entregue divergiu. Telas web seguem fora |
 
 ## Limites do comportamento atual

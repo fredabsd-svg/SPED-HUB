@@ -41,9 +41,10 @@ Já existem o modelo de dados, o adaptador de NF-e/NFC-e (lendo os dois
 regimes tributários), o importador em lote com deduplicação, a camada
 efetiva (ajustes com reversão por lote), o motor de classificação, as
 alterações em massa com simulação, os geradores da EFD ICMS/IPI e da
-EFD-Contribuições e a escrituração arquivada — a terceira camada, o arquivo
-que efetivamente saiu — ver [`status.md`](status.md). Sobre a Reforma
-Tributária, ver [`reforma-tributaria.md`](reforma-tributaria.md).
+EFD-Contribuições, a escrituração arquivada — a terceira camada, o arquivo
+que efetivamente saiu —, a apuração de CBS, IBS e IS, e o comando
+`sped-hub fiscal` que alcança tudo isso; ver [`status.md`](status.md). Sobre a
+Reforma Tributária, ver [`reforma-tributaria.md`](reforma-tributaria.md).
 
 O que falta:
 
@@ -59,7 +60,8 @@ O que falta:
 | Monofásico, substituição e alíquota por unidade no PIS/Cofins | A apuração usa o valor destacado no documento, qualquer que seja o CST | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |
 | Cooperativa e entidade de folha de salários na EFD-Contribuições | O `IND_NAT_PJ` do 0000 sai fixo como `00` (sociedade empresária em geral), com aviso no resultado | `src.db.models:Empresa.ind_nat_pj` |
 | Tela de cadastro fiscal da empresa | `ind_perfil`, `ind_ativ`, `ind_ativ_contribuicoes` e `cod_inc_trib` só podem ser preenchidos direto no banco | `src.routes.empresas:cadastro_fiscal` |
-| Apuração de CBS, IBS e Imposto Seletivo | Os campos são lidos do documento; nenhuma apuração os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS` |
+| Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
+| Monofásico, diferimento, crédito presumido e split payment | Os campos são lidos do documento; a apuração é soma direta e não os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
 | Espelhos antes da geração | A escrituração arquivada já guarda o que saiu e sabe comparar com uma geração nova; falta o espelho legível **antes** de gerar | `src.escrituracoes.espelhos:Espelho` |
 | Marcar qual escrituração foi transmitida | Todas as gerações ficam guardadas; qual delas foi entregue é informação que o sistema não tem, e por isso nenhuma é marcada | `src.escrituracoes.arquivadas:marcar_transmitida` |
 | Excel bidirecional de documentos | — | `src.documentos.planilha:reimportar` |
