@@ -41,6 +41,7 @@ from src.documentos import (
     confirmar,
     desfazer_lote,
     efetivo,
+    recalcular,
     simular,
 )
 from tests.fixtures_nfe import nfe_xml
@@ -230,10 +231,34 @@ class TestNiveis:
         """
         simulacao = simular(sessao, cenario["selecao"], [Alteracao("base_icms", 900.0)])
 
-        assert all(
-            m.item_id is not None for m in simulacao.mudancas
-        ), "o total do documento foi sobrescrito com o valor de um item"
+        substituidas = [m for m in simulacao.mudancas if m.item_id is None and not m.recalculada]
+        assert not substituidas, "o total do documento foi sobrescrito com o valor de um item"
+
+        # O cabeçalho muda, mas pelo recálculo: recebe a SOMA das parcelas.
+        # A conferência é contra a soma, e não contra "diferente de 900": o
+        # documento B tem um item só, e nele a soma É 900 — os dois valores
+        # coincidem, e um teste que só olhasse a diferença passaria por sorte
+        # num documento e falharia no outro.
+        por_documento = {m.documento_id: m for m in simulacao.mudancas if m.item_id is None}
+        assert por_documento, "o recálculo do cabeçalho não aconteceu"
+
+        for documento in (cenario["a"], cenario["b"]):
+            mudanca = por_documento[documento.id]
+            assert mudanca.recalculada
+            assert mudanca.campo == "base_icms"
+            assert mudanca.valor_novo == pytest.approx(900.0 * len(documento.itens))
+
         assert simulacao.impacto_total == pytest.approx(-300.0), "3 itens × −100"
+
+    def test_o_recalculo_do_cabecalho_nao_conta_no_impacto(self, sessao, cenario):
+        """Somar o total junto com as parcelas contaria o mesmo dinheiro duas
+        vezes, e o impacto sairia dobrado."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("base_icms", 900.0)])
+
+        recalculadas = [m for m in simulacao.mudancas if m.recalculada]
+
+        assert recalculadas, "o cenário precisa exercitar o recálculo"
+        assert all(m.impacto == 0.0 for m in recalculadas)
 
 
 class TestFiltroSobreOEfetivo:
@@ -471,3 +496,173 @@ class TestConfirmar:
         assert visao.item(1)["cfop"] == "2102", "o primeiro lote continua"
         assert visao.item(1)["cst_pis"] == "01"
         assert primeiro != segundo
+
+
+class TestRecalculoDeTotais:
+    """§12.5 — o cabeçalho recomposto a partir das parcelas.
+
+    Sem isto, alterar itens deixa o C100 dizendo um valor e a soma dos C170
+    dizendo outro, que é exatamente o que o validador do Fisco confere.
+    """
+
+    def test_o_total_acompanha_a_parcela(self, sessao, cenario):
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+
+        do_a = next(
+            m for m in simulacao.mudancas if m.documento_id == cenario["a"].id and m.item_id is None
+        )
+
+        assert do_a.campo == "valor_produtos", "o total do documento chama-se outra coisa"
+        assert do_a.valor_anterior == pytest.approx(2000.0)
+        assert do_a.valor_novo == pytest.approx(1000.0), "2 itens × 500"
+
+    def test_parte_de_como_os_itens_vao_ficar(self, sessao, cenario):
+        """O recálculo é de uma simulação: os itens ainda não mudaram.
+
+        Somar o que está no banco daria o total de antes da alteração — e a
+        simulação proporia manter o número que ela mesma está tornando errado.
+        """
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+
+        assert not sessao.execute(select(AjusteFiscal)).scalars().all()
+        do_a = next(
+            m for m in simulacao.mudancas if m.documento_id == cenario["a"].id and m.item_id is None
+        )
+        assert do_a.valor_novo == pytest.approx(1000.0)
+
+    def test_o_vnf_nao_e_recalculado_e_o_aviso_diz_por_que(self, sessao, cenario):
+        """Calcular o vNF com metade dos termos daria um total errado
+        apresentado como certo — pior que um desatualizado, que ao menos é o
+        número que o emitente declarou."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+
+        do_cabecalho = [m for m in simulacao.mudancas if m.item_id is None]
+
+        assert not any(m.campo == "valor_total" for m in do_cabecalho)
+        assert any(
+            "vNF" in a.problema and "NÃO foi recalculado" in a.problema for a in simulacao.avisos
+        )
+
+    def test_o_aviso_sai_uma_vez_so(self, sessao, cenario):
+        """Um por documento faria ninguém ler nenhum num fechamento."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+
+        assert len({m.documento_id for m in simulacao.mudancas}) == 2
+        assert sum(1 for a in simulacao.avisos if "vNF" in a.problema) == 1
+
+    def test_o_aviso_do_vnf_nao_e_impeditivo(self, sessao, cenario):
+        """Ele informa; travar a correção por causa dele seria pior."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+
+        assert not simulacao.impedida
+
+    def test_alteracao_so_de_cabecalho_nao_dispara_recalculo(self, sessao, cenario):
+        """Não há parcela mexida; recompor seria mexer no que ninguém pediu."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("natureza_operacao", "COMPRA")])
+
+        assert simulacao.mudancas
+        assert not any(m.recalculada for m in simulacao.mudancas)
+
+    def test_cabecalho_ja_desatualizado_nao_e_consertado_de_carona(self, sessao, cenario):
+        """A operação faz o que foi pedido, e só.
+
+        Aqui o cabeçalho **já está** fora de sincronia, por um ajuste anterior
+        que não passou por aqui. Uma alteração de natureza da operação não pode
+        arrastar junto a correção dos totais: a simulação mostraria mudanças
+        que ninguém pediu, e quem lê não saberia de onde vieram.
+
+        Sem este cenário a fronteira não se vê — quando os totais já batem, um
+        recálculo indevido não produz mudança nenhuma e passa despercebido.
+        """
+        documento = cenario["a"]
+        aplicar_ajuste(
+            sessao,
+            documento=documento,
+            item=documento.itens[0],
+            campo="valor_total",
+            valor_novo="400.00",
+            origem=ORIGEM_USUARIO,
+        )
+        sessao.flush()
+
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("natureza_operacao", "COMPRA")])
+
+        assert simulacao.mudancas, "a alteração pedida tem de acontecer"
+        assert not any(m.recalculada for m in simulacao.mudancas)
+
+    def test_recalcular_conserta_quando_chamado_de_proposito(self, sessao, cenario):
+        """A porta existe; ela só não é aberta de carona."""
+        documento = cenario["a"]
+        aplicar_ajuste(
+            sessao,
+            documento=documento,
+            item=documento.itens[0],
+            campo="valor_total",
+            valor_novo="400.00",
+            origem=ORIGEM_USUARIO,
+        )
+        sessao.flush()
+
+        recalculadas, avisos = recalcular(sessao, [documento])
+
+        produtos = next(m for m in recalculadas if m.campo == "valor_produtos")
+        assert produtos.valor_anterior == pytest.approx(2000.0)
+        assert produtos.valor_novo == pytest.approx(1400.0), "400 + 1000"
+        assert avisos
+
+    def test_alteracao_sem_reflexo_em_total_nao_recalcula(self, sessao, cenario):
+        """O CFOP é do item e não compõe total nenhum."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("cfop", "6404")])
+
+        assert simulacao.mudancas
+        assert not any(m.recalculada for m in simulacao.mudancas)
+
+    def test_recompor_totais_pode_ser_desligado(self, sessao, cenario):
+        simulacao = simular(
+            sessao,
+            cenario["selecao"],
+            [Alteracao("valor_total", 500.0)],
+            recompor_totais=False,
+        )
+
+        assert simulacao.mudancas
+        assert not any(m.recalculada for m in simulacao.mudancas)
+
+    def test_o_recalculo_e_gravado_junto(self, sessao, cenario):
+        """Aparecer na simulação e não ser gravado seria mentir na tela."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+        confirmar(sessao, simulacao)
+        sessao.flush()
+
+        assert efetivo(sessao, cenario["a"]).valores["valor_produtos"] == pytest.approx(1000.0)
+
+    def test_desfazer_o_lote_devolve_o_total(self, sessao, cenario):
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+        lote = confirmar(sessao, simulacao)
+        sessao.flush()
+
+        desfazer_lote(sessao, lote)
+        sessao.flush()
+
+        assert efetivo(sessao, cenario["a"]).valores["valor_produtos"] == pytest.approx(2000.0)
+
+    def test_total_que_ja_bate_nao_vira_mudanca(self, sessao, cenario):
+        """Rodar duas vezes não pode encher a simulação de ruído."""
+        primeira = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+        confirmar(sessao, primeira)
+        sessao.flush()
+
+        segunda = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+
+        assert segunda.total_mudancas == 0
+
+    def test_impostos_do_cabecalho_tambem_acompanham(self, sessao, cenario):
+        """Não é só o valor da mercadoria: base e imposto também são somas."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_icms", 60.0)])
+
+        do_a = next(
+            m for m in simulacao.mudancas if m.documento_id == cenario["a"].id and m.item_id is None
+        )
+
+        assert do_a.campo == "valor_icms"
+        assert do_a.valor_novo == pytest.approx(120.0), "2 itens × 60"
