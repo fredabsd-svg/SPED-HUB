@@ -22,6 +22,7 @@ do arquivo inteiro ou imposto errado:
   * a soma dos itens contra o total do documento (`C170` × `C100`);
   * o consolidado contra os itens (`C190` × `C170`);
   * a apuração contra os documentos (`E110`, `M200`, `M600`);
+  * os ajustes do `E110` contra a soma dos `E111` que os compõem;
   * as contagens do bloco 9, refeitas linha a linha.
 
 O espelho **não** transmite nem grava escrituração: é prosa, não arquivo SPED.
@@ -289,12 +290,29 @@ class _Leitor:
             ("débitos das saídas", _valor(self.campo(e110, "VL_TOT_DEBITOS"))),
             ("créditos das entradas", _valor(self.campo(e110, "VL_TOT_CREDITOS"))),
         ]
+        # Os ajustes só aparecem quando existem, e cada um com o próprio nome:
+        # é o que explica por que o imposto não é débito menos crédito.  Uma
+        # linha de 0,00 para cada um afogaria a que tem valor.
+        for nome, rotulo in (
+            ("VL_AJ_DEBITOS", "ajustes a débito (E111)"),
+            ("VL_ESTORNOS_CRED", "estornos de crédito (E111)"),
+            ("VL_AJ_CREDITOS", "ajustes a crédito (E111)"),
+            ("VL_ESTORNOS_DEB", "estornos de débito (E111)"),
+        ):
+            if ajuste := _valor(self.campo(e110, nome)):
+                linhas.append((rotulo, ajuste))
         # Só aparece quando existe: uma linha de 0,00 todo mês faria a que tem
         # valor passar despercebida, e é ela que explica por que o imposto a
         # recolher é menor que débito menos crédito.
         if anterior := _valor(self.campo(e110, "VL_SLD_CREDOR_ANT")):
             linhas.append(("saldo credor do período anterior", anterior))
+        if deducao := _valor(self.campo(e110, "VL_TOT_DED")):
+            linhas.append(("deduções (E111)", deducao))
         linhas.append(("ICMS a recolher", _valor(self.campo(e110, "VL_ICMS_RECOLHER"))))
+        if especial := _valor(self.campo(e110, "DEB_ESP")):
+            # Fora do saldo de propósito: é recolhido em guia separada, e
+            # somá-lo ao "a recolher" faria alguém pagar duas vezes.
+            linhas.append(("débito especial, em guia à parte", especial))
         linhas.append(
             ("saldo credor a transportar", _valor(self.campo(e110, "VL_SLD_CREDOR_TRANSPORTAR")))
         )
@@ -333,6 +351,7 @@ class _Leitor:
         if tipo == "efd_icms":
             feitas.append(self._consolidado_contra_os_itens())
             feitas.append(self._apuracao_contra_os_documentos_icms())
+            feitas.append(self._ajustes_contra_o_e110())
         else:
             feitas.extend(self._apuracao_contra_os_documentos_contribuicoes())
         return feitas
@@ -449,6 +468,49 @@ class _Leitor:
                 )
             )
         return feitas
+
+    def _ajustes_contra_o_e110(self) -> Conferencia:
+        """Cada campo de ajuste do E110 × a soma dos E111 que o compõem.
+
+        É o que o validador do Fisco confere, e é onde um gerador erra ao
+        somar um E111 duas vezes ou ao esquecer de somar um. A soma é refeita a
+        partir dos E111 do arquivo — pelo código de cada um, cuja 4ª posição
+        diz o campo de destino —, não perguntada a quem escreveu o E110.
+        """
+        from src.escrituracoes.ajustes_apuracao import APURACAO_ICMS, utilizacao
+
+        e110 = self.primeiro("E110")
+        if e110 is None:
+            return Conferencia(nome="os ajustes batem com os E111", ok=True)
+
+        somado: dict[str, float] = {}
+        for registro in self.todos("E111"):
+            codigo = self.campo(registro, "COD_AJ_APUR")
+            if codigo[2:3] != APURACAO_ICMS:
+                continue
+            _, campo = utilizacao(codigo)
+            if campo:
+                somado[campo] = somado.get(campo, 0.0) + _valor(self.campo(registro, "VL_AJ_APUR"))
+
+        problemas = []
+        for campo in (
+            "VL_AJ_DEBITOS",
+            "VL_ESTORNOS_CRED",
+            "VL_AJ_CREDITOS",
+            "VL_ESTORNOS_DEB",
+            "VL_TOT_DED",
+            "DEB_ESP",
+        ):
+            declarado = _valor(self.campo(e110, campo))
+            dos_ajustes = somado.get(campo, 0.0)
+            if abs(declarado - dos_ajustes) > MEIO_CENTAVO:
+                problemas.append(f"{campo}: E110 {_moeda(declarado)} × E111 {_moeda(dos_ajustes)}")
+
+        return Conferencia(
+            nome="os ajustes do E110 batem com a soma dos E111",
+            ok=not problemas,
+            detalhe="; ".join(problemas),
+        )
 
     def _bloco_9(self) -> Conferencia:
         """As contagens do bloco 9, refeitas linha a linha.
