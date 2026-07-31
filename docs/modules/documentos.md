@@ -50,6 +50,12 @@ As três camadas que a suíte separa:
 | `confirmar(session, simulacao, motivo=, forcar=)` | Grava num lote reversível. |
 | `Simulacao` | Contagens, `impacto_total` em reais, `por_campo()`, `avisos`. |
 | `Aviso` | Problema detectado, com `impeditivo` separando recusa de sinalização. |
+| `exportar(session, selecao)` | Os itens do recorte como `.xlsx`, com a camada **efetiva** aplicada. |
+| `reimportar(session, conteudo)` | Lê a planilha corrigida e devolve o que ela mudaria — **sem gravar**. |
+| `Reimportacao` | `simulacao` (a mesma de `simular`), `divergencias` e `linhas_lidas`. |
+| `Divergencia` | Linha que não virou alteração, com o número da linha e o motivo. |
+| `COLUNAS` / `EDITAVEIS` | As colunas da planilha, e quais delas a volta aceita. |
+| `PlanilhaInvalida` | Arquivo que não abre, ou sem as colunas que ligam a linha ao banco. |
 
 ## O que não faz
 
@@ -58,14 +64,15 @@ daqui. Nenhuma tela mostra a Central: o acesso é pelo `sped-hub fiscal`. O
 motor **não escolhe** entre regras empatadas e `simular` **não grava**. O
 recálculo de totais (§12.5) refaz o que é soma de parcela e **não** refaz o
 `valor_total` (vNF) — ver as armadilhas abaixo. Não lê NFS-e: cada provedor
-municipal precisa do seu adaptador. Não valida códigos fiscais contra as
+municipal precisa do seu adaptador. A planilha **não grava**: reimportar
+devolve uma `Simulacao`, e quem grava é `confirmar`. Não valida códigos fiscais contra as
 tabelas oficiais, e **não calcula tributo nenhum**: os valores de CBS, IBS e IS
 são lidos do XML, nunca presumidos.
 
 ## Depende de / quem depende
 
-Depende de `db.models` e da stdlib (`xml.etree.ElementTree`, `hashlib`) — sem
-dependência nova. Quem depende: `escrituracoes` (lê o efetivo para gerar) e
+Depende de `db.models`, da stdlib (`xml.etree.ElementTree`, `hashlib`) e, só
+na planilha, de `openpyxl` — que o projeto já usava para os relatórios. Quem depende: `escrituracoes` (lê o efetivo para gerar) e
 `cli_fiscal` (a única porta de entrada humana hoje).
 
 ## Decisões não óbvias e armadilhas
@@ -74,6 +81,24 @@ dependência nova. Quem depende: `escrituracoes` (lê o efetivo para gerar) e
   coluna faria as três camadas divergirem no primeiro `UPDATE` escrito fora do
   fluxo. Calculando, desfazer um lote é apagar seus ajustes, e "por que este
   registro saiu assim?" se responde listando os ajustes daquele campo.
+- **A planilha volta sem gravar.** `reimportar` devolve a mesma `Simulacao`
+  que `simular` — quem confirma é `confirmar`, num lote reversível. Uma
+  planilha que gravasse ao ser lida seria a única escrita do sistema sem que
+  ninguém visse o que vai mudar, e é a que mais tem como dar errado: passou
+  por um programa que não é este.
+- **A identidade viaja e é reconferida.** Cada linha leva `documento_id` e
+  `item_id`, e a volta confere a chave da nota contra o banco. Planilha
+  reordenada, com linha apagada ou colada de outro mês é o caso normal, não o
+  excepcional: casar por posição faria a correção de um documento cair em
+  outro, e o erro só apareceria na intimação.
+- **A comparação da volta tolera meio centavo.** O Excel guarda
+  `1000.0000000001` para um `1000,00` digitado; comparar por igualdade exata
+  faria toda linha intocada voltar como alteração, e ninguém leria a lista.
+- **Não há coerção de `float` para `int` na leitura da planilha.** O risco
+  aparente é um CFOP voltar `2102.0` e virar `"2102.0"`; só que openpyxl
+  normaliza inteiro para `int` ao ler, e o ramo de coerção seria código que
+  nenhuma entrada alcança. Código morto com comentário é pior que código
+  nenhum: parece cobrir algo.
 - **`valor_efetivo` recebe os ajustes, não os busca.** Buscar por campo daria
   uma consulta para cada um dos 68 campos de cada item — a geração de um mês
   viraria centenas de milhares de consultas.

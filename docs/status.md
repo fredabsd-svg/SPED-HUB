@@ -68,6 +68,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 55 | Ajustes de apuração do ICMS (E111) e a fórmula completa do E110 | concluída | `tests/test_ajustes_de_apuracao.py`, `tests/test_cli_fiscal.py`, `tests/test_espelho.py` | o sistema conhece a **estrutura** do código da tabela 5.1.1, não a tabela — a 4ª posição decide o campo do E110. O sinal está no código: valor negativo é recusado. Ajustes de documento (C197/D197) seguem fora. O espelho mostra cada ajuste com o próprio nome e confere o E110 contra a soma dos E111 |
 
+| 56 | Excel de mão dupla: exportar os itens, corrigir fora, reimportar | concluída | `tests/test_planilha_de_documentos.py`, `tests/test_cli_fiscal.py` | a planilha sai com a camada **efetiva** aplicada, e a volta **não grava**: devolve a mesma `Simulacao` de `simular`, que `confirmar` grava num lote reversível. Cada linha leva `documento_id` e `item_id`, e a chave da nota é reconferida contra o banco — planilha de outra base é recusada linha a linha, não aplicada no documento errado. Só as colunas editáveis voltam |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

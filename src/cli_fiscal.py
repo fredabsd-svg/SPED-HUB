@@ -45,12 +45,15 @@ from src.documentos import (
     Filtro,
     ImportadorDeDocumentos,
     MotorDeClassificacao,
+    PlanilhaInvalida,
     RegraInvalida,
     Selecao,
     SelecaoVazia,
     confirmar,
     desfazer_lote,
+    exportar,
     novo_lote,
+    reimportar,
     simular,
 )
 from src.documentos.ajustes import desserializar
@@ -863,6 +866,69 @@ def _alterar(sessao: Session, args) -> int:
     return 0
 
 
+def _planilha(sessao: Session, args) -> int:
+    """Exporta os itens do recorte, ou lê de volta a planilha corrigida.
+
+    Com `--saida`, escreve o `.xlsx`. Com `--arquivo`, lê e mostra o que
+    mudaria — e **não grava**, exatamente como `alterar` sem `--confirmar`.
+    Uma planilha que gravasse ao ser lida seria a única escrita do sistema sem
+    ninguém ver o que muda.
+    """
+    if args.arquivo:
+        return _planilha_de_volta(sessao, args)
+
+    empresa = _empresa(sessao, args.empresa) if args.empresa else None
+    selecao = Selecao(
+        escritorio_id=empresa.escritorio_id if empresa else args.escritorio,
+        empresa_id=args.empresa,
+        data_inicio=_data(args.de) if args.de else None,
+        data_fim=_data(args.ate) if args.ate else None,
+        filtros=[_filtro(bruto) for bruto in (args.filtro or [])],
+    )
+    padrao = f"itens_{args.empresa}.xlsx" if args.empresa else "itens.xlsx"
+    destino = pathlib.Path(args.saida or padrao)
+    destino.write_bytes(exportar(sessao, selecao))
+
+    print(f"\nPlanilha gravada em {destino}")
+    print("  corrija as colunas editáveis e volte com:")
+    print(f"    sped-hub fiscal planilha --arquivo {destino}\n")
+    return 0
+
+
+def _planilha_de_volta(sessao: Session, args) -> int:
+    resultado = reimportar(sessao, pathlib.Path(args.arquivo).read_bytes())
+    simulacao = resultado.simulacao
+
+    print(f"\n{resultado.linhas_lidas} linha(s) lida(s) de {args.arquivo}")
+    print(f"  documentos    {simulacao.documentos_afetados}")
+    print(f"  itens         {simulacao.itens_afetados}")
+    print(f"  mudanças      {simulacao.total_mudancas}")
+    print(f"  impacto       {fmt_moeda(simulacao.impacto_total)}")
+
+    for mudanca in simulacao.mudancas[:20]:
+        print(
+            f"    item {mudanca.numero_item}: {mudanca.campo} "
+            f"{mudanca.valor_anterior!r} → {mudanca.valor_novo!r}"
+        )
+    if simulacao.total_mudancas > 20:
+        print(f"    … e mais {simulacao.total_mudancas - 20}")
+
+    if resultado.divergencias:
+        print("\n  LINHAS RECUSADAS:")
+        for divergencia in resultado.divergencias:
+            print(f"    · {divergencia}")
+
+    if not args.confirmar:
+        print("\n  nada foi gravado — use --confirmar para aplicar\n")
+        return 0
+
+    lote = confirmar(sessao, simulacao, motivo=args.motivo or f"planilha {args.arquivo}")
+    sessao.commit()
+    print(f"\n  gravado no lote {lote}")
+    print(f"  desfaça com: sped-hub fiscal desfazer --lote {lote}\n")
+    return 0
+
+
 def _desfazer(sessao: Session, args) -> int:
     """Apagar os ajustes do lote basta — o normalizado nunca foi tocado."""
     quantos = desfazer_lote(sessao, args.lote)
@@ -900,6 +966,7 @@ ACOES = {
     "classificar": _classificar,
     "alterar": _alterar,
     "desfazer": _desfazer,
+    "planilha": _planilha,
     "gerar": _gerar,
     "espelho": _espelho,
     "ajuste": _ajuste,
@@ -934,6 +1001,7 @@ def cmd_fiscal(args) -> int:
         LookupError,
         OSError,
         AjusteInvalido,
+        PlanilhaInvalida,
         RegraInvalida,
         SelecaoVazia,
         TransmissaoInvalida,
@@ -975,6 +1043,7 @@ def registrar(sub) -> None:
     p.add_argument("--diff", action="store_true", help="Mostra as linhas divergentes")
     p.add_argument("--recibo", help="Número do recibo do Fisco (em `transmitida`)")
     p.add_argument("--codigo", help="Código da tabela 5.1.1 do seu estado (em `ajuste`)")
+    p.add_argument("--arquivo", help="Planilha a reimportar (em `planilha`)")
 
     # ── cadastro fiscal ────────────────────────────────────────────────────
     # Sem `choices=`: o argparse recusaria com código 2, que nesta CLI quer
