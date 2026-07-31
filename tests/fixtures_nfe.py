@@ -10,6 +10,8 @@ terceiros, que não podem ser versionados.
 
 from __future__ import annotations
 
+import datetime
+
 CHAVE_PADRAO = "35260712345678000195550010000000011000000017"
 
 
@@ -28,12 +30,22 @@ def nfe_xml(
     itens: int = 1,
     mod_frete: str | None = None,
     valor_frete: float = 0.0,
+    data_emissao: str = "2026-07-30",
+    data_saida: str | None = None,
 ) -> bytes:
     """Monta uma NF-e completa.
 
     `com_reforma=False` produz a nota como era antes de 03/08/2026 — sem os
     grupos IBS/CBS/IS —, que é o que o sistema recebe ao importar histórico.
+
+    `dhEmi` e `dhSaiEnt` são datas **diferentes** por padrão — a saída no dia
+    seguinte à emissão. Iguais, um adaptador que lesse o campo errado passaria
+    despercebido.
     """
+    saida = (
+        data_saida
+        or (datetime.date.fromisoformat(data_emissao) + datetime.timedelta(days=1)).isoformat()
+    )
     corpo_itens = "".join(
         _item(n, com_reforma=com_reforma, is_especifico=is_especifico) for n in range(1, itens + 1)
     )
@@ -65,8 +77,8 @@ def nfe_xml(
         <mod>{modelo}</mod>
         <serie>{serie}</serie>
         <nNF>{numero}</nNF>
-        <dhEmi>2026-07-30T09:15:00-03:00</dhEmi>
-        <dhSaiEnt>2026-07-31T14:00:00-03:00</dhSaiEnt>
+        <dhEmi>{data_emissao}T09:15:00-03:00</dhEmi>
+        <dhSaiEnt>{saida}T14:00:00-03:00</dhSaiEnt>
         <tpNF>{tp_nf}</tpNF>
         <idDest>1</idDest>
         <cMunFG>3550308</cMunFG>

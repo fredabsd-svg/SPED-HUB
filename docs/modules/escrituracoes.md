@@ -60,6 +60,9 @@ existisse.
 | `Conferencia` / `LinhaDocumento` | Uma conferência com `ok` e detalhe; um documento do arquivo. |
 | `arquivar(session, resultado=, empresa=, tipo=, data_inicio=, data_fim=)` | Guarda o arquivo que saiu, com os documentos que entraram nele. |
 | `marcar_transmitida(session, escrituracao, recibo=, quando=, usuario_id=, forcar=)` | Diz qual geração foi entregue; levanta `TransmissaoInvalida`. |
+| `campo_do_registro(escrituracao, tipo, nome)` | Um campo, pelo nome, do arquivo que foi guardado. |
+| `ultima_transmitida_antes(session, empresa_id=, tipo=, data=)` | A última entrega que termina antes da data. |
+| `existe_geracao_antes(session, empresa_id=, tipo=, data=)` | Se há qualquer geração anterior, entregue ou não. |
 | `transmitidas_do_periodo(session, escrituracao)` | As já entregues do mesmo período, empresa e obrigação. |
 | `comparar(escrituracao, resultado)` | O que mudou entre o arquivado e uma geração nova. |
 | `escrituracoes_do_documento(session, documento)` | Em que arquivos esta nota entrou. |
@@ -176,6 +179,20 @@ arquivadas.
   Fisco recebeu o arquivo. É o campo 2 nas duas escriturações — `COD_FIN` na
   EFD ICMS/IPI e `TIPO_ESCRIT` na EFD-Contribuições, mesma posição e mesmos
   valores.
+- **O saldo credor anterior vem da escrituração transmitida do período
+  anterior**, lido do arquivo dela. O leiaute manda: o `VL_SLD_CREDOR_ANT` de
+  um período tem de ser igual ao `VL_SLD_CREDOR_TRANSPORTAR` do anterior.
+  Recalcular o mês passado hoje pode dar outro número, e o Fisco tem o
+  primeiro. Só **transmitida** conta: geração que ninguém entregou não vale
+  nada perante o Fisco, e é a que sobra em maior número.
+- **Só período contíguo carrega saldo.** Se a última entrega termina antes da
+  véspera, há um mês sem entregar no meio e aquele saldo já foi consumido;
+  carregá-lo produziria imposto a MENOS com aparência de conta certa. Nesse
+  caso sai zerado, com aviso que nomeia as duas datas.
+- **Mês sem nota mas com saldo credor ainda emite o E110.** É essa linha que
+  transporta o crédito; sem ela, o mês seguinte procura o
+  `VL_SLD_CREDOR_TRANSPORTAR` do anterior, não acha, e o saldo acumulado
+  evapora sem que ninguém veja.
 - **A comparação conta multiconjunto, não conjunto.** Linha repetida é o normal
   num arquivo SPED: o mesmo produto com os mesmos valores em dois documentos
   gera dois C170 idênticos. Perguntar "esta linha continua no arquivo?"

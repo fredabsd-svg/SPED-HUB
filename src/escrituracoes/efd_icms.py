@@ -34,6 +34,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from src.db.models import AjusteFiscal, DocumentoFiscal, Empresa
 from src.documentos.ajustes import valor_efetivo
+from src.escrituracoes.arquivadas import (
+    campo_do_registro,
+    existe_geracao_antes,
+    ultima_transmitida_antes,
+)
 from src.escrituracoes.base import (
     CampoObrigatorioAusente,
     GeradorBase,
@@ -45,6 +50,17 @@ from src.escrituracoes.base import texto as _texto
 from src.escrituracoes.leiaute import EFD_ICMS
 
 logger = logging.getLogger("sped-hub.escrituracoes")
+
+
+def _numero(bruto: str) -> float:
+    """O inverso de `formatar_valor`: `"1000,00"` → `1000.0`, vazio → `0.0`."""
+    if not bruto:
+        return 0.0
+    try:
+        return float(bruto.replace(".", "").replace(",", "."))
+    except ValueError:
+        return 0.0
+
 
 # Versão do leiaute declarada no 0000.  Fixa e explícita: o leiaute muda por
 # ato normativo, e um gerador que "descobre" a versão sozinho erra calado.
@@ -395,19 +411,92 @@ class GeradorEFDICMS(GeradorBase):
     # ── Bloco E: apuração do ICMS ──────────────────────────────────────────
 
     def _bloco_e(self, visoes: Sequence[dict]) -> None:
-        self._add("E001", "0" if visoes else "1")
-        if visoes:
+        """A apuração sai quando há movimento **ou** saldo credor a carregar.
+
+        Mês sem nota mas com crédito acumulado precisa do E110 assim mesmo: é
+        ele que transporta o saldo para o mês seguinte. Sem essa linha o
+        crédito desaparece da cadeia — e some de vez, porque o mês seguinte
+        procura o `VL_SLD_CREDOR_TRANSPORTAR` do anterior e não acha.
+        """
+        credor_anterior = self._saldo_credor_anterior()
+        tem_apuracao = bool(visoes) or credor_anterior > 0
+
+        self._add("E001", "0" if tem_apuracao else "1")
+        if tem_apuracao:
             self._add("E100", formatar_data(self.data_inicio), formatar_data(self.data_fim))
-            self._apuracao_e110(visoes)
+            self._apuracao_e110(visoes, credor_anterior)
         self._encerrar_bloco("E", "E990")
 
-    def _apuracao_e110(self, visoes: Sequence[dict]) -> None:
-        """Débito das saídas menos crédito das entradas.
+    def _saldo_credor_anterior(self) -> float:
+        """O `VL_SLD_CREDOR_TRANSPORTAR` do período anterior, se houver.
 
-        Soma direta, sem ajuste da tabela 5.1.1 e sem saldo credor anterior —
-        que este gerador não conhece. Empresa que tenha qualquer um dos dois
-        precisa complementar; está dito em `docs/modules/escrituracoes.md` e num aviso
-        do resultado.
+        O leiaute é explícito: o `VL_SLD_CREDOR_ANT` de um período tem de ser
+        igual ao `VL_SLD_CREDOR_TRANSPORTAR` do período anterior. Três decisões
+        cercam isso:
+
+        **Só de escrituração transmitida.** Uma geração que ninguém entregou
+        não estabelece saldo nenhum perante o Fisco — e é justamente a que
+        sobra em maior número, porque gerar para conferir é barato.
+
+        **Só se o período for contíguo.** Se o anterior transmitido termina
+        antes da véspera, há um mês sem entrega no meio, e o saldo daquele
+        arquivo já não é o de agora. Carregá-lo mesmo assim produziria imposto
+        a menos com aparência de conta certa.
+
+        **Lido do arquivo, não recalculado.** O que vale é o número que foi
+        declarado; regerar o mês anterior hoje pode dar outro.
+        """
+        anterior = ultima_transmitida_antes(
+            self.session,
+            empresa_id=self.empresa.id,
+            tipo="efd_icms",
+            data=self.data_inicio,
+        )
+
+        if anterior is None:
+            houve = existe_geracao_antes(
+                self.session,
+                empresa_id=self.empresa.id,
+                tipo="efd_icms",
+                data=self.data_inicio,
+            )
+            self._resultado.avisos.append(
+                "há escrituração anterior gerada, mas NENHUMA marcada como transmitida: "
+                "o saldo credor anterior saiu ZERADO. Se o mês passado foi entregue, "
+                "marque com `sped-hub fiscal transmitida` e gere de novo"
+                if houve
+                else "não há escrituração anterior transmitida no sistema: o saldo credor "
+                "anterior saiu ZERADO. Se a empresa vinha de saldo credor, o imposto a "
+                "recolher está MAIOR do que o devido — informe o saldo à mão"
+            )
+            return 0.0
+
+        vespera = self.data_inicio - datetime.timedelta(days=1)
+        if anterior.data_fim != vespera:
+            self._resultado.avisos.append(
+                f"a última escrituração transmitida (#{anterior.id}) termina em "
+                f"{anterior.data_fim} e este período começa em {self.data_inicio}: há "
+                "intervalo sem entrega no meio, e o saldo credor daquele arquivo não "
+                "vale para este. Saiu ZERADO"
+            )
+            return 0.0
+
+        saldo = _numero(campo_do_registro(anterior, "E110", "VL_SLD_CREDOR_TRANSPORTAR"))
+        if saldo:
+            self._resultado.avisos.append(
+                f"saldo credor anterior de {saldo:.2f} veio da escrituração #{anterior.id}, "
+                f"transmitida em {anterior.transmitida_em:%d/%m/%Y} — é o "
+                "VL_SLD_CREDOR_TRANSPORTAR daquele arquivo, não um recálculo"
+            )
+        return saldo
+
+    def _apuracao_e110(self, visoes: Sequence[dict], credor_anterior: float) -> None:
+        """Débito das saídas menos crédito das entradas, menos o saldo anterior.
+
+        Soma direta, sem ajuste da tabela 5.1.1 e sem deduções — que este
+        gerador não conhece. O saldo credor anterior, esse sim, vem da
+        escrituração transmitida do período anterior; ver
+        `_saldo_credor_anterior`.
         """
         debitos = credito = 0.0
         for visao in visoes:
@@ -417,7 +506,7 @@ class GeradorEFDICMS(GeradorBase):
             else:
                 credito += valor
 
-        saldo = debitos - credito
+        saldo = debitos - credito - credor_anterior
         self._add(
             "E110",
             formatar_valor(debitos),
@@ -428,7 +517,7 @@ class GeradorEFDICMS(GeradorBase):
             "",  # VL_AJ_CREDITOS
             "",  # VL_TOT_AJ_CREDITOS
             "",  # VL_ESTORNOS_DEB
-            "",  # VL_SLD_CREDOR_ANT
+            formatar_valor(credor_anterior),
             formatar_valor(saldo) if saldo > 0 else "",
             "",  # VL_TOT_DED
             formatar_valor(saldo) if saldo > 0 else "",
@@ -437,5 +526,5 @@ class GeradorEFDICMS(GeradorBase):
         )
         self._resultado.avisos.append(
             "apuração do E110 é a soma direta dos documentos: não inclui ajustes da "
-            "tabela 5.1.1, saldo credor anterior nem deduções — confira antes de transmitir"
+            "tabela 5.1.1 nem deduções — confira antes de transmitir"
         )

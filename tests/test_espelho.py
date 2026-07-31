@@ -351,3 +351,25 @@ def test_o_texto_traz_as_secoes_e_marca_o_que_nao_bate(sessao, empresa):
     assert "CONFERÊNCIAS" in texto
     assert "NÃO  a soma dos itens" in texto
     assert "LEIA ANTES DE TRANSMITIR" in texto
+
+
+# ── O saldo credor anterior no espelho ─────────────────────────────────────
+
+
+def test_o_saldo_credor_anterior_aparece_quando_existe(sessao, empresa):
+    """É ele que explica por que o imposto é menor que débito menos crédito."""
+    uma_entrada_e_uma_saida(sessao, empresa)
+    resultado = gerar_icms(sessao, empresa)
+    adulterar(resultado, "E110", "VL_SLD_CREDOR_ANT", "500,00")
+
+    lido = dict(espelho(resultado, tipo="efd_icms").apuracao)
+
+    assert lido["saldo credor do período anterior"] == 500.0
+
+
+def test_saldo_credor_anterior_zerado_nao_vira_linha(sessao, empresa):
+    """Uma linha de 0,00 todo mês faria a que tem valor passar despercebida."""
+    uma_entrada_e_uma_saida(sessao, empresa)
+    lido = dict(espelho(gerar_icms(sessao, empresa), tipo="efd_icms").apuracao)
+
+    assert "saldo credor do período anterior" not in lido
