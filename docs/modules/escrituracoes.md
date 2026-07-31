@@ -54,6 +54,8 @@ existisse.
 | `CampoObrigatorioAusente` | Falta cadastro sem o qual o arquivo sairia errado. |
 | `COD_VER` | Versão do leiaute da EFD ICMS/IPI declarada no 0000. |
 | `REGIMES` | Os valores válidos de `cod_inc_trib` (registro 0110). |
+| `CST_ENTRADA_COM_CREDITO` / `CST_ENTRADA_SEM_CREDITO` | Quais aquisições geram crédito (tabela 4.3.4). |
+| `CST_SAIDA_TRIBUTADA` / `CST_SAIDA_SEM_DEBITO` | Quais saídas geram contribuição (tabela 4.3.3). |
 | `ATIVIDADES_CONTRIBUICOES` | Os valores válidos de `ind_ativ_contribuicoes` (IND_ATIV do 0000). |
 | `ATIVIDADES_ICMS` | Os valores válidos de `ind_ativ` — tabela **diferente** da de cima. |
 | `PERFIS` | Os valores válidos de `ind_perfil` (IND_PERFIL do 0000). |
@@ -163,6 +165,25 @@ arquivadas.
 - **`IND_NAT_PJ` 03, 04 e 05 exigem o registro 0035**, que identifica a SCP e
   que este gerador não escreve. Declarar uma dessas naturezas produz aviso
   dizendo isso; as demais não.
+- **O CST decide se o valor destacado entra na apuração.** O CST não é
+  decoração: ele diz o tratamento tributário, e o valor destacado sozinho não.
+  Entrada com CST 70 a 75 não dá direito a crédito, e somá-la produz
+  contribuição a MENOR — que volta como cobrança com multa, num arquivo que o
+  validador aceita. Saída com CST 04 (monofásica, já paga no início da cadeia),
+  06, 07, 08 ou 09 não gera débito.
+- **Numa entrada, o CST que veio no XML é o do fornecedor.** O documento é
+  dele. Quem escritura tem de classificar a aquisição com o CST do adquirente,
+  e é para isso que existe o motor de classificação. O gerador não decide por
+  ninguém: item de entrada ainda com CST de saída **soma**, como sempre fez, e
+  o aviso aponta `sped-hub fiscal classificar`. É o estado de toda nota
+  recém-importada, e por isso tem aviso próprio, separado do de CST indefinido.
+- **CST que não decide nada (`49`, `98`, `99`, vazio) soma e avisa.** "Outras
+  operações" não diz o tratamento; quem sabe é quem escriturou, e travar o mês
+  por causa disso seria pior que somar e dizer.
+- **Valor descartado é dito com o total.** Documento que traz contribuição
+  destacada num item cujo CST diz que não há está inconsistente, e quem fecha o
+  mês precisa saber antes de transmitir. Descarte de valor zero não vira aviso:
+  repeti-lo em todo item monofásico afogaria os que importam.
 - **No regime cumulativo não há crédito.** A empresa que apura pelo lucro
   presumido paga PIS e Cofins sobre a receita e não desconta nada das compras.
   Um gerador que somasse os créditos das entradas ali produziria contribuição a

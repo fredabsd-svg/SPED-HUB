@@ -98,6 +98,43 @@ IND_NAT_PJ_GERAL = "00"
 # gerador não escreve.
 _COM_SCP = {"03", "04", "05"}
 
+# CST de PIS/Cofins — tabelas 4.3.3 e 4.3.4 do Guia Prático.  **O CST decide se
+# o valor destacado entra na apuração**, e ignorá-lo é a diferença entre
+# recolher o certo e recolher a menos com multa.
+#
+# Saídas que geram contribuição.  Ficam de fora, de propósito: 04 (monofásica,
+# revenda a alíquota zero — a contribuição já foi paga no início da cadeia),
+# 06 (alíquota zero), 07 (isenta), 08 (sem incidência) e 09 (suspensão).
+CST_SAIDA_TRIBUTADA = {"01", "02", "03", "05"}
+CST_SAIDA_SEM_DEBITO = {"04", "06", "07", "08", "09"}
+
+# Entradas que dão direito a crédito: 50 a 56 (crédito) e 60 a 67 (presumido).
+CST_ENTRADA_COM_CREDITO = {
+    "50",
+    "51",
+    "52",
+    "53",
+    "54",
+    "55",
+    "56",
+    "60",
+    "61",
+    "62",
+    "63",
+    "64",
+    "65",
+    "66",
+    "67",
+}
+# Entradas que NÃO dão: aquisição sem direito, isenta, suspensa, alíquota zero,
+# sem incidência, por substituição.  Somar crédito aqui é contribuição a menor.
+CST_ENTRADA_SEM_CREDITO = {"70", "71", "72", "73", "74", "75"}
+
+# "Outras operações", nos dois sentidos: o código não diz o tratamento, e o
+# sistema não tem como decidir.  Entram na soma — é o comportamento de sempre —
+# mas o resultado avisa, porque quem sabe é quem escriturou.
+CST_INDEFINIDO = {"49", "98", "99"}
+
 
 class GeradorEFDContribuicoes(GeradorBase):
     """Monta a EFD-Contribuições de um período."""
@@ -409,25 +446,92 @@ class GeradorEFDContribuicoes(GeradorBase):
             self._apuracao(visoes)
         self._encerrar_bloco("M", "M990")
 
+    def _entra_na_apuracao(self, cst: str, saida: bool) -> bool:
+        """Se o valor destacado neste item conta — decidido pelo CST.
+
+        O CST não é decoração: ele diz o tratamento tributário da operação, e
+        o valor destacado sozinho não. Uma revenda monofásica traz zero, mas
+        uma aquisição sem direito a crédito pode vir com PIS destacado pelo
+        fornecedor — somá-lo produz contribuição a MENOR, que volta como
+        cobrança com multa, num arquivo estruturalmente válido.
+
+        **Numa entrada, o CST que veio no XML é o do fornecedor**, porque o
+        documento é dele. Quem escritura tem de classificar a aquisição com o
+        CST do adquirente — 50 a 56 dão crédito, 70 a 75 não —, e é para isso
+        que existe o motor de classificação. Item de entrada ainda com CST de
+        saída não foi classificado, e o gerador não decide por ele: soma, como
+        sempre fez, e diz em voz alta o que aconteceu.
+        """
+        codigo = (cst or "").strip()
+        do_sentido, do_outro = (
+            (
+                CST_SAIDA_TRIBUTADA | CST_SAIDA_SEM_DEBITO,
+                CST_ENTRADA_COM_CREDITO | CST_ENTRADA_SEM_CREDITO,
+            )
+            if saida
+            else (
+                CST_ENTRADA_COM_CREDITO | CST_ENTRADA_SEM_CREDITO,
+                CST_SAIDA_TRIBUTADA | CST_SAIDA_SEM_DEBITO,
+            )
+        )
+
+        if codigo in do_sentido:
+            return codigo not in (CST_SAIDA_SEM_DEBITO | CST_ENTRADA_SEM_CREDITO)
+        if codigo in do_outro:
+            self._cst_do_outro_sentido.add(codigo)
+            return True
+
+        self._cst_indefinido.add(codigo or "(vazio)")
+        return True
+
+    def _somar_item(self, item: dict, campo: str, cst: str, saida: bool) -> float:
+        """O valor do item que entra na apuração, ou zero.
+
+        Descartar valor destacado é decisão forte, e por isso o valor
+        descartado é registrado: documento que traz contribuição num item cujo
+        CST diz que não há é documento inconsistente, e quem fecha o mês
+        precisa saber disso antes de transmitir.
+        """
+        valor = item[campo] or 0.0
+        if self._entra_na_apuracao(cst, saida):
+            return valor
+        if valor:
+            self._descartados.append((cst, valor))
+        return 0.0
+
     def _apuracao(self, visoes: Sequence[dict]) -> None:
         """Contribuição das saídas menos crédito das entradas — quando há crédito.
 
-        A distinção do regime é o ponto: no cumulativo a empresa paga sobre a
-        receita e não desconta nada das compras. Somar crédito ali produziria
-        contribuição a menor num arquivo estruturalmente válido.
+        Duas distinções decidem o número, e as duas produzem arquivo
+        estruturalmente válido quando erradas:
+
+        **O regime.** No cumulativo a empresa paga sobre a receita e não
+        desconta nada das compras; somar crédito ali produz contribuição a
+        menor.
+
+        **O CST de cada item.** É ele que diz se a operação gera débito ou
+        crédito — ver `_entra_na_apuracao`.
         """
         debito_pis = debito_cofins = 0.0
         credito_pis = credito_cofins = 0.0
+        self._cst_indefinido: set[str] = set()
+        self._cst_do_outro_sentido: set[str] = set()
+        self._descartados: list[tuple[str, float]] = []
 
         for visao in visoes:
-            pis = sum(i["valor_pis"] or 0.0 for i in visao["itens"])
-            cofins = sum(i["valor_cofins"] or 0.0 for i in visao["itens"])
-            if visao["cabecalho"]["sentido"] == "saida":
+            saida = visao["cabecalho"]["sentido"] == "saida"
+            pis = sum(self._somar_item(i, "valor_pis", i["cst_pis"], saida) for i in visao["itens"])
+            cofins = sum(
+                self._somar_item(i, "valor_cofins", i["cst_cofins"], saida) for i in visao["itens"]
+            )
+            if saida:
                 debito_pis += pis
                 debito_cofins += cofins
             else:
                 credito_pis += pis
                 credito_cofins += cofins
+
+        self._avisar_sobre_os_cst()
 
         if not self._tem_credito:
             credito_pis = credito_cofins = 0.0
@@ -443,6 +547,38 @@ class GeradorEFDContribuicoes(GeradorBase):
             "extemporâneos, ajustes, retenções nem regimes especiais — confira antes "
             "de transmitir"
         )
+
+    def _avisar_sobre_os_cst(self) -> None:
+        """Um aviso por motivo, não um por item.
+
+        Num fechamento com centenas de notas, um aviso por item afogaria todos
+        os outros — e é justamente aí que os outros importam.
+        """
+        if self._cst_do_outro_sentido:
+            codigos = ", ".join(sorted(self._cst_do_outro_sentido))
+            self._resultado.avisos.append(
+                f"há itens cujo CST de PIS/Cofins ({codigos}) é do OUTRO sentido da "
+                "operação — numa entrada, o CST que vem no XML é o do fornecedor, e "
+                "quem escritura precisa classificar a aquisição com o CST do "
+                "adquirente (50 a 56 dão crédito, 70 a 75 não). Os valores ENTRARAM "
+                "na apuração; use `sped-hub fiscal classificar` antes de transmitir"
+            )
+        if self._cst_indefinido:
+            codigos = ", ".join(sorted(self._cst_indefinido))
+            self._resultado.avisos.append(
+                f"há itens com CST de PIS/Cofins que não define o tratamento ({codigos}): "
+                "os valores destacados ENTRARAM na apuração, porque é o que se fazia "
+                "antes de haver a conferência. Confira se é isso mesmo"
+            )
+        if self._descartados:
+            total = sum(valor for _, valor in self._descartados)
+            codigos = ", ".join(sorted({cst for cst, _ in self._descartados}))
+            self._resultado.avisos.append(
+                f"{formatar_valor(total)} de PIS/Cofins destacado foi DESCARTADO da "
+                f"apuração: são itens com CST {codigos}, que não gera débito nem "
+                "crédito. Documento com valor destacado nesses CST está inconsistente "
+                "— confira a origem antes de transmitir"
+            )
 
     def _consolidacao(self, tipo: str, debito: float, credito: float) -> None:
         """M200 (PIS) e M600 (Cofins) têm o mesmo desenho de campos."""
