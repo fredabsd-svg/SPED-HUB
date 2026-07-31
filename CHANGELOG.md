@@ -9,6 +9,16 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **Benefício fiscal, crédito outorgado e estorno agora entram na apuração do
+  ICMS.** A apuração era a soma dos documentos e mais nada — e empresa com
+  incentivo tem valores que não estão em nota nenhuma, o que fazia o imposto
+  sair a menos quando faltava um crédito e a mais quando faltava um estorno.
+  `sped-hub fiscal ajuste --empresa 1 --de … --ate … --codigo TO020007 --valor
+  1.234,56` cadastra, e o comando diz para onde o valor vai antes de gravar. O
+  código é o da tabela do **seu estado**: o sistema confere a estrutura — a UF,
+  o tipo de apuração e o tipo de ajuste — e não a lista de códigos, que muda
+  por ato normativo e é diferente em cada estado. Valor negativo é recusado:
+  o sinal está no código, não no número.
 - **O cadastro fiscal da empresa deixou de exigir acesso ao banco.** Os campos
   que decidem o enquadramento declarado no arquivo — perfil, indicador de
   atividade (que tem tabela diferente em cada escrituração), regime de

@@ -6,7 +6,7 @@ O subcomando `sped-hub fiscal` — a cadeia da Central de Documentos pela linha
 de comando, na ordem em que ela acontece:
 
 ```
-cadastro → regras → importar → documentos → classificar → alterar → apurar → espelho → gerar → transmitida → conferir
+cadastro → regras → importar → documentos → classificar → alterar → ajuste → apurar → espelho → gerar → transmitida → conferir
                                              ↘ desfazer ↙
 ```
 
@@ -43,6 +43,7 @@ Ações:
 | `classificar --empresa [--de --ate --aplicar]` | O que as regras propõem. Sem `--aplicar`, **não grava**. |
 | `alterar --empresa --campo --valor [--filtro --apenas-vazios --confirmar --forcar --motivo]` | Alteração em massa. Sem `--confirmar`, **só simula**. |
 | `desfazer --lote` | Reverte um lote inteiro de ajustes. |
+| `ajuste --empresa --de --ate [--codigo --valor --descricao]` | Ajustes de apuração (E111). Sem `--codigo`, lista. |
 | `apurar --empresa --de --ate` | CBS, IBS e IS do período. Só leitura: **não grava nada**. |
 | `espelho --empresa --de --ate [--tipo --saida]` | O arquivo em forma de leitura, **antes** de gerar. Não arquiva. |
 | `gerar --empresa --de --ate [--tipo --saida]` | Gera a EFD **e arquiva** a escrituração. |

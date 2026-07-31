@@ -14,12 +14,14 @@ empresa, e o gerador recusa gerar sem ele em vez de inventar um padrão.
 
   * inventário (bloco H), ativo imobilizado (bloco G) e o bloco 1 inteiro;
   * documentos de serviço, energia, comunicação e transporte (C500, D100…);
-  * ajustes de apuração por código da tabela 5.1.1 (E111 e vizinhos);
+  * ajustes que nascem de um documento (`C197`/`D197`), que compõem os campos
+    `VL_TOT_AJ_*` do E110 — os do período, esses o E111 cobre;
   * substituição tributária apurada (E200 e seguintes).
 
-A apuração do bloco E é a soma direta dos débitos e créditos dos documentos
-escriturados. Empresa com ajuste, benefício ou saldo credor anterior precisa
-conferir e complementar — está registrado em `docs/modules/escrituracoes.md`.
+A apuração do bloco E soma os documentos, carrega o saldo credor da
+escrituração transmitida do período anterior e aplica os ajustes cadastrados
+para o período (E111). O que segue fora está listado acima e em
+`docs/modules/escrituracoes.md`.
 """
 
 from __future__ import annotations
@@ -34,6 +36,11 @@ from sqlalchemy.orm import Session, selectinload
 
 from src.db.models import AjusteFiscal, DocumentoFiscal, Empresa
 from src.documentos.ajustes import valor_efetivo
+from src.escrituracoes.ajustes_apuracao import (
+    ajustes_do_periodo,
+    totais_por_campo,
+    utilizacao,
+)
 from src.escrituracoes.arquivadas import (
     campo_do_registro,
     existe_geracao_antes,
@@ -430,12 +437,25 @@ class GeradorEFDICMS(GeradorBase):
         procura o `VL_SLD_CREDOR_TRANSPORTAR` do anterior e não acha.
         """
         credor_anterior = self._saldo_credor_anterior()
-        tem_apuracao = bool(visoes) or credor_anterior > 0
+        ajustes = ajustes_do_periodo(
+            self.session,
+            empresa_id=self.empresa.id,
+            data_inicio=self.data_inicio,
+            data_fim=self.data_fim,
+        )
+        tem_apuracao = bool(visoes) or credor_anterior > 0 or bool(ajustes)
 
         self._add("E001", "0" if tem_apuracao else "1")
         if tem_apuracao:
             self._add("E100", formatar_data(self.data_inicio), formatar_data(self.data_fim))
-            self._apuracao_e110(visoes, credor_anterior)
+            self._apuracao_e110(visoes, credor_anterior, ajustes)
+            for ajuste in ajustes:
+                self._add(
+                    "E111",
+                    ajuste.cod_aj,
+                    _texto(ajuste.descricao),
+                    formatar_valor(ajuste.valor),
+                )
         self._encerrar_bloco("E", "E990")
 
     def _saldo_credor_anterior(self) -> float:
@@ -501,13 +521,16 @@ class GeradorEFDICMS(GeradorBase):
             )
         return saldo
 
-    def _apuracao_e110(self, visoes: Sequence[dict], credor_anterior: float) -> None:
-        """Débito das saídas menos crédito das entradas, menos o saldo anterior.
+    def _apuracao_e110(self, visoes: Sequence[dict], credor_anterior: float, ajustes: list) -> None:
+        """A fórmula do E110, inteira.
 
-        Soma direta, sem ajuste da tabela 5.1.1 e sem deduções — que este
-        gerador não conhece. O saldo credor anterior, esse sim, vem da
-        escrituração transmitida do período anterior; ver
-        `_saldo_credor_anterior`.
+        `VL_SLD_APURADO` = débitos + ajustes a débito + estornos de crédito
+        − créditos − ajustes a crédito − estornos de débito − saldo credor
+        anterior; e `VL_ICMS_RECOLHER` = saldo apurado − deduções.
+
+        Os campos `VL_TOT_AJ_*` continuam vazios de propósito: eles são os
+        ajustes que nascem de um documento (`C197`/`D197`), não do período, e
+        este gerador não os escreve. Ver o roadmap.
         """
         debitos = credito = 0.0
         for visao in visoes:
@@ -517,25 +540,65 @@ class GeradorEFDICMS(GeradorBase):
             else:
                 credito += valor
 
-        saldo = debitos - credito - credor_anterior
+        do_ajuste = totais_por_campo(ajustes)
+
+        def ajustado(campo: str) -> float:
+            return do_ajuste.get(campo, 0.0)
+
+        saldo = (
+            debitos
+            + ajustado("VL_AJ_DEBITOS")
+            + ajustado("VL_ESTORNOS_CRED")
+            - credito
+            - ajustado("VL_AJ_CREDITOS")
+            - ajustado("VL_ESTORNOS_DEB")
+            - credor_anterior
+        )
+        # As deduções entram DEPOIS do saldo apurado, não dentro dele: é a
+        # diferença entre o que se apurou e o que se recolhe.
+        a_recolher = saldo - ajustado("VL_TOT_DED")
+
         self._add(
             "E110",
             formatar_valor(debitos),
-            "",  # VL_AJ_DEBITOS
-            "",  # VL_TOT_AJ_DEBITOS
-            "",  # VL_ESTORNOS_CRED
+            formatar_valor(ajustado("VL_AJ_DEBITOS")),
+            "",  # VL_TOT_AJ_DEBITOS: ajuste de documento, não de período
+            formatar_valor(ajustado("VL_ESTORNOS_CRED")),
             formatar_valor(credito),
-            "",  # VL_AJ_CREDITOS
-            "",  # VL_TOT_AJ_CREDITOS
-            "",  # VL_ESTORNOS_DEB
+            formatar_valor(ajustado("VL_AJ_CREDITOS")),
+            "",  # VL_TOT_AJ_CREDITOS: idem
+            formatar_valor(ajustado("VL_ESTORNOS_DEB")),
             formatar_valor(credor_anterior),
             formatar_valor(saldo) if saldo > 0 else "",
-            "",  # VL_TOT_DED
-            formatar_valor(saldo) if saldo > 0 else "",
+            formatar_valor(ajustado("VL_TOT_DED")),
+            formatar_valor(a_recolher) if a_recolher > 0 else "",
             formatar_valor(-saldo) if saldo < 0 else "",
-            "",  # DEB_ESP
+            formatar_valor(ajustado("DEB_ESP")),
         )
-        self._resultado.avisos.append(
-            "apuração do E110 é a soma direta dos documentos: não inclui ajustes da "
-            "tabela 5.1.1 nem deduções — confira antes de transmitir"
-        )
+        self._avisar_sobre_os_ajustes(ajustes)
+
+    def _avisar_sobre_os_ajustes(self, ajustes: list) -> None:
+        """O que entrou e o que não entrou, com o número.
+
+        Sem ajuste nenhum, o aviso diz que a apuração é a soma direta — que é
+        a informação certa para quem tem benefício fiscal e ainda não o
+        cadastrou. Com ajustes, dizer isso seria mentira.
+        """
+        if not ajustes:
+            self._resultado.avisos.append(
+                "não há ajustes de apuração cadastrados no período: o E110 é a soma "
+                "direta dos documentos. Empresa com benefício, crédito outorgado, "
+                "estorno ou dedução precisa cadastrá-los com `sped-hub fiscal ajuste`"
+            )
+            return
+
+        fora = [a for a in ajustes if utilizacao(a.cod_aj)[1] is None or a.cod_aj[2:3] != "0"]
+        if fora:
+            codigos = ", ".join(sorted({a.cod_aj for a in fora}))
+            total = sum(a.valor for a in fora)
+            self._resultado.avisos.append(
+                f"{len(fora)} ajuste(s) saíram no E111 mas NÃO entraram na apuração do "
+                f"E110 ({codigos}, somando {formatar_valor(total)}): são de controle "
+                "extra-apuração ou de outra apuração (ST, DIFAL, FCP), que tem registro "
+                "próprio e este gerador não escreve"
+            )

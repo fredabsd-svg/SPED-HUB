@@ -190,6 +190,8 @@ EFD_ICMS: dict[str, tuple[str, ...]] = {
         "VL_SLD_CREDOR_TRANSPORTAR",
         "DEB_ESP",
     ),
+    # Filho do E110: um por ajuste do período.
+    "E111": ("COD_AJ_APUR", "DESCR_COMPL_AJ", "VL_AJ_APUR"),
     "E990": ("QTD_LIN_E",),
 }
 

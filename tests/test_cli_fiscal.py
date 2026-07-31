@@ -27,6 +27,7 @@ from sqlalchemy import select
 from src import cli_fiscal
 from src.cli import main
 from src.db.models import (
+    AjusteApuracao,
     AjusteFiscal,
     DocumentoFiscal,
     Empresa,
@@ -1696,3 +1697,101 @@ class TestApurarMostraOQueFicaDeFora:
         _apurar(importado)
 
         assert "CST de IBS/CBS fora da tributação integral: 620" in capsys.readouterr().out
+
+
+class TestAjusteDeApuracao:
+    """O E111 — valores que não estão em nota nenhuma."""
+
+    def _ajuste(self, url, *extras, empresa="1"):
+        return main(
+            [
+                "fiscal",
+                "ajuste",
+                "--empresa",
+                empresa,
+                "--de",
+                "2026-07-01",
+                "--ate",
+                "2026-07-31",
+                "--db",
+                url,
+                *extras,
+            ]
+        )
+
+    def test_sem_codigo_lista_e_diz_quando_nao_ha(self, banco, capsys):
+        assert self._ajuste(banco) == 0
+
+        assert "Nenhum ajuste de apuração" in capsys.readouterr().out
+
+    def test_cadastra_e_diz_para_onde_o_valor_vai(self, banco, capsys):
+        codigo = self._ajuste(banco, "--codigo", "TO020007", "--valor", "1.234,56")
+
+        saida = capsys.readouterr().out
+        assert codigo == 0
+        assert "outros créditos" in saida
+        assert "VL_AJ_CREDITOS" in saida
+        assert "1.234,56" in saida
+
+    def test_valor_aceita_o_formato_brasileiro(self, banco, capsys):
+        self._ajuste(banco, "--codigo", "TO020007", "--valor", "1.234,56")
+
+        with _sessao(banco) as sessao:
+            ajuste = sessao.execute(select(AjusteApuracao)).scalars().one()
+
+        assert ajuste.valor == 1234.56
+
+    def test_valor_aceita_o_formato_com_ponto(self, banco, capsys):
+        """Quem copia de planilha em inglês digita `1234.56`."""
+        self._ajuste(banco, "--codigo", "TO020007", "--valor", "1234.56")
+
+        with _sessao(banco) as sessao:
+            assert sessao.execute(select(AjusteApuracao)).scalars().one().valor == 1234.56
+
+    def test_codigo_de_outro_estado_e_um(self, banco, capsys):
+        codigo = self._ajuste(banco, "--codigo", "SP020007", "--valor", "10")
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert "é do estado SP" in saida
+        assert "Traceback" not in saida
+
+    def test_valor_negativo_e_um_com_a_razao(self, banco, capsys):
+        codigo = self._ajuste(banco, "--codigo", "TO020007", "--valor", "-10")
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert "sinal está no código" in saida
+
+    def test_codigo_sem_valor_e_recusado(self, banco, capsys):
+        """Cadastrar ajuste sem valor gravaria zero sem que ninguém pedisse."""
+        codigo = self._ajuste(banco, "--codigo", "TO020007")
+
+        assert codigo == 1
+        assert "--valor" in capsys.readouterr().out
+
+    def test_a_listagem_mostra_o_destino_de_cada_um(self, banco, capsys):
+        self._ajuste(banco, "--codigo", "TO020007", "--valor", "100")
+        self._ajuste(banco, "--codigo", "TO090001", "--valor", "50")
+        capsys.readouterr()
+
+        self._ajuste(banco)
+
+        saida = capsys.readouterr().out
+        assert "VL_AJ_CREDITOS" in saida
+        assert "— fora da apuração" in saida
+
+    def test_o_ajuste_chega_ao_arquivo_gerado(self, importado, tmp_path, capsys):
+        """De ponta a ponta: cadastrar, gerar, e o E111 está lá."""
+        self._ajuste(importado, "--codigo", "TO020007", "--valor", "100")
+        _gerar(importado, tmp_path / "efd.txt")
+
+        conteudo = (tmp_path / "efd.txt").read_text(encoding="utf-8")
+
+        assert "|E111|TO020007||100,00|" in conteudo
+
+    def test_periodo_e_obrigatorio(self, banco, capsys):
+        codigo = main(["fiscal", "ajuste", "--empresa", "1", "--db", banco])
+
+        assert codigo == 1
+        assert "--de" in capsys.readouterr().out

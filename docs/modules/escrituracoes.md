@@ -65,6 +65,11 @@ existisse.
 | `Conferencia` / `LinhaDocumento` | Uma conferência com `ok` e detalhe; um documento do arquivo. |
 | `arquivar(session, resultado=, empresa=, tipo=, data_inicio=, data_fim=)` | Guarda o arquivo que saiu, com os documentos que entraram nele. |
 | `marcar_transmitida(session, escrituracao, recibo=, quando=, usuario_id=, forcar=)` | Diz qual geração foi entregue; levanta `TransmissaoInvalida`. |
+| `criar_ajuste(session, empresa=, data_inicio=, data_fim=, cod_aj=, valor=)` | Cadastra um ajuste da apuração; levanta `AjusteInvalido`. |
+| `ajustes_do_periodo(session, empresa_id=, data_inicio=, data_fim=)` | Os ajustes daquele período exato. |
+| `totais_por_campo(ajustes)` | Quanto cada campo do E110 recebe. |
+| `utilizacao(cod_aj)` / `validar_codigo(cod_aj, uf=)` | Como se lê o código e onde ele entra. |
+| `UTILIZACOES` / `APURACOES` | A 4ª e a 3ª posição do código da tabela 5.1.1. |
 | `campo_do_registro(escrituracao, tipo, nome)` | Um campo, pelo nome, do arquivo que foi guardado. |
 | `ultima_transmitida_antes(session, empresa_id=, tipo=, data=)` | A última entrega que termina antes da data. |
 | `existe_geracao_antes(session, empresa_id=, tipo=, data=)` | Se há qualquer geração anterior, entregue ou não. |
@@ -85,29 +90,31 @@ Muito, e é preciso saber antes de usar.
 - **inventário (bloco H), ativo imobilizado (bloco G) e o bloco 1 inteiro**;
 - **documentos de serviço, energia, comunicação e transporte** — C500, D100 e
   vizinhos. Só o C100 (mercadorias) está coberto;
-- **ajustes de apuração pela tabela 5.1.1** (E111 e seguintes);
-- **substituição tributária apurada** (E200 e seguintes);
-- **saldo credor de período anterior**.
+- **ajustes que nascem de um documento** (`C197`/`D197`), que compõem os campos
+  `VL_TOT_AJ_*` do E110. Os ajustes do período, esses o `E111` cobre;
+- **substituição tributária apurada** (E200 e seguintes).
 
 **Na EFD-Contribuições:**
 
 - **bloco A (serviços/NFS-e)** — a Central ainda não importa NFS-e;
 - **blocos D (transporte), F (demais operações) e I (financeiras)**;
 - **créditos extemporâneos, ajustes e o bloco 1 inteiro**;
-- **monofásico, substituição, alíquota por unidade e regimes especiais** — a
-  apuração usa o valor destacado no documento, qualquer que seja o CST;
+- **bases próprias do monofásico e da alíquota por unidade** — o CST já decide
+  se o valor destacado entra na apuração, mas a apuração usa o valor
+  destacado, não uma base calculada;
 - **retenções na fonte**.
 
-Em ambos, a apuração é a soma direta dos documentos escriturados. Empresa com
-ajuste, benefício ou saldo credor precisa conferir e complementar; o
-`ResultadoGeracao` traz aviso explícito sobre isso.
+A apuração da EFD ICMS/IPI soma os documentos, carrega o saldo credor da
+escrituração transmitida do período anterior e aplica os ajustes cadastrados
+(E111). A da EFD-Contribuições é soma direta, respeitando o CST de cada item.
+Em ambas, o `ResultadoGeracao` traz aviso explícito do que não cobre.
 
 ## Depende de / quem depende
 
-Depende de `db.models` e de `documentos.ajustes` (a camada efetiva); da stdlib,
-`decimal`, `collections`, `difflib`, `hashlib` e `json`. Quem depende: nada
-ainda — nenhuma rota ou comando expõe os geradores nem as escriturações
-arquivadas.
+Depende de `db.models`, de `documentos.ajustes` (a camada efetiva) e de
+`reports.base` (a formatação de moeda do espelho); da stdlib, `decimal`,
+`collections`, `difflib`, `hashlib` e `json`. Quem depende: `cli_fiscal`, que é
+a porta de entrada humana de tudo isto.
 
 ## Decisões não óbvias e armadilhas
 
@@ -216,6 +223,22 @@ arquivadas.
   Fisco recebeu o arquivo. É o campo 2 nas duas escriturações — `COD_FIN` na
   EFD ICMS/IPI e `TIPO_ESCRIT` na EFD-Contribuições, mesma posição e mesmos
   valores.
+- **O sistema conhece a estrutura do código de ajuste, não a tabela 5.1.1.**
+  Ela é de cada Secretaria da Fazenda, muda por ato normativo e tem centenas de
+  entradas; embuti-la seria embutir uma tabela errada para 26 dos 27 estados.
+  A estrutura é nacional (Ato COTEPE/ICMS 09/2008) — `PRBCDDDD` —, e a **4ª
+  posição decide em que campo do E110 o valor entra**. Quem informa o código
+  informa junto o tratamento. O sequencial não é conferido contra nada.
+- **O sinal do ajuste está no código, não no número.** Valor negativo é
+  recusado: um "outros créditos" negativo seria um débito escrito de um jeito
+  que o validador não entende, e a apuração sairia com o sinal trocado.
+- **A dedução entra depois do saldo apurado, não dentro dele.** É a diferença
+  entre o que se apurou e o que se recolhe; somá-la no saldo daria o mesmo
+  total a recolher e um `VL_SLD_APURADO` errado — que é o número conferido
+  contra os E111.
+- **O período do ajuste casa por igualdade, não por sobreposição.** Um mês
+  fechado e uma quinzena começam no mesmo dia; aproximar faria o mesmo valor
+  entrar em duas apurações.
 - **O saldo credor anterior vem da escrituração transmitida do período
   anterior**, lido do arquivo dela. O leiaute manda: o `VL_SLD_CREDOR_ANT` de
   um período tem de ser igual ao `VL_SLD_CREDOR_TRANSPORTAR` do anterior.

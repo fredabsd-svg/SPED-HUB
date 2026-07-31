@@ -389,15 +389,18 @@ class TestBlocoE:
         assert campos[0] == "360,00", "débito"
         assert campos[4] == "", "sem crédito"
 
-    def test_apuracao_avisa_o_que_nao_cobre(self, sessao, empresa, com_documento):
+    def test_apuracao_sem_ajuste_diz_que_e_soma_direta(self, sessao, empresa, com_documento):
         """Silêncio aqui faria alguém transmitir apuração incompleta.
 
-        O saldo credor anterior saiu desta lista quando passou a ser buscado
-        na escrituração transmitida do período anterior — ver
-        `tests/test_saldo_credor_anterior.py`. Aqui ficou o que segue fora.
+        Esta lista encolheu duas vezes, e nas duas porque o que estava nela
+        passou a existir: o saldo credor anterior virou busca na escrituração
+        transmitida, e os ajustes da tabela 5.1.1 viraram cadastro. O que
+        sobra é dizer que NÃO HÁ ajuste cadastrado — que é a informação certa
+        para quem tem benefício fiscal e ainda não o registrou.
         """
         avisos = _gerar(sessao, empresa).avisos
-        assert any("ajustes da tabela 5.1.1" in a for a in avisos)
+        assert any("não há ajustes de apuração cadastrados" in a for a in avisos)
+        assert any("fiscal ajuste" in a for a in avisos)
 
 
 class TestContagensDoBloco9:

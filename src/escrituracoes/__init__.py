@@ -21,6 +21,16 @@ no meio de um registro desloca todos os seguintes e produz arquivo que parece
 certo.
 """
 
+from src.escrituracoes.ajustes_apuracao import (
+    APURACOES,
+    UTILIZACOES,
+    AjusteInvalido,
+    ajustes_do_periodo,
+    criar_ajuste,
+    totais_por_campo,
+    utilizacao,
+    validar_codigo,
+)
 from src.escrituracoes.arquivadas import (
     TIPOS,
     Comparacao,
@@ -82,6 +92,7 @@ from src.escrituracoes.reforma import (
 
 __all__ = [
     "ANO_DE_TESTE",
+    "APURACOES",
     "ATIVIDADES_CONTRIBUICOES",
     "ATIVIDADES_ICMS",
     "BLOCOS",
@@ -93,6 +104,8 @@ __all__ = [
     "PERFIS",
     "REGIMES",
     "TIPOS",
+    "UTILIZACOES",
+    "AjusteInvalido",
     "ApuracaoIBSCBS",
     "CampoObrigatorioAusente",
     "CamposEmDesacordo",
@@ -111,11 +124,13 @@ __all__ = [
     "TipoSemLeiaute",
     "TransmissaoInvalida",
     "Tributo",
+    "ajustes_do_periodo",
     "arquivar",
     "avisos_de",
     "campo_do_registro",
     "comparar",
     "conferir",
+    "criar_ajuste",
     "escrituracoes_do_documento",
     "espelho",
     "existe_geracao_antes",
@@ -123,6 +138,9 @@ __all__ = [
     "formatar_valor",
     "hash_do_conteudo",
     "marcar_transmitida",
+    "totais_por_campo",
     "transmitidas_do_periodo",
     "ultima_transmitida_antes",
+    "utilizacao",
+    "validar_codigo",
 ]
