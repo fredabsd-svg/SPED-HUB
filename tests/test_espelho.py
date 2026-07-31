@@ -28,6 +28,7 @@ from src.escrituracoes import (
     GeradorEFDContribuicoes,
     GeradorEFDICMS,
     TipoSemLeiaute,
+    criar_ajuste,
     espelho,
 )
 from src.escrituracoes.leiaute import EFD_CONTRIBUICOES, EFD_ICMS
@@ -152,7 +153,7 @@ def test_geracao_limpa_nao_tem_divergencia_nenhuma(sessao, empresa):
     visao = espelho(gerar_icms(sessao, empresa), tipo="efd_icms")
 
     assert visao.divergencias() == []
-    assert len(visao.conferencias) == 4
+    assert len(visao.conferencias) == 5
 
 
 def test_os_documentos_saem_com_sentido_numero_e_valor(sessao, empresa):
@@ -373,3 +374,115 @@ def test_saldo_credor_anterior_zerado_nao_vira_linha(sessao, empresa):
     lido = dict(espelho(gerar_icms(sessao, empresa), tipo="efd_icms").apuracao)
 
     assert "saldo credor do período anterior" not in lido
+
+
+# ── Os ajustes de apuração no espelho ──────────────────────────────────────
+
+
+def test_os_ajustes_aparecem_com_o_proprio_nome(sessao, empresa):
+    """É o que explica por que o imposto não é débito menos crédito."""
+    uma_entrada_e_uma_saida(sessao, empresa)
+    resultado = gerar_icms(sessao, empresa)
+    adulterar(resultado, "E110", "VL_AJ_CREDITOS", "300,00")
+
+    lido = dict(espelho(resultado, tipo="efd_icms").apuracao)
+
+    assert lido["ajustes a crédito (E111)"] == 300.0
+
+
+def test_ajuste_zerado_nao_vira_linha(sessao, empresa):
+    """Quatro linhas de 0,00 afogariam a que tem valor."""
+    uma_entrada_e_uma_saida(sessao, empresa)
+    lido = dict(espelho(gerar_icms(sessao, empresa), tipo="efd_icms").apuracao)
+
+    assert not [r for r in lido if "E111" in r]
+
+
+def test_o_debito_especial_aparece_fora_do_a_recolher(sessao, empresa):
+    """Ele é recolhido em guia separada; somá-lo faria pagar duas vezes."""
+    uma_entrada_e_uma_saida(sessao, empresa)
+    resultado = gerar_icms(sessao, empresa)
+    adulterar(resultado, "E110", "DEB_ESP", "70,00")
+
+    lido = dict(espelho(resultado, tipo="efd_icms").apuracao)
+
+    assert lido["débito especial, em guia à parte"] == 70.0
+
+
+def test_o_e110_que_nao_bate_com_os_e111_e_acusado(sessao, empresa):
+    """É o que o validador confere, e onde gerador próprio erra.
+
+    O E110 é adulterado sem tocar nos E111: a soma refeita a partir dos
+    ajustes do arquivo acusa a diferença.
+    """
+    uma_entrada_e_uma_saida(sessao, empresa)
+    criar_ajuste(
+        sessao,
+        empresa=empresa,
+        data_inicio=INICIO,
+        data_fim=FIM,
+        cod_aj="TO020001",
+        valor=100.0,
+    )
+    sessao.commit()
+    resultado = gerar_icms(sessao, empresa)
+    adulterar(resultado, "E110", "VL_AJ_CREDITOS", "999,00")
+
+    achada = divergencia(espelho(resultado, tipo="efd_icms"), "batem com a soma dos E111")
+
+    assert "VL_AJ_CREDITOS" in achada.detalhe
+    assert "999,00" in achada.detalhe and "100,00" in achada.detalhe
+
+
+def test_ajuste_de_outra_apuracao_nao_conta_na_conferencia(sessao, empresa):
+    """ST, DIFAL e FCP saem no E111 mas não compõem o E110."""
+    uma_entrada_e_uma_saida(sessao, empresa)
+    criar_ajuste(
+        sessao,
+        empresa=empresa,
+        data_inicio=INICIO,
+        data_fim=FIM,
+        cod_aj="TO120001",
+        valor=500.0,
+    )
+    sessao.commit()
+
+    visao = espelho(gerar_icms(sessao, empresa), tipo="efd_icms")
+
+    assert visao.divergencias() == []
+
+
+def test_sem_ajuste_a_conferencia_passa(sessao, empresa):
+    uma_entrada_e_uma_saida(sessao, empresa)
+    visao = espelho(gerar_icms(sessao, empresa), tipo="efd_icms")
+
+    achada = next(c for c in visao.conferencias if "E111" in c.nome)
+    assert achada.ok
+
+
+def test_com_ajuste_correto_a_conferencia_passa(sessao, empresa):
+    """O caso positivo é o que prova que o destino é respeitado.
+
+    Com o E110 intocado, qualquer desvio no campo de destino do E111 cria uma
+    divergência que não existe — e é assim que se pega um gerador que soma
+    todo ajuste no mesmo campo.
+    """
+    uma_entrada_e_uma_saida(sessao, empresa)
+    for codigo, valor in (("TO020001", 100.0), ("TO000001", 40.0), ("TO040001", 25.0)):
+        criar_ajuste(
+            sessao,
+            empresa=empresa,
+            data_inicio=INICIO,
+            data_fim=FIM,
+            cod_aj=codigo,
+            valor=valor,
+        )
+    sessao.commit()
+
+    visao = espelho(gerar_icms(sessao, empresa), tipo="efd_icms")
+
+    assert visao.divergencias() == []
+    lido = dict(visao.apuracao)
+    assert lido["ajustes a crédito (E111)"] == 100.0
+    assert lido["ajustes a débito (E111)"] == 40.0
+    assert lido["deduções (E111)"] == 25.0
