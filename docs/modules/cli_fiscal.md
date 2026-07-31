@@ -6,7 +6,7 @@ O subcomando `sped-hub fiscal` — a cadeia da Central de Documentos pela linha
 de comando, na ordem em que ela acontece:
 
 ```
-regras → importar → documentos → classificar → alterar → apurar → espelho → gerar → conferir
+regras → importar → documentos → classificar → alterar → apurar → espelho → gerar → transmitida → conferir
                                              ↘ desfazer ↙
 ```
 
@@ -45,7 +45,8 @@ Ações:
 | `apurar --empresa --de --ate` | CBS, IBS e IS do período. Só leitura: **não grava nada**. |
 | `espelho --empresa --de --ate [--tipo --saida]` | O arquivo em forma de leitura, **antes** de gerar. Não arquiva. |
 | `gerar --empresa --de --ate [--tipo --saida]` | Gera a EFD **e arquiva** a escrituração. |
-| `historico [--empresa]` | As escriturações geradas, com hash. |
+| `historico [--empresa --transmitidas]` | As escriturações geradas, com hash e a data de entrega. |
+| `transmitida --escrituracao [--recibo --forcar]` | Registra qual geração foi a entregue. |
 | `conferir --escrituracao [--diff]` | O entregue contra o que sairia agora. |
 
 ## Códigos de saída
@@ -145,6 +146,11 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
 - **Os avisos da geração são impressos em bloco próprio.** São o canal de
   "leia antes de transmitir" que os geradores usam para dizer o que a apuração
   não cobre; engoli-los seria pior que não gerar.
+- **`transmitida` existe porque o sistema não transmite.** Quem transmite é o
+  programa validador da Receita; a marca vem de fora e precisa ser dita. Sem
+  ela, a terceira camada guarda candidatos e não o registro do que foi enviado.
+- **`historico` marca a não entregue com travessão, não com vazio.** Campo em
+  branco se lê como coluna que não se aplica àquela linha.
 - **`conferir` usa o gerador do tipo que foi arquivado**, não um fixo:
   comparar uma EFD-Contribuições com o gerador de ICMS acusaria divergência
   inexistente.

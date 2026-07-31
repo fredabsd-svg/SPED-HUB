@@ -59,6 +59,8 @@ existisse.
 | `Espelho.texto()` / `.divergencias()` | O espelho legível; as conferências que falharam. |
 | `Conferencia` / `LinhaDocumento` | Uma conferência com `ok` e detalhe; um documento do arquivo. |
 | `arquivar(session, resultado=, empresa=, tipo=, data_inicio=, data_fim=)` | Guarda o arquivo que saiu, com os documentos que entraram nele. |
+| `marcar_transmitida(session, escrituracao, recibo=, quando=, usuario_id=, forcar=)` | Diz qual geração foi entregue; levanta `TransmissaoInvalida`. |
+| `transmitidas_do_periodo(session, escrituracao)` | As já entregues do mesmo período, empresa e obrigação. |
 | `comparar(escrituracao, resultado)` | O que mudou entre o arquivado e uma geração nova. |
 | `escrituracoes_do_documento(session, documento)` | Em que arquivos esta nota entrou. |
 | `avisos_de(escrituracao)` | Os avisos como estavam na hora de gerar. |
@@ -157,8 +159,23 @@ arquivadas.
   divergirem — e é aí que a diferença importa. Por isso `Escrituracao.conteudo`
   guarda o texto, e a linha nunca é alterada: regerar cria outra escrituração.
 - **`arquivar` não sobrescreve o período.** Duas gerações do mesmo mês são dois
-  fatos, e qual delas foi transmitida é informação que o sistema ainda não tem.
-  Sobrescrever seria inventá-la, e apagaria a única cópia do que saiu antes.
+  fatos, e apagar a anterior apagaria a única cópia do que saiu antes.
+- **Nenhuma escrituração é marcada como transmitida sozinha.** O sistema não
+  transmite — quem transmite é o programa validador da Receita —, então a
+  informação vem de fora e precisa ser dita. Deduzir pela geração mais recente
+  responderia que foi entregue justamente a que se acabou de gerar para olhar.
+- **Marcar não se desfaz.** Transmitir é fato do mundo, não estado do sistema;
+  apagar a marca apagaria o registro de que aconteceu. Arquivo entregue errado
+  se corrige com retificadora — outra escrituração, com o `0000` declarando
+  finalidade `1` —, e as duas ficam, na ordem em que saíram.
+- **Uma segunda entrega ORIGINAL do mesmo período é recusada.** Ou o arquivo
+  devia ter sido gerado como retificadora, ou a marca anterior está errada; nos
+  dois casos alguém precisa olhar. `forcar=True` passa por cima porque o caso
+  legítimo existe: entrega rejeitada pelo Fisco e reenviada como original.
+- **A finalidade é lida do `0000` do arquivo**, não do parâmetro de geração: o
+  Fisco recebeu o arquivo. É o campo 2 nas duas escriturações — `COD_FIN` na
+  EFD ICMS/IPI e `TIPO_ESCRIT` na EFD-Contribuições, mesma posição e mesmos
+  valores.
 - **A comparação conta multiconjunto, não conjunto.** Linha repetida é o normal
   num arquivo SPED: o mesmo produto com os mesmos valores em dois documentos
   gera dois C170 idênticos. Perguntar "esta linha continua no arquivo?"

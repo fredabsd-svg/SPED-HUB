@@ -9,6 +9,19 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **Agora dá para dizer qual arquivo foi o entregue.** O sistema guardava todas
+  as gerações do mês — a primeira, a de depois da correção, a que se fez só
+  para conferir — e não sabia qual delas foi transmitida. `sped-hub fiscal
+  transmitida --escrituracao 3 --recibo REC-2026-0001` registra a entrega, e
+  `fiscal historico` passa a mostrar a data ao lado de cada geração
+  (`--transmitidas` filtra só as entregues). Nenhuma é marcada sozinha: quem
+  transmite é o programa da Receita, e adivinhar pela mais recente diria que
+  foi entregue justamente a que se acabou de gerar para olhar. Marcar **não se
+  desfaz** — arquivo entregue errado se corrige com retificadora, e as duas
+  ficam registradas na ordem em que saíram. Tentar marcar uma segunda entrega
+  *original* do mesmo período é recusado, porque ou o arquivo devia ser
+  retificadora ou a marca anterior está errada; `--forcar` passa por cima para
+  o caso de entrega rejeitada pelo Fisco e reenviada.
 - **`sped-hub fiscal espelho` mostra o arquivo em português antes de
   transmitir.** Um arquivo SPED é ilegível — `|C100|0|1|55|00|...` —, e até
   agora só dava para saber se ele estava certo depois de entregue. O espelho

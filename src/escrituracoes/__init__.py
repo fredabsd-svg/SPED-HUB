@@ -25,11 +25,14 @@ from src.escrituracoes.arquivadas import (
     TIPOS,
     Comparacao,
     TipoDesconhecido,
+    TransmissaoInvalida,
     arquivar,
     avisos_de,
     comparar,
     escrituracoes_do_documento,
     hash_do_conteudo,
+    marcar_transmitida,
+    transmitidas_do_periodo,
 )
 from src.escrituracoes.base import (
     MODALIDADES_DE_FRETE,
@@ -93,6 +96,7 @@ __all__ = [
     "ResultadoGeracao",
     "TipoDesconhecido",
     "TipoSemLeiaute",
+    "TransmissaoInvalida",
     "Tributo",
     "arquivar",
     "avisos_de",
@@ -103,4 +107,6 @@ __all__ = [
     "formatar_data",
     "formatar_valor",
     "hash_do_conteudo",
+    "marcar_transmitida",
+    "transmitidas_do_periodo",
 ]
