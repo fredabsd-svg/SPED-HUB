@@ -14,6 +14,11 @@ Os dois montam o arquivo a partir da camada efetiva — o normalizado mais os
 ajustes. O que o operador corrigiu na tela é o que vai para o Fisco, e o XML
 original continua intocado para conferência.
 
+Antes de gerar, `espelhos.py` mostra o arquivo em forma de leitura: quais
+documentos entraram, quanto deu a apuração, e se o arquivo é coerente consigo
+mesmo — as mesmas conferências que o validador do Fisco faz. O espelho é lido
+dos **registros**, não do banco; ver as armadilhas.
+
 Gerado o arquivo, `arquivadas.py` guarda o que saiu: é a **terceira camada**,
 ao lado do documento original e do tratamento fiscal. O conteúdo é gravado,
 não reconstruído — regerar responde "o que eu enviaria hoje", e a pergunta da
@@ -50,6 +55,9 @@ existisse.
 | `COD_VER` | Versão do leiaute da EFD ICMS/IPI declarada no 0000. |
 | `REGIMES` | Os valores válidos de `cod_inc_trib` (registro 0110). |
 | `ATIVIDADES` | Os valores válidos de `ind_ativ_contribuicoes` (IND_ATIV do 0000). |
+| `espelho(resultado, tipo=)` | O arquivo em forma de leitura, antes de gerar; levanta `TipoSemLeiaute`. |
+| `Espelho.texto()` / `.divergencias()` | O espelho legível; as conferências que falharam. |
+| `Conferencia` / `LinhaDocumento` | Uma conferência com `ok` e detalhe; um documento do arquivo. |
 | `arquivar(session, resultado=, empresa=, tipo=, data_inicio=, data_fim=)` | Guarda o arquivo que saiu, com os documentos que entraram nele. |
 | `comparar(escrituracao, resultado)` | O que mudou entre o arquivado e uma geração nova. |
 | `escrituracoes_do_documento(session, documento)` | Em que arquivos esta nota entrou. |
@@ -93,6 +101,26 @@ arquivadas.
 
 ## Decisões não óbvias e armadilhas
 
+- **O espelho é lido dos registros, não do banco.** É a decisão que dá sentido
+  ao módulo. Um espelho montado a partir dos documentos responderia "o que eu
+  acredito que vai sair" — e concordaria com o banco mesmo quando o gerador
+  discorda dele, escondendo exatamente o erro que ele existe para mostrar.
+  Pelo mesmo motivo as conferências **recalculam a partir do arquivo**:
+  perguntar ao gerador se ele somou certo é aceitar a resposta dele.
+- **O espelho não arquiva, e isso não contradiz "gerar sempre arquiva".** A
+  regra vale para o que pode ser transmitido. O espelho é prosa; ninguém o
+  entrega por engano, e arquivá-lo encheria o histórico de linhas que ninguém
+  entregou.
+- **O regime que o espelho lê é o do arquivo, não o do cadastro.** São a mesma
+  coisa quando tudo está certo — e quando não estão, o que vale para o Fisco é
+  o que está no arquivo. No cumulativo a contribuição sai num campo diferente e
+  os créditos não entram; conferir sempre pelo mesmo campo acusaria de errada
+  toda empresa do lucro presumido.
+- **A tolerância das conferências cresce com a quantidade de itens.** Cada
+  valor do arquivo já vem arredondado ao centavo, e a soma de N itens
+  arredondados pode afastar-se do total arredondado em até meio centavo por
+  item. Tolerância fixa acusaria documento correto de 40 itens; frouxa demais
+  engoliria erro real num de dois.
 - **Campo esquecido no meio de um registro não parece erro nenhum.** O `C100`
   saía sem o `IND_FRT`, que é o campo 17, logo depois do `VL_MERC`. O arquivo
   saía bem-formado, com as barras nos lugares certos — e os doze valores

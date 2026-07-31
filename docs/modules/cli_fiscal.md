@@ -6,7 +6,7 @@ O subcomando `sped-hub fiscal` — a cadeia da Central de Documentos pela linha
 de comando, na ordem em que ela acontece:
 
 ```
-regras → importar → documentos → classificar → alterar → apurar → gerar → conferir
+regras → importar → documentos → classificar → alterar → apurar → espelho → gerar → conferir
                                              ↘ desfazer ↙
 ```
 
@@ -29,7 +29,7 @@ com os relatórios contábeis; o `cli.py` registra o parser e despacha.
 | `_valor_tipado(campo, bruto)` | O texto do terminal no tipo que a coluna espera. |
 | `GERADORES` | Os tipos de escrituração que o comando gera. |
 | `EXTENSOES` | O que `importar` recolhe ao varrer uma pasta. |
-| `DIVERGENTE` | O código de saída 2, de `conferir`. |
+| `DIVERGENTE` | O código de saída 2, de `conferir` e de `espelho`. |
 
 Ações:
 
@@ -43,6 +43,7 @@ Ações:
 | `alterar --empresa --campo --valor [--filtro --apenas-vazios --confirmar --forcar --motivo]` | Alteração em massa. Sem `--confirmar`, **só simula**. |
 | `desfazer --lote` | Reverte um lote inteiro de ajustes. |
 | `apurar --empresa --de --ate` | CBS, IBS e IS do período. Só leitura: **não grava nada**. |
+| `espelho --empresa --de --ate [--tipo --saida]` | O arquivo em forma de leitura, **antes** de gerar. Não arquiva. |
 | `gerar --empresa --de --ate [--tipo --saida]` | Gera a EFD **e arquiva** a escrituração. |
 | `historico [--empresa]` | As escriturações geradas, com hash. |
 | `conferir --escrituracao [--diff]` | O entregue contra o que sairia agora. |
@@ -55,7 +56,7 @@ Isto entra em script de fechamento, então o código é contrato:
 |---|---|
 | `0` | Correu bem. |
 | `1` | Erro — cadastro faltando, empresa inexistente, arquivo ilegível, banco sem schema. |
-| `2` | Só em `conferir`: o arquivo entregue divergiu do que sairia agora. |
+| `2` | Em `conferir`, o arquivo entregue divergiu do que sairia agora; em `espelho`, alguma conferência falhou. |
 
 O `2` é distinto do `1` de propósito: divergência não é falha. É o que permite
 alertar que alguém mexeu num documento depois da entrega, sem confundir as
@@ -118,6 +119,11 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   ela fecha. Uma "prévia" que grava em disco é indistinguível de uma entrega
   depois que o arquivo está na mão de alguém. Gerar de novo cria outra
   escrituração — o histórico de tentativas é informação real.
+- **`espelho` não arquiva, e não é exceção à regra acima.** A regra vale para
+  o que pode ser transmitido. O espelho é prosa — nenhum validador o aceita, e
+  ninguém o entrega por engano —, então produzi-lo sem registro não abre o
+  buraco que a terceira camada fecha. Arquivá-lo, ao contrário, encheria o
+  histórico de linhas que ninguém entregou.
 - **`gravar` é função própria por causa de uma falha invisível no Linux.**
   `open` em modo texto sem `newline=""` reescreve `\n` como `\r\n` no Windows;
   o texto do leiaute já vem com `\r\n`, e o resultado é `\r\r\n`, que faz o

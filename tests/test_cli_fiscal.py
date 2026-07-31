@@ -1295,3 +1295,106 @@ class TestApurar:
         assert codigo == 0
         assert "documentos    0" in saida
         assert "por falta de dado" in saida
+
+
+def _espelho(url, *extras, empresa="1", tipo="efd_icms"):
+    return main(
+        [
+            "fiscal",
+            "espelho",
+            "--empresa",
+            empresa,
+            "--de",
+            "2026-07-01",
+            "--ate",
+            "2026-07-31",
+            "--tipo",
+            tipo,
+            "--db",
+            url,
+            *extras,
+        ]
+    )
+
+
+class TestEspelho:
+    """A leitura do arquivo ANTES de transmitir."""
+
+    def test_mostra_documentos_apuracao_e_conferencias(self, importado, capsys):
+        assert _espelho(importado) == 0
+
+        saida = capsys.readouterr().out
+        assert "ESPELHO — EFD ICMS/IPI" in saida
+        assert "DOCUMENTOS (2)" in saida
+        assert "APURAÇÃO" in saida
+        assert "CONFERÊNCIAS" in saida
+
+    def test_espelho_nao_arquiva_escrituracao(self, importado, capsys):
+        """Espelho é prosa, não arquivo transmissível: não é entrega.
+
+        A regra de que gerar sempre arquiva vale para o que pode ser
+        transmitido. Arquivar um espelho encheria o histórico de linhas que
+        ninguém entregou, e a terceira camada existe para responder o que foi
+        entregue.
+        """
+        _espelho(importado)
+
+        with _sessao(importado) as sessao:
+            assert sessao.execute(select(Escrituracao)).scalars().all() == []
+
+    def test_espelho_nao_escreve_arquivo_sped(self, importado, tmp_path, capsys):
+        """Sem `--saida` não fica nada em disco para alguém transmitir."""
+        antes = set(tmp_path.iterdir())
+        _espelho(importado)
+
+        assert set(tmp_path.iterdir()) == antes
+
+    def test_com_saida_grava_o_espelho_e_diz_onde(self, importado, tmp_path, capsys):
+        destino = tmp_path / "espelho.txt"
+        assert _espelho(importado, "--saida", str(destino)) == 0
+
+        assert "ESPELHO" in destino.read_text(encoding="utf-8")
+        assert str(destino) in capsys.readouterr().out
+
+    def test_conferencia_que_falha_sai_com_dois(self, importado, tmp_path, capsys):
+        """O mesmo código de `conferir`: cabe em rotina de fechamento.
+
+        A divergência é plantada no banco — o total do documento deixa de
+        bater com a soma dos itens, que é o que o validador do Fisco confere.
+        """
+        with _sessao(importado) as sessao:
+            documento = (
+                sessao.execute(select(DocumentoFiscal).order_by(DocumentoFiscal.id))
+                .scalars()
+                .first()
+            )
+            aplicar_ajuste(
+                sessao,
+                documento=documento,
+                campo="valor_produtos",
+                valor_novo=1.0,
+                origem=ORIGEM_USUARIO,
+            )
+            sessao.commit()
+
+        codigo = _espelho(importado)
+
+        saida = capsys.readouterr().out
+        assert codigo == 2
+        assert "NÃO  a soma dos itens" in saida
+
+    def test_os_avisos_da_geracao_aparecem(self, importado, capsys):
+        _espelho(importado)
+
+        assert "LEIA ANTES DE TRANSMITIR" in capsys.readouterr().out
+
+    def test_vale_para_a_efd_contribuicoes(self, importado, capsys):
+        assert _espelho(importado, tipo="efd_contribuicoes") == 0
+
+        assert "ESPELHO — EFD-Contribuições" in capsys.readouterr().out
+
+    def test_periodo_e_obrigatorio(self, importado, capsys):
+        codigo = main(["fiscal", "espelho", "--empresa", "1", "--db", importado])
+
+        assert codigo == 1
+        assert "--de" in capsys.readouterr().out
