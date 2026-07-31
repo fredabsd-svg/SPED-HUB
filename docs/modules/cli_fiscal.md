@@ -7,6 +7,7 @@ de comando, na ordem em que ela acontece:
 
 ```
 cadastro → regras → importar → documentos → classificar → alterar → ajuste → apurar → espelho → gerar → transmitida → conferir
+                                             ↕ planilha
                                              ↘ desfazer ↙
 ```
 
@@ -43,6 +44,8 @@ Ações:
 | `classificar --empresa [--de --ate --aplicar]` | O que as regras propõem. Sem `--aplicar`, **não grava**. |
 | `alterar --empresa --campo --valor [--filtro --apenas-vazios --confirmar --forcar --motivo]` | Alteração em massa. Sem `--confirmar`, **só simula**. |
 | `desfazer --lote` | Reverte um lote inteiro de ajustes. |
+| `planilha --empresa [--de --ate --filtro --saida]` | Exporta os itens do recorte em `.xlsx`, já com a camada efetiva. |
+| `planilha --arquivo [--confirmar --motivo]` | Lê a planilha corrigida. Sem `--confirmar`, **só mostra**. |
 | `ajuste --empresa --de --ate [--codigo --valor --descricao]` | Ajustes de apuração (E111). Sem `--codigo`, lista. |
 | `apurar --empresa --de --ate` | CBS, IBS e IS do período. Só leitura: **não grava nada**. |
 | `espelho --empresa --de --ate [--tipo --saida]` | O arquivo em forma de leitura, **antes** de gerar. Não arquiva. |
@@ -84,6 +87,10 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   regra, e quem for auditar o mês vai querer saber qual era a condição. A
   regra desativada continua na listagem, com a coluna `Ativa` em "não" —
   sumir da lista faria parecer que ela nunca existiu.
+- **`planilha --arquivo` ignora `--empresa` e o período.** Quem manda na volta
+  é a planilha: cada linha carrega a própria identidade e a chave é reconferida
+  contra o banco. Recortar de novo na volta só criaria a chance de a correção
+  sumir em silêncio por não bater com o filtro digitado.
 - **`classificar` e `alterar` não gravam por padrão.** O motor de
   classificação nunca aplica sozinho, e o módulo de massa separa `simular` de
   `confirmar` — inverter isso na CLI desfaria, na porta de entrada, a proteção

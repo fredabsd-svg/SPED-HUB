@@ -9,6 +9,20 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **Correção item a item passou a caber numa planilha.** A alteração em massa
+  resolve "todos os itens com NCM 2203 viram CFOP 2102"; não resolve o caso
+  mais comum do saneamento, em que cada linha tem um valor diferente e quem
+  sabe qual é uma pessoa olhando — item a item na tela é inviável num mês com
+  mil notas. `sped-hub fiscal planilha --empresa 1 --saida itens.xlsx` exporta
+  os itens já com as correções que existem aplicadas, e `sped-hub fiscal
+  planilha --arquivo itens.xlsx` traz de volta o que foi corrigido. A volta
+  **não grava**: mostra o que mudaria, como toda alteração em massa, e só com
+  `--confirmar` vira um lote que `desfazer` reverte inteiro. Cada linha carrega
+  a identidade do item e a chave da nota é reconferida contra o banco, de modo
+  que planilha de outro mês ou com os identificadores editados é recusada linha
+  a linha, com o motivo, em vez de escrever no documento errado. Só as colunas
+  editáveis voltam: a chave, o número da nota e a descrição vão junto porque
+  sem elas ninguém sabe o que está editando, mas mudá-las ali não muda nada.
 - **Benefício fiscal, crédito outorgado e estorno agora entram na apuração do
   ICMS.** A apuração era a soma dos documentos e mais nada — e empresa com
   incentivo tem valores que não estão em nota nenhuma, o que fazia o imposto

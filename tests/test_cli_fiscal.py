@@ -22,6 +22,7 @@ import re
 from unittest import mock
 
 import pytest
+from openpyxl import load_workbook
 from sqlalchemy import select
 
 from src import cli_fiscal
@@ -1795,3 +1796,193 @@ class TestAjusteDeApuracao:
 
         assert codigo == 1
         assert "--de" in capsys.readouterr().out
+
+
+def _planilha(url, *extras):
+    return main(["fiscal", "planilha", "--empresa", "1", "--db", url, *extras])
+
+
+def _aba(caminho):
+    return load_workbook(caminho)["itens"]
+
+
+def _editar(caminho, campo: str, valor) -> None:
+    """Escreve `valor` na coluna `campo` de todas as linhas — como quem corrige.
+
+    Atribuir a `.value` e não passar `value=` ao `cell()`: com `value=None` o
+    openpyxl não faz nada, e um teste que quisesse apagar a célula passaria
+    sem apagar coisa alguma.
+    """
+    livro = load_workbook(caminho)
+    aba = livro["itens"]
+    coluna = [c.value for c in aba[1]].index(campo) + 1
+    for linha in range(2, aba.max_row + 1):
+        aba.cell(row=linha, column=coluna).value = valor
+    livro.save(caminho)
+
+
+class TestPlanilhaVaiEVolta:
+    """§16: a correção linha a linha acontece na planilha, não na tela.
+
+    O que está sob teste aqui é a ida e a volta *pela CLI* — o módulo já é
+    testado em `test_planilha_de_documentos.py`. O ponto da CLI é outro: que a
+    volta não grave sozinha, e que o que ela recusa apareça.
+    """
+
+    def test_a_ida_escreve_o_arquivo(self, importado, tmp_path, capsys):
+        destino = tmp_path / "itens.xlsx"
+
+        codigo = _planilha(importado, "--saida", str(destino))
+
+        assert codigo == 0
+        assert destino.exists()
+        assert "Planilha gravada" in capsys.readouterr().out
+
+    def test_a_ida_diz_como_voltar(self, importado, tmp_path, capsys):
+        """Sem essa linha ninguém descobre o `--arquivo` sem ler o --help."""
+        destino = tmp_path / "itens.xlsx"
+
+        _planilha(importado, "--saida", str(destino))
+
+        assert f"--arquivo {destino}" in capsys.readouterr().out
+
+    def test_a_planilha_tem_uma_linha_por_item(self, importado, tmp_path):
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+
+        aba = _aba(destino)
+
+        assert aba.max_row == 4, "duas notas, uma com 1 item e outra com 2"
+
+    def test_a_volta_sem_confirmar_nao_grava(self, importado, tmp_path, capsys):
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        _editar(destino, "cfop", "2102")
+        capsys.readouterr()
+
+        codigo = _planilha(importado, "--arquivo", str(destino))
+
+        saida = capsys.readouterr().out
+        assert codigo == 0
+        assert "mudanças" in saida
+        assert _ajustes(importado) == [], "gravou sem --confirmar"
+
+    def test_a_volta_diz_que_nao_gravou(self, importado, tmp_path, capsys):
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        _editar(destino, "cfop", "2102")
+        capsys.readouterr()
+
+        _planilha(importado, "--arquivo", str(destino))
+
+        assert "nada foi gravado" in capsys.readouterr().out
+
+    def test_a_volta_com_confirmar_grava(self, importado, tmp_path, capsys):
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        _editar(destino, "cfop", "2102")
+        capsys.readouterr()
+
+        codigo = _planilha(importado, "--arquivo", str(destino), "--confirmar")
+
+        assert codigo == 0
+        assert len(_ajustes(importado)) == 3, "os três itens tiveram o CFOP editado"
+        assert "gravado no lote" in capsys.readouterr().out
+
+    def test_o_que_gravou_e_reversivel(self, importado, tmp_path, capsys):
+        """A volta é um lote como qualquer outro — senão não há como desfazer."""
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        _editar(destino, "cfop", "2102")
+        _planilha(importado, "--arquivo", str(destino), "--confirmar")
+        lote = re.search(r"gravado no lote (\S+)", capsys.readouterr().out).group(1)
+
+        main(["fiscal", "desfazer", "--lote", lote, "--db", importado])
+
+        assert _ajustes(importado) == []
+
+    def test_o_motivo_padrao_diz_de_onde_veio(self, importado, tmp_path):
+        """Seis meses depois, "veio da planilha" é o que explica o ajuste."""
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        _editar(destino, "cfop", "2102")
+
+        _planilha(importado, "--arquivo", str(destino), "--confirmar")
+
+        assert "planilha" in _ajustes(importado)[0].motivo
+
+    def test_planilha_sem_edicao_nao_propoe_nada(self, importado, tmp_path, capsys):
+        """A ida e a volta imediatas têm de ser inertes.
+
+        Se o simples round-trip propusesse mudanças, a lista de alterações
+        viraria ruído e ninguém leria a de verdade.
+        """
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        capsys.readouterr()
+
+        _planilha(importado, "--arquivo", str(destino))
+
+        assert "mudanças      0" in capsys.readouterr().out
+
+    def test_a_volta_lista_o_que_mudaria(self, importado, tmp_path, capsys):
+        """O total é o resumo; a lista é o que dá para conferir antes de gravar."""
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        _editar(destino, "cfop", "2102")
+        capsys.readouterr()
+
+        _planilha(importado, "--arquivo", str(destino))
+
+        saida = capsys.readouterr().out
+        assert saida.count("cfop") == 3, "uma linha por item alterado"
+        assert "'2102'" in saida
+
+    def test_a_volta_diz_quantas_linhas_leu(self, importado, tmp_path, capsys):
+        """Planilha truncada ao salvar é comum; o número é como se percebe."""
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        capsys.readouterr()
+
+        _planilha(importado, "--arquivo", str(destino))
+
+        assert "3 linha(s) lida(s)" in capsys.readouterr().out
+
+    def test_a_linha_recusada_aparece(self, importado, tmp_path, capsys):
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        _editar(destino, "item_id", 9999)
+        capsys.readouterr()
+
+        _planilha(importado, "--arquivo", str(destino))
+
+        saida = capsys.readouterr().out
+        assert "LINHAS RECUSADAS" in saida
+        assert "não existe item #9999" in saida
+
+    def test_arquivo_que_nao_e_planilha_e_erro_e_nao_traceback(self, importado, tmp_path, capsys):
+        ruim = tmp_path / "isto.xlsx"
+        ruim.write_bytes(b"nem de longe um xlsx")
+
+        codigo = _planilha(importado, "--arquivo", str(ruim))
+
+        assert codigo == 1
+        assert "não foi possível abrir" in capsys.readouterr().out
+
+    def test_a_volta_ignora_a_selecao(self, importado, tmp_path, capsys):
+        """Quem manda na volta é a planilha, não o `--empresa`.
+
+        A linha carrega a identidade; recortar de novo na volta só criaria a
+        chance de a correção sumir em silêncio por não bater com o filtro.
+        """
+        destino = tmp_path / "itens.xlsx"
+        _planilha(importado, "--saida", str(destino))
+        _editar(destino, "cfop", "2102")
+        capsys.readouterr()
+
+        codigo = main(
+            ["fiscal", "planilha", "--arquivo", str(destino), "--db", importado, "--confirmar"]
+        )
+
+        assert codigo == 0
+        assert len(_ajustes(importado)) == 3
