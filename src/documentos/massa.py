@@ -90,10 +90,21 @@ class Mudanca:
     campo: str
     valor_anterior: Any
     valor_novo: Any
+    # Total do cabeçalho recomposto a partir das parcelas (§12.5), e não uma
+    # alteração que alguém pediu.  A distinção existe por causa do impacto: o
+    # recálculo não é dinheiro novo, é o mesmo dinheiro refletido para cima.
+    recalculada: bool = False
 
     @property
     def impacto(self) -> float:
-        """Diferença em reais; zero quando o campo não é numérico."""
+        """Diferença em reais; zero quando o campo não é numérico.
+
+        Zero também quando a mudança é recálculo: somar o total do cabeçalho
+        junto com as parcelas que o compõem contaria a mesma quantia duas
+        vezes, e o impacto sairia dobrado.
+        """
+        if self.recalculada:
+            return 0.0
         a, n = self.valor_anterior, self.valor_novo
         if isinstance(a, bool) or isinstance(n, bool):
             return 0.0
@@ -354,11 +365,19 @@ def simular(
     session: Session,
     selecao: Selecao,
     alteracoes: Sequence[Alteracao],
+    *,
+    recompor_totais: bool = True,
 ) -> Simulacao:
     """O que mudaria, sem mudar nada.
 
     Documento cancelado é recusado com aviso impeditivo: alterar escrituração
     de nota que não existe mais produz arquivo que o validador rejeita.
+
+    `recompor_totais` traz para a simulação os totais do cabeçalho que a
+    alteração dos itens torna obsoletos (§12.5). Aparecem aqui, e não dentro do
+    `confirmar`, de propósito: a simulação é o que a pessoa lê antes de decidir,
+    e um recálculo que só acontecesse na gravação mudaria mais coisas do que o
+    que foi mostrado.
     """
     if not alteracoes:
         raise AlteracaoInvalida("nenhuma alteração configurada")
@@ -374,6 +393,18 @@ def simular(
             if not _casa(documento, item, selecao.filtros, dos_ajustes):
                 continue
             _simular_alvo(documento, item, alteracoes, dos_ajustes, simulacao)
+
+    if recompor_totais:
+        tocados = {m.documento_id for m in simulacao.mudancas if m.item_id is not None}
+        if tocados:
+            recalculadas, avisos = recalcular(
+                session,
+                [d for d in documentos if d.id in tocados],
+                mudancas=simulacao.mudancas,
+            )
+            simulacao.mudancas.extend(recalculadas)
+            simulacao.avisos.extend(avisos)
+
     return simulacao
 
 
@@ -443,6 +474,119 @@ def _simular_alvo(
                 valor_novo=alteracao.valor,
             )
         )
+
+
+# Total do cabeçalho → parcela do item que o compõe.  Só somas diretas entram
+# aqui: cada uma destas é, por definição do leiaute, a soma da parcela
+# correspondente dos itens.
+#
+# `valor_total` do documento fica **de fora de propósito**.  Ele não é soma de
+# nada: é o vNF, que sai de produtos menos desconto mais frete, seguro,
+# despesas, ST e IPI — e ainda de componentes que este modelo não carrega
+# (ICMS desonerado, imposto de importação, valor de serviços).  Calculá-lo com
+# a metade dos termos produziria um total errado apresentado como certo, que é
+# pior que um total desatualizado: o desatualizado ao menos é o número que o
+# emitente declarou.  O recálculo avisa quando o deixa para trás.
+SOMAS = {
+    "valor_produtos": "valor_total",
+    "valor_desconto": "valor_desconto",
+    "valor_frete": "valor_frete",
+    "valor_seguro": "valor_seguro",
+    "valor_outras": "valor_outras",
+    "base_icms": "base_icms",
+    "valor_icms": "valor_icms",
+    "valor_icms_st": "valor_icms_st",
+    "valor_ipi": "valor_ipi",
+    "valor_pis": "valor_pis",
+    "valor_cofins": "valor_cofins",
+}
+
+# Diferença abaixo da qual dois totais são o mesmo número.  Somar onze parcelas
+# em ponto flutuante não devolve exatamente o mesmo valor que o emitente
+# escreveu, e propor uma mudança de um centésimo de centavo encheria a
+# simulação de ruído que ninguém vai conferir.
+TOLERANCIA = 0.005
+
+
+def _numero(valor: Any) -> float:
+    try:
+        return float(valor or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def recalcular(
+    session: Session,
+    documentos: Sequence[DocumentoFiscal],
+    *,
+    mudancas: Sequence[Mudanca] = (),
+) -> tuple[list[Mudanca], list[Aviso]]:
+    """Os totais do cabeçalho recompostos a partir das parcelas dos itens.
+
+    §12.5. Alterar a parcela de um item deixa o cabeçalho para trás, e o
+    arquivo sai com o C100 dizendo um valor e a soma dos C170 dizendo outro —
+    que é exatamente o que o validador do Fisco confere.
+
+    Recebe as `mudancas` que a simulação ainda **não** aplicou: o recálculo tem
+    de partir de como os itens vão ficar, não de como estão. Sem isso, o total
+    proposto seria o de antes da alteração.
+    """
+    por_item: dict[tuple[int, str], Any] = {
+        (m.item_id, m.campo): m.valor_novo for m in mudancas if m.item_id is not None
+    }
+    ajustes = _ajustes_de(session, documentos)
+
+    recalculadas: list[Mudanca] = []
+    avisos: list[Aviso] = []
+
+    for documento in documentos:
+        dos_ajustes = ajustes.get(documento.id, [])
+        do_cabecalho = [a for a in dos_ajustes if a.item_id is None]
+
+        for total, parcela in SOMAS.items():
+            soma = 0.0
+            for item in documento.itens:
+                if (item.id, parcela) in por_item:
+                    soma += _numero(por_item[(item.id, parcela)])
+                else:
+                    do_item = [a for a in dos_ajustes if a.item_id == item.id]
+                    soma += _numero(valor_efetivo(item, parcela, do_item))
+
+            atual = _numero(valor_efetivo(documento, total, do_cabecalho))
+            if abs(soma - atual) < TOLERANCIA:
+                continue
+
+            recalculadas.append(
+                Mudanca(
+                    documento_id=documento.id,
+                    chave=documento.chave,
+                    item_id=None,
+                    numero_item=None,
+                    campo=total,
+                    valor_anterior=atual,
+                    valor_novo=round(soma, 2),
+                    recalculada=True,
+                )
+            )
+
+    # Um aviso só, e não um por documento: a mensagem é a mesma, e repeti-la
+    # quinhentas vezes num fechamento faria ninguém ler nenhuma.
+    if recalculadas:
+        avisos.append(
+            Aviso(
+                documento_id=recalculadas[0].documento_id,
+                numero_item=None,
+                campo="valor_total",
+                problema=(
+                    "o total do documento (vNF) NÃO foi recalculado: ele não é soma de "
+                    "parcela, e este modelo não carrega todos os termos da fórmula "
+                    "(ICMS desonerado, imposto de importação, serviços). Confira antes "
+                    "de gerar"
+                ),
+            )
+        )
+
+    return recalculadas, avisos
 
 
 def confirmar(

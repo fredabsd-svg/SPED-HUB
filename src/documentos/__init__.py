@@ -87,6 +87,7 @@ from src.documentos.massa import (
     SelecaoVazia,
     Simulacao,
     confirmar,
+    recalcular,
     simular,
 )
 
@@ -128,6 +129,7 @@ __all__ = [
     "aplicar_ajuste",
     "carregar_xml",
     "confirmar",
+    "recalcular",
     "criar_regra",
     "desfazer_lote",
     "efetivo",

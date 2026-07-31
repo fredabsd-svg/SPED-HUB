@@ -58,6 +58,14 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **Corrigir o valor de vários itens deixava o cabeçalho da nota para trás.**
+  Quem usava a alteração em massa para ajustar valores dos itens gerava um
+  arquivo em que o total do documento dizia uma coisa e a soma dos itens dizia
+  outra — e é exatamente isso que o validador do Fisco confere. Agora a
+  simulação já mostra os totais recompostos junto com as alterações, antes de
+  confirmar. O total geral da nota (vNF) continua sendo o declarado, com aviso
+  na tela: ele não é soma de parcela, e recalculá-lo com os dados que o sistema
+  tem daria um número errado com cara de certo.
 - **Quem constrói no Windows não conseguia subir o nginx.** O Git converte a
   quebra de linha dos arquivos ao baixar o repositório, e o script que o
   container executa parava de funcionar por causa disso — com uma mensagem que

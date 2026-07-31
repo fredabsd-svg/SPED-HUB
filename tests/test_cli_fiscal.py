@@ -763,11 +763,15 @@ class TestAlterarSimulaPorPadrao:
 
         with _sessao(importado) as sessao:
             documento = sessao.execute(select(DocumentoFiscal)).scalars().first()
-            efetivo = valor_efetivo(
-                documento.itens[0],
-                "valor_desconto",
-                sessao.execute(select(AjusteFiscal)).scalars().all(),
-            )
+            item = documento.itens[0]
+            # Só os ajustes DO ITEM: `valor_efetivo` não filtra por alvo, e o
+            # recálculo do §12.5 também grava um `valor_desconto`, no
+            # cabeçalho. Passar os dois faria o total do documento responder
+            # pela parcela do item.
+            do_item = [
+                a for a in sessao.execute(select(AjusteFiscal)).scalars() if a.item_id == item.id
+            ]
+            efetivo = valor_efetivo(item, "valor_desconto", do_item)
 
         assert efetivo == 10.0
         assert isinstance(efetivo, float)

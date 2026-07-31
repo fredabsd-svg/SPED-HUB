@@ -51,7 +51,7 @@ O que falta:
 | Item | Situação | Marcador de ausência |
 |---|---|---|
 | Importação de NFS-e por provedor | Exige um adaptador por provedor municipal | `src.documentos.adaptadores:AdaptadorNFSe` |
-| Recálculo de totais depois de alteração em massa (§12.5) | Alterar a parcela de um item não recompõe o total do documento | `src.documentos.massa:recalcular` |
+| Recálculo do vNF (total do documento) | Os totais que são soma de parcela são recompostos; o `valor_total` não, porque a fórmula usa termos que o modelo não carrega (ICMS desonerado, imposto de importação, serviços) | `src.documentos.massa:recompor_vnf` |
 | Blocos G, H e 1 da EFD ICMS/IPI | O gerador cobre 0, C, E e 9 | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_h` |
 | Documentos de serviço, energia e transporte na EFD (C500, D100) | Só o C100 de mercadorias é gerado | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_d` |
 | Ajustes de apuração pela tabela 5.1.1 (E111) | O E110 é soma direta, sem ajuste nem saldo credor anterior | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_apuracao` |

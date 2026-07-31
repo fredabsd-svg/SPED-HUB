@@ -45,26 +45,28 @@ As três camadas que a suíte separa:
 | `Selecao(escritorio_id=, empresa_id=, data_inicio=, data_fim=, filtros=)` | O recorte da massa. Recusa seleção sem filtro. |
 | `Filtro(campo, operador, valor)` | Uma condição do recorte; todas são E. |
 | `Alteracao(campo, valor, apenas_vazios=)` | O que fazer com o selecionado. |
-| `simular(session, selecao, alteracoes)` | O que mudaria — **não toca no banco**. |
+| `simular(session, selecao, alteracoes, recompor_totais=)` | O que mudaria — **não toca no banco**. Já traz os totais do cabeçalho recompostos. |
+| `recalcular(session, documentos, mudancas=)` | Os totais que são soma de parcela, refeitos a partir dos itens. |
 | `confirmar(session, simulacao, motivo=, forcar=)` | Grava num lote reversível. |
 | `Simulacao` | Contagens, `impacto_total` em reais, `por_campo()`, `avisos`. |
 | `Aviso` | Problema detectado, com `impeditivo` separando recusa de sinalização. |
 
 ## O que não faz
 
-Não gera escrituração — ver `docs/roadmap.md`. Modelo, importação, camada
-efetiva, classificação e alterações em massa existem, mas nada além dos testes
-as consome: nenhuma tela as mostra e nenhum gerador as lê. O motor **não
-escolhe** entre regras empatadas, `simular` **não grava**, e nenhum recálculo
-de totais existe ainda (§12.5). Não lê NFS-e: cada provedor municipal precisa do seu
-adaptador. Não valida códigos fiscais contra as tabelas oficiais, e **não
-calcula tributo nenhum**: os valores de CBS, IBS e IS são lidos do XML, nunca
-presumidos.
+Não gera escrituração — quem gera é `escrituracoes`, lendo a camada efetiva
+daqui. Nenhuma tela mostra a Central: o acesso é pelo `sped-hub fiscal`. O
+motor **não escolhe** entre regras empatadas e `simular` **não grava**. O
+recálculo de totais (§12.5) refaz o que é soma de parcela e **não** refaz o
+`valor_total` (vNF) — ver as armadilhas abaixo. Não lê NFS-e: cada provedor
+municipal precisa do seu adaptador. Não valida códigos fiscais contra as
+tabelas oficiais, e **não calcula tributo nenhum**: os valores de CBS, IBS e IS
+são lidos do XML, nunca presumidos.
 
 ## Depende de / quem depende
 
 Depende de `db.models` e da stdlib (`xml.etree.ElementTree`, `hashlib`) — sem
-dependência nova. Quem depende: nada ainda; o dashboard não expõe a Central.
+dependência nova. Quem depende: `escrituracoes` (lê o efetivo para gerar) e
+`cli_fiscal` (a única porta de entrada humana hoje).
 
 ## Decisões não óbvias e armadilhas
 
@@ -85,6 +87,24 @@ dependência nova. Quem depende: nada ainda; o dashboard não expõe a Central.
   histórico mentir.
 - **Valor de ajuste que não converte para o tipo da coluna vira aviso, não
   exceção.** Um ajuste corrompido não pode impedir o mês inteiro de sair.
+- **O recálculo recompõe o que é soma de parcela e para aí.** Alterar em massa
+  o valor dos itens sem mexer no cabeçalho gera um arquivo em que o `C100` diz
+  uma coisa e a soma dos `C170` diz outra — que é justamente o que o validador
+  do Fisco confere. Já o `valor_total` (vNF) **não** é soma de parcela: a
+  fórmula legal soma frete, seguro, despesas e IPI e desconta o ICMS
+  desonerado, e o modelo não carrega todos esses termos. Recalculá-lo com o que
+  existe daria um número errado com cara de certo, então ele fica como
+  declarado e a simulação avisa — aviso **não impeditivo**, porque quem sabe o
+  número correto é o usuário.
+- **O recálculo parte das mudanças simuladas, não do banco.** Se lesse os itens
+  gravados, a simulação mostraria o cabeçalho recomposto a partir dos valores
+  antigos — coerente com nada.
+- **Cabeçalho que já estava errado antes não é consertado de carona.** Só entra
+  no recálculo o documento que teve item mexido. Consertar os outros faria a
+  simulação exibir mudanças que ninguém pediu, sem que se soubesse de onde
+  vieram; para fazer isso de propósito existe `recalcular`.
+- **A mudança vinda do recálculo não conta no impacto.** Ela é consequência das
+  alterações dos itens, que já contaram; somar as duas relataria o dobro.
 - **`AjusteFiscal` é aditivo.** Cada linha guarda o valor anterior, a origem
   (`regra` ou `usuario`) e o lote. Nenhum ajuste sobrescreve outro; o efetivo
   é o mais recente que alcança o campo.
