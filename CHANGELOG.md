@@ -25,6 +25,19 @@ interno da implementação.
 - Gerar **sempre** registra a escrituração; não há como produzir um arquivo
   sem deixar rastro do que saiu. Gerar de novo cria um registro novo, sem
   apagar o anterior.
+- **`sped-hub fiscal classificar` mostra o que as regras propõem, sem aplicar
+  nada.** A lista traz o valor de agora, o sugerido e qual regra propôs, para
+  ser conferida antes. Só grava com `--aplicar`, e num lote que pode ser
+  desfeito inteiro. Regras de mesma prioridade disputando o mesmo campo
+  aparecem como conflito, em vez de o sistema escolher uma por conta própria.
+- **`sped-hub fiscal alterar` corrige vários documentos de uma vez, mostrando
+  antes o que mudaria.** Quantos documentos, quantos itens e quanto muda em
+  reais; só grava com `--confirmar`. Dá para recortar por período e por
+  qualquer campo (`--filtro ncm:comeca_com:2203`), e preencher só o que está
+  vazio sem tocar no que já tem valor.
+- **`sped-hub fiscal desfazer --lote` reverte um lote inteiro**, seja da
+  classificação ou de uma alteração em massa. O documento volta ao que era: o
+  que veio no XML nunca foi alterado.
 
 ### Corrigido
 - **Quem constrói no Windows não conseguia subir o nginx.** O Git converte a

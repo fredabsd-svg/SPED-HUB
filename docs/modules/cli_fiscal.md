@@ -3,8 +3,12 @@
 ## O que faz
 
 O subcomando `sped-hub fiscal` — a cadeia da Central de Documentos pela linha
-de comando: importar XML, listar o que entrou, gerar a EFD e conferir o que
-foi entregue contra o que sairia agora.
+de comando, na ordem em que ela acontece:
+
+```
+importar → documentos → classificar → alterar → gerar → conferir
+                                   ↘ desfazer ↙
+```
 
 Existe porque a suíte fiscal (fases 39 a 45) estava completa e inalcançável:
 nenhuma rota nem comando chegava até o importador, os geradores ou a
@@ -21,6 +25,8 @@ com os relatórios contábeis; o `cli.py` registra o parser e despacha.
 | `cmd_fiscal(args)` | Despacha a ação e traduz falhas em mensagem legível. |
 | `conferir_argumentos(args)` | A mensagem de erro por argumento faltando, ou `None`. |
 | `gravar(destino, texto)` | Escreve o arquivo SPED sem deixar o Python mexer na quebra de linha. |
+| `_filtro(bruto)` | `campo:valor`, `campo:operador:valor` ou `campo:operador`. |
+| `_valor_tipado(campo, bruto)` | O texto do terminal no tipo que a coluna espera. |
 | `GERADORES` | Os tipos de escrituração que o comando gera. |
 | `EXTENSOES` | O que `importar` recolhe ao varrer uma pasta. |
 | `DIVERGENTE` | O código de saída 2, de `conferir`. |
@@ -32,6 +38,9 @@ Ações:
 | `empresas` | As cadastradas, com o cadastro fiscal que decide se podem gerar. |
 | `importar CAMINHO…` | XML avulso ou pasta, varrida recursivamente por `.xml`. |
 | `documentos --empresa [--de --ate]` | Os documentos da Central, com o total. |
+| `classificar --empresa [--de --ate --aplicar]` | O que as regras propõem. Sem `--aplicar`, **não grava**. |
+| `alterar --empresa --campo --valor [--filtro --apenas-vazios --confirmar --forcar --motivo]` | Alteração em massa. Sem `--confirmar`, **só simula**. |
+| `desfazer --lote` | Reverte um lote inteiro de ajustes. |
 | `gerar --empresa --de --ate [--tipo --saida]` | Gera a EFD **e arquiva** a escrituração. |
 | `historico [--empresa]` | As escriturações geradas, com hash. |
 | `conferir --escrituracao [--diff]` | O entregue contra o que sairia agora. |
@@ -58,6 +67,30 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
 
 ## Decisões não óbvias e armadilhas
 
+- **`classificar` e `alterar` não gravam por padrão.** O motor de
+  classificação nunca aplica sozinho, e o módulo de massa separa `simular` de
+  `confirmar` — inverter isso na CLI desfaria, na porta de entrada, a proteção
+  que os motores têm por dentro. Os dois dizem em voz alta que não gravaram: o
+  silêncio faria parecer que a operação aconteceu.
+- **O que grava imprime o lote e como desfazê-lo.** Uma alteração em massa
+  errada estraga o mês inteiro de uma vez, e a reversão tem de estar à mão na
+  mesma tela — não no manual.
+- **`--valor` é convertido para o tipo da coluna.** Argumento de terminal é
+  sempre `str`; sem converter, alterar `base_icms` para `1000` mostraria
+  **impacto R$ 0,00** na simulação, porque a diferença entre `0.0` e `"1000"`
+  não é numérica — e é justamente o impacto que decide se a alteração passa. A
+  conversão reusa o `desserializar` da camada efetiva: duas conversões
+  diferentes para o mesmo campo acabariam divergindo.
+- **Campo inexistente é recusado antes de simular.** Uma alteração em massa
+  com nome errado não alcançaria nada, em silêncio, e pareceria "0 mudanças"
+  — indistinguível de um filtro que não casou.
+- **O filtro usa dois-pontos, não `=`.** Valor fiscal — NCM, CFOP, CST, CNPJ —
+  não tem dois-pontos dentro; o `=` apareceria em descrição de produto.
+- **Conflitos de classificação aparecem em bloco próprio.** O motor se recusa
+  a resolver empate de prioridade por sorteio; esconder isso faria a
+  classificação parecer completa quando ela parou no meio.
+- **A confiança da sugestão só é impressa quando não é total.** Repeti-la em
+  toda linha esconderia justamente a que merece atenção.
 - **`gerar` sempre arquiva, e não existe `--sem-arquivar`.** A ausência é
   deliberada. A terceira camada existe para responder "o que você enviou", e
   um arquivo que sai do sistema sem deixar registro é exatamente o buraco que
@@ -96,8 +129,8 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
 
 ## O que não faz
 
-- Não classifica nem aplica alterações em massa — o motor de classificação e o
-  `documentos.massa` existem e ainda não têm comando.
+- Não cadastra regras de classificação: `criar_regra` existe no módulo e a
+  única entrada é código (roadmap).
 - Não marca qual escrituração foi transmitida: todas ficam guardadas, e o
   sistema não tem como saber qual foi entregue (roadmap).
 - Não valida o arquivo contra o validador do Fisco.
