@@ -28,7 +28,7 @@ from src.db.models import (
 )
 from src.documentos import ORIGEM_USUARIO, ImportadorDeDocumentos, aplicar_ajuste
 from src.escrituracoes import (
-    ATIVIDADES,
+    ATIVIDADES_CONTRIBUICOES,
     REGIMES,
     CampoObrigatorioAusente,
     GeradorEFDContribuicoes,
@@ -158,7 +158,7 @@ class TestAtividadeObrigatoria:
         with pytest.raises(CampoObrigatorioAusente):
             _gerar(sessao, empresa)
 
-    @pytest.mark.parametrize("atividade", sorted(ATIVIDADES))
+    @pytest.mark.parametrize("atividade", sorted(ATIVIDADES_CONTRIBUICOES))
     def test_a_atividade_cadastrada_e_a_que_sai_no_0000(self, sessao, escritorio, atividade):
         empresa = _empresa(sessao, escritorio, atividade=atividade)
         assert _primeiro(_linhas(_gerar(sessao, empresa)), "0000")[12] == atividade
@@ -177,14 +177,61 @@ class TestAtividadeObrigatoria:
         assert campos[12] == COMERCIO
         assert campos[12] != empresa.ind_ativ
 
-    def test_ind_nat_pj_fixo_e_avisado(self, sessao, escritorio):
-        """Cooperativa e entidade de folha são minoria, mas precisam saber."""
+    def test_sem_natureza_declarada_sai_o_geral_com_aviso(self, sessao, escritorio):
+        """Há default razoável aqui, ao contrário do regime e da atividade.
+
+        Exigir a resposta de todo mundo por causa da minoria travaria quem não
+        tem o que declarar — mas o silêncio é dito em voz alta.
+        """
         empresa = _empresa(sessao, escritorio)
 
         resultado = _gerar(sessao, empresa)
 
         assert _primeiro(_linhas(resultado), "0000")[11] == "00"
-        assert any("IND_NAT_PJ" in a and "cooperativa" in a for a in resultado.avisos)
+        aviso = next(a for a in resultado.avisos if "IND_NAT_PJ" in a)
+        assert "não declarou a natureza jurídica" in aviso
+        assert "fiscal cadastro --ind-nat-pj" in aviso
+
+    def test_natureza_declarada_vai_para_o_arquivo(self, sessao, escritorio):
+        """Cooperativa apura por outra regra: declarar errado sai caro."""
+        empresa = _empresa(sessao, escritorio)
+        empresa.ind_nat_pj = "01"
+        sessao.commit()
+
+        resultado = _gerar(sessao, empresa)
+
+        assert _primeiro(_linhas(resultado), "0000")[11] == "01"
+        assert not [a for a in resultado.avisos if "não declarou a natureza" in a]
+
+    def test_natureza_fora_da_tabela_nao_e_repassada(self, sessao, escritorio):
+        """Valor inválido no cadastro não vira valor inválido no arquivo."""
+        empresa = _empresa(sessao, escritorio)
+        empresa.ind_nat_pj = "99"
+        sessao.commit()
+
+        resultado = _gerar(sessao, empresa)
+
+        assert _primeiro(_linhas(resultado), "0000")[11] == "00"
+        assert [a for a in resultado.avisos if "não declarou a natureza" in a]
+
+    @pytest.mark.parametrize("natureza", ["03", "04", "05"])
+    def test_natureza_de_scp_avisa_o_registro_que_falta(self, sessao, escritorio, natureza):
+        """As três naturezas de SCP exigem o 0035, que este gerador não escreve."""
+        empresa = _empresa(sessao, escritorio)
+        empresa.ind_nat_pj = natureza
+        sessao.commit()
+
+        resultado = _gerar(sessao, empresa)
+
+        assert _primeiro(_linhas(resultado), "0000")[11] == natureza
+        assert [a for a in resultado.avisos if "0035" in a]
+
+    def test_natureza_sem_scp_nao_avisa_do_0035(self, sessao, escritorio):
+        empresa = _empresa(sessao, escritorio)
+        empresa.ind_nat_pj = "02"
+        sessao.commit()
+
+        assert not [a for a in _gerar(sessao, empresa).avisos if "0035" in a]
 
 
 class TestCumulativoNaoTemCredito:

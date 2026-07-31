@@ -60,6 +60,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 51 | Saldo credor anterior no E110, vindo da escrituração transmitida do período anterior | concluída | `tests/test_saldo_credor_anterior.py` | só de escrituração **transmitida** e só se o período for contíguo; o valor é lido do arquivo, não recalculado. Mês sem nota mas com saldo passa a emitir o E110, senão o crédito some da cadeia |
 
+| 52 | Cadastro fiscal pela linha de comando, e a natureza jurídica da empresa | concluída | `tests/test_cli_fiscal.py`, `tests/test_gerador_efd_contribuicoes.py` | `fiscal cadastro` mostra o que falta para cada obrigação e valida contra as tabelas oficiais; o `IND_NAT_PJ` deixa de sair fixo em `00`. Cooperativa (01) e entidade de folha (02) passam a ser declaráveis; as naturezas de SCP (03, 04, 05) avisam que o registro 0035 não é gerado |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

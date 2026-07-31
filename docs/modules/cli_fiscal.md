@@ -6,7 +6,7 @@ O subcomando `sped-hub fiscal` — a cadeia da Central de Documentos pela linha
 de comando, na ordem em que ela acontece:
 
 ```
-regras → importar → documentos → classificar → alterar → apurar → espelho → gerar → transmitida → conferir
+cadastro → regras → importar → documentos → classificar → alterar → apurar → espelho → gerar → transmitida → conferir
                                              ↘ desfazer ↙
 ```
 
@@ -36,6 +36,7 @@ Ações:
 | Ação | Para quê |
 |---|---|
 | `empresas` | As cadastradas, com o cadastro fiscal que decide se podem gerar. |
+| `cadastro --empresa [--ind-perfil --ind-ativ --ind-ativ-contribuicoes --cod-inc-trib --ind-nat-pj]` | Mostra ou preenche o cadastro fiscal. Sem campos, é diagnóstico. |
 | `importar CAMINHO…` | XML avulso ou pasta, varrida recursivamente por `.xml`. |
 | `documentos --empresa [--de --ate]` | Os documentos da Central, com o total. |
 | `regras [--acao-regra listar\|criar\|remover]` | Cadastra, lista e desativa as regras de classificação. |
@@ -146,6 +147,14 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
 - **Os avisos da geração são impressos em bloco próprio.** São o canal de
   "leia antes de transmitir" que os geradores usam para dizer o que a apuração
   não cobre; engoli-los seria pior que não gerar.
+- **`cadastro` não usa `choices=` do argparse.** O argparse recusaria com
+  código de saída 2, que nesta CLI quer dizer "divergiu" e seria lido como
+  divergência por um script de fechamento. E a mensagem dele lista os códigos
+  sem as descrições, que é justamente o que importa: ninguém erra `2`, erra o
+  significado de `2`. A conferência é própria, e a recusa mostra a tabela.
+- **`cadastro` confere todos os campos antes de atribuir qualquer um.** Hoje a
+  sessão seria descartada de qualquer jeito ao levantar, mas depender disso é
+  depender de quem chama não commitar.
 - **`transmitida` existe porque o sistema não transmite.** Quem transmite é o
   programa validador da Receita; a marca vem de fora e precisa ser dita. Sem
   ela, a terceira camada guarda candidatos e não o registro do que foi enviado.

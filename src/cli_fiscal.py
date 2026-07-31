@@ -57,6 +57,11 @@ from src.documentos.ajustes import desserializar
 from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.classificacao import criar_regra
 from src.escrituracoes import (
+    ATIVIDADES_CONTRIBUICOES,
+    ATIVIDADES_ICMS,
+    NATUREZAS_PJ,
+    PERFIS,
+    REGIMES,
     TIPOS,
     ApuracaoIBSCBS,
     CampoObrigatorioAusente,
@@ -86,6 +91,31 @@ GERADORES = {
 EXTENSOES = {".xml"}
 
 DIVERGENTE = 2
+
+# O cadastro fiscal: os campos que decidem o enquadramento declarado no
+# arquivo, e que o validador do Fisco **não** confere — ele não tem como saber
+# qual é o certo.  Errar aqui produz arquivo aceito e intimação meses depois.
+#
+# A ordem é a de quem preenche: primeiro o que a EFD ICMS/IPI exige, depois o
+# que a EFD-Contribuições exige.  Cada linha traz a tabela de valores, para
+# que a recusa possa mostrá-la em vez de mandar procurar no Guia Prático.
+CADASTRO_FISCAL = {
+    "ind_perfil": ("IND_PERFIL do 0000 da EFD ICMS/IPI", PERFIS),
+    "ind_ativ": ("IND_ATIV do 0000 da EFD ICMS/IPI", ATIVIDADES_ICMS),
+    "ind_ativ_contribuicoes": (
+        "IND_ATIV do 0000 da EFD-Contribuições — tabela DIFERENTE da de cima",
+        ATIVIDADES_CONTRIBUICOES,
+    ),
+    "cod_inc_trib": ("COD_INC_TRIB do 0110 — decide se há crédito", REGIMES),
+    "ind_nat_pj": ("IND_NAT_PJ do 0000 — natureza jurídica", NATUREZAS_PJ),
+}
+
+# O que cada obrigação exige antes de gerar.  `ind_nat_pj` fica fora: tem
+# default, e por isso não impede a geração.
+EXIGIDOS = {
+    "efd_icms": ("ind_perfil", "ind_ativ"),
+    "efd_contribuicoes": ("cod_inc_trib", "ind_ativ_contribuicoes"),
+}
 
 
 def _empresa(sessao: Session, empresa_id: int) -> Empresa:
@@ -166,6 +196,55 @@ def _empresas(sessao: Session) -> int:
             f"{e.id:>4}  {e.cnpj:16} {(e.uf or '—'):3} "
             f"{(e.ind_perfil or '—'):7} {(e.cod_inc_trib or '—'):7} {e.nome}"
         )
+    print()
+    return 0
+
+
+def _cadastro(sessao: Session, args) -> int:
+    """Mostra ou preenche o cadastro fiscal da empresa.
+
+    Sem nenhum campo, é diagnóstico: mostra o que está preenchido e o que
+    falta para cada obrigação. É o comando que responde "por que a geração
+    recusou?" antes de alguém tentar gerar.
+
+    Os campos aqui são os que o validador do Fisco **não** confere — ele não
+    tem como saber qual é o certo. Por isso o valor é conferido contra a
+    tabela na hora de gravar, e a recusa mostra a tabela inteira.
+    """
+    empresa = _empresa(sessao, args.empresa)
+    informados = {
+        campo: getattr(args, campo) for campo in CADASTRO_FISCAL if getattr(args, campo, None)
+    }
+
+    # Confere TUDO antes de atribuir QUALQUER coisa.  Hoje a sessão seria
+    # descartada de qualquer jeito ao levantar, mas depender disso é depender
+    # de quem chama não commitar — e este módulo não é o único que pode chamar.
+    for campo, valor in informados.items():
+        rotulo, tabela = CADASTRO_FISCAL[campo]
+        if valor not in tabela:
+            opcoes = "; ".join(f"{c} = {d}" for c, d in sorted(tabela.items()))
+            raise ValueError(
+                f"{valor!r} não é um valor válido de {campo} ({rotulo}). "
+                f"Os válidos são: {opcoes}"
+            )
+
+    for campo, valor in informados.items():
+        setattr(empresa, campo, valor)
+    if informados:
+        sessao.commit()
+
+    print(f"\nCadastro fiscal — {empresa.nome} ({empresa.cnpj})")
+    for campo, (_, tabela) in CADASTRO_FISCAL.items():
+        valor = getattr(empresa, campo)
+        descricao = tabela.get(valor, "—" if valor is None else "VALOR FORA DA TABELA")
+        marca = "*" if campo in informados else " "
+        print(f" {marca} {campo:24} {(valor or '—'):4} {descricao}")
+
+    print()
+    for tipo, campos in EXIGIDOS.items():
+        faltando = [c for c in campos if getattr(empresa, c) not in CADASTRO_FISCAL[c][1]]
+        estado = f"FALTA {', '.join(faltando)}" if faltando else "pronta para gerar"
+        print(f"  {TIPOS[tipo]:20} {estado}")
     print()
     return 0
 
@@ -738,6 +817,7 @@ def _documentos_do_recorte(sessao: Session, empresa, args) -> list[DocumentoFisc
 
 ACOES = {
     "empresas": lambda sessao, args: _empresas(sessao),
+    "cadastro": _cadastro,
     "importar": _importar,
     "documentos": _documentos,
     "classificar": _classificar,
@@ -815,6 +895,20 @@ def registrar(sub) -> None:
     p.add_argument("--escrituracao", type=int, help="ID da escrituração (em `conferir`)")
     p.add_argument("--diff", action="store_true", help="Mostra as linhas divergentes")
     p.add_argument("--recibo", help="Número do recibo do Fisco (em `transmitida`)")
+
+    # ── cadastro fiscal ────────────────────────────────────────────────────
+    # Sem `choices=`: o argparse recusaria com código 2, que nesta CLI quer
+    # dizer "divergiu" e seria lido como divergência por um script de
+    # fechamento.  E a mensagem dele lista os códigos sem as descrições, que é
+    # justamente o que importa aqui — ninguém erra "2", erra o significado
+    # de 2.  A conferência é em `_cadastro`, com a tabela inteira na recusa.
+    for campo, (rotulo, tabela) in CADASTRO_FISCAL.items():
+        p.add_argument(
+            f"--{campo.replace('_', '-')}",
+            dest=campo,
+            metavar="CODIGO",
+            help=f"{rotulo} ({', '.join(f'{c}={d}' for c, d in sorted(tabela.items()))})",
+        )
     p.add_argument(
         "--transmitidas",
         action="store_true",
@@ -896,6 +990,7 @@ def registrar(sub) -> None:
 # dentro de cada função, é o que dá a mesma mensagem para todos os casos.
 OBRIGATORIOS = {
     "importar": ("caminhos",),
+    "cadastro": ("empresa",),
     "documentos": ("empresa",),
     "classificar": ("empresa",),
     "alterar": ("empresa", "campo", "valor"),
