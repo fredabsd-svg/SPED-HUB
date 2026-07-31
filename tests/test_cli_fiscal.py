@@ -17,6 +17,7 @@ O que estes testes protegem:
 from __future__ import annotations
 
 import datetime
+import json
 from unittest import mock
 
 import pytest
@@ -30,6 +31,7 @@ from src.db.models import (
     Empresa,
     Escritorio,
     Escrituracao,
+    RegraFiscal,
     criar_engine,
     get_session,
     init_db,
@@ -950,3 +952,217 @@ class TestArgumentosDoMeioDoFluxo:
         saida = capsys.readouterr().out
         assert codigo == 1
         assert faltando in saida
+
+
+# ── Cadastro de regras ─────────────────────────────────────────────────────
+
+
+def _regras_no_banco(url) -> list:
+    with _sessao(url) as sessao:
+        return sessao.execute(select(RegraFiscal).order_by(RegraFiscal.id)).scalars().all()
+
+
+def _criar_regra(url, *extras):
+    return main(
+        [
+            "fiscal",
+            "regras",
+            "--acao-regra",
+            "criar",
+            "--nome",
+            "Bebida vira 2102",
+            "--se",
+            "ncm:comeca_com:2203",
+            "--entao",
+            "cfop:2102",
+            "--escritorio",
+            "1",
+            "--db",
+            url,
+            *extras,
+        ]
+    )
+
+
+class TestCadastroDeRegras:
+    """Sem isto, `classificar` não tem o que aplicar: a única entrada era código."""
+
+    def test_a_regra_criada_pela_cli_classifica(self, importado, capsys):
+        """O teste que liga as duas pontas — cadastrar e depois usar."""
+        assert _criar_regra(importado) == 0
+        capsys.readouterr()
+
+        main(["fiscal", "classificar", "--empresa", "1", "--db", importado])
+
+        saida = capsys.readouterr().out
+        assert "sugestões" in saida
+        assert "'6102' → '2102'" in saida
+        assert "Bebida vira 2102" in saida
+
+    def test_listar_mostra_condicoes_e_acoes(self, importado, capsys):
+        """A regra sem as condições na tela não dá para conferir."""
+        _criar_regra(importado, "--prioridade", "10")
+        capsys.readouterr()
+
+        assert main(["fiscal", "regras", "--db", importado]) == 0
+
+        saida = capsys.readouterr().out
+        assert "Bebida vira 2102" in saida
+        assert "ncm comeca_com '2203'" in saida
+        assert "cfop = '2102'" in saida
+
+    def test_listar_mostra_a_prioridade(self, importado, capsys):
+        """A prioridade decide quem vence; sem ela na tela não dá para prever.
+
+        A prioridade é conferida na **linha da regra**, não no texto todo:
+        procurar o número solto passaria por acidente — "10" está dentro de
+        "2102", que aparece na ação.
+        """
+        _criar_regra(importado, "--prioridade", "77")
+        capsys.readouterr()
+
+        main(["fiscal", "regras", "--db", importado])
+
+        linha = next(ln for ln in capsys.readouterr().out.splitlines() if "Bebida vira 2102" in ln)
+        assert "77" in linha
+
+    def test_listar_vazio_nao_quebra(self, importado, capsys):
+        assert main(["fiscal", "regras", "--db", importado]) == 0
+        assert "Nenhuma regra" in capsys.readouterr().out
+
+    def test_a_condicao_usa_a_mesma_sintaxe_do_filtro(self, importado):
+        """Duas sintaxes para a mesma pergunta acabariam divergindo."""
+        _criar_regra(importado)
+
+        condicoes = json.loads(_regras_no_banco(importado)[0].condicoes)
+
+        assert condicoes == [{"campo": "ncm", "operador": "comeca_com", "valor": "2203"}]
+
+    def test_condicao_sem_valor_nao_grava_valor_nulo(self, importado):
+        """`"valor": None` faria a regra parecer comparar com nulo."""
+        main(
+            [
+                "fiscal",
+                "regras",
+                "--acao-regra",
+                "criar",
+                "--nome",
+                "CFOP em branco",
+                "--se",
+                "cfop:vazio",
+                "--entao",
+                "cfop:2102",
+                "--db",
+                importado,
+            ]
+        )
+
+        condicoes = json.loads(_regras_no_banco(importado)[0].condicoes)
+
+        assert condicoes == [{"campo": "cfop", "operador": "vazio"}]
+
+    def test_acao_sem_dois_pontos_e_recusada(self, importado, capsys):
+        """Uma ação válida e uma quebrada: a quebrada tem de derrubar as duas."""
+        codigo = _criar_regra(importado, "--entao", "semvalor")
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert "semvalor" in saida
+        assert _regras_no_banco(importado) == [], "gravou regra pela metade"
+
+    def test_operador_inexistente_e_recusado(self, importado, capsys):
+        codigo = main(
+            [
+                "fiscal",
+                "regras",
+                "--acao-regra",
+                "criar",
+                "--nome",
+                "X",
+                "--se",
+                "ncm:parecido_com:2203",
+                "--entao",
+                "cfop:2102",
+                "--db",
+                importado,
+            ]
+        )
+
+        assert codigo == 1
+        assert "ERRO" in capsys.readouterr().out
+
+    def test_prioridade_e_vigencia_sao_guardadas(self, importado):
+        _criar_regra(importado, "--prioridade", "7", "--de", "2026-01-01", "--ate", "2026-12-31")
+
+        regra = _regras_no_banco(importado)[0]
+
+        assert regra.prioridade == 7
+        assert regra.vigencia_inicio == datetime.date(2026, 1, 1)
+        assert regra.vigencia_fim == datetime.date(2026, 12, 31)
+
+
+class TestRemoverRegra:
+    def test_remover_desativa_em_vez_de_apagar(self, importado, capsys):
+        """A regra apagada deixaria sem explicação os ajustes que ela gerou.
+
+        O `AjusteFiscal` guarda o nome da regra, e quem for auditar o mês vai
+        querer saber qual era a condição.
+        """
+        _criar_regra(importado)
+        capsys.readouterr()
+
+        codigo = main(
+            ["fiscal", "regras", "--acao-regra", "remover", "--regra", "1", "--db", importado]
+        )
+
+        regras = _regras_no_banco(importado)
+        assert codigo == 0
+        assert len(regras) == 1, "apagou em vez de desativar"
+        assert regras[0].ativa is False
+        assert "desativada" in capsys.readouterr().out
+
+    def test_regra_desativada_nao_classifica_mais(self, importado, capsys):
+        _criar_regra(importado)
+        main(["fiscal", "regras", "--acao-regra", "remover", "--regra", "1", "--db", importado])
+        capsys.readouterr()
+
+        main(["fiscal", "classificar", "--empresa", "1", "--db", importado])
+
+        assert "0 sugestões" in capsys.readouterr().out
+
+    def test_regra_inexistente_e_um(self, importado, capsys):
+        codigo = main(
+            ["fiscal", "regras", "--acao-regra", "remover", "--regra", "99", "--db", importado]
+        )
+
+        assert codigo == 1
+        assert "não existe regra #99" in capsys.readouterr().out
+
+    def test_listar_mostra_a_desativada(self, importado, capsys):
+        """Sumir da lista faria parecer que a regra nunca existiu."""
+        _criar_regra(importado)
+        main(["fiscal", "regras", "--acao-regra", "remover", "--regra", "1", "--db", importado])
+        capsys.readouterr()
+
+        main(["fiscal", "regras", "--db", importado])
+
+        saida = capsys.readouterr().out
+        assert "Bebida vira 2102" in saida
+        assert "não" in saida, "a coluna Ativa"
+
+
+class TestArgumentosDeRegras:
+    @pytest.mark.parametrize(
+        ("acao_regra", "faltando"),
+        [("criar", "--nome"), ("criar", "--se"), ("criar", "--entao"), ("remover", "--regra")],
+    )
+    def test_falta_de_argumento_e_recusada(self, banco, capsys, acao_regra, faltando):
+        codigo = main(["fiscal", "regras", "--acao-regra", acao_regra, "--db", banco])
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert faltando in saida
+        assert acao_regra in saida, "a mensagem tem de dizer qual ação"
+
+    def test_listar_nao_exige_nada(self, banco):
+        assert main(["fiscal", "regras", "--db", banco]) == 0

@@ -6,8 +6,8 @@ O subcomando `sped-hub fiscal` — a cadeia da Central de Documentos pela linha
 de comando, na ordem em que ela acontece:
 
 ```
-importar → documentos → classificar → alterar → gerar → conferir
-                                   ↘ desfazer ↙
+regras → importar → documentos → classificar → alterar → gerar → conferir
+                                             ↘ desfazer ↙
 ```
 
 Existe porque a suíte fiscal (fases 39 a 45) estava completa e inalcançável:
@@ -38,6 +38,7 @@ Ações:
 | `empresas` | As cadastradas, com o cadastro fiscal que decide se podem gerar. |
 | `importar CAMINHO…` | XML avulso ou pasta, varrida recursivamente por `.xml`. |
 | `documentos --empresa [--de --ate]` | Os documentos da Central, com o total. |
+| `regras [--acao-regra listar\|criar\|remover]` | Cadastra, lista e desativa as regras de classificação. |
 | `classificar --empresa [--de --ate --aplicar]` | O que as regras propõem. Sem `--aplicar`, **não grava**. |
 | `alterar --empresa --campo --valor [--filtro --apenas-vazios --confirmar --forcar --motivo]` | Alteração em massa. Sem `--confirmar`, **só simula**. |
 | `desfazer --lote` | Reverte um lote inteiro de ajustes. |
@@ -67,6 +68,17 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
 
 ## Decisões não óbvias e armadilhas
 
+- **A condição de uma regra usa a mesma sintaxe do `--filtro`.** As duas
+  coisas são a mesma pergunta — "quais documentos casam com isto" —, e duas
+  sintaxes para a mesma pergunta acabariam divergindo, com quem usa tendo de
+  lembrar qual vale onde. A ação é `campo:valor`, sem operador: ela atribui.
+- **Condição sem valor não grava `"valor": None`.** `vazio` e `preenchido` não
+  comparam com nada; gravar o nulo faria a regra parecer comparar com nulo.
+- **`regras remover` desativa, não apaga.** Uma regra apagada deixaria sem
+  explicação os ajustes que ela gerou: o `AjusteFiscal` guarda o nome da
+  regra, e quem for auditar o mês vai querer saber qual era a condição. A
+  regra desativada continua na listagem, com a coluna `Ativa` em "não" —
+  sumir da lista faria parecer que ela nunca existiu.
 - **`classificar` e `alterar` não gravam por padrão.** O motor de
   classificação nunca aplica sozinho, e o módulo de massa separa `simular` de
   `confirmar` — inverter isso na CLI desfaria, na porta de entrada, a proteção
@@ -129,8 +141,8 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
 
 ## O que não faz
 
-- Não cadastra regras de classificação: `criar_regra` existe no módulo e a
-  única entrada é código (roadmap).
+- Não edita regra existente: a correção é desativar e criar outra, o que
+  preserva a explicação dos ajustes que a primeira gerou.
 - Não marca qual escrituração foi transmitida: todas ficam guardadas, e o
   sistema não tem como saber qual foi entregue (roadmap).
 - Não valida o arquivo contra o validador do Fisco.
