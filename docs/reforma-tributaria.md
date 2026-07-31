@@ -132,12 +132,42 @@ alíquota específica, e que os dois regimes convivem. Os **valores** de alíquo
 e os **códigos** de classificação são dado de entrada, lido do XML — o sistema
 não os calcula nem os presume.
 
+## A apuração
+
+`src/escrituracoes/reforma.py` soma CBS, IBS e IS de um período, a partir da
+camada efetiva — os documentos normalizados mais os ajustes. Três decisões
+carregam o resultado:
+
+**O Imposto Seletivo não gera crédito.** É extrafiscal e monofásico: incide
+uma vez na cadeia, e quem revende não credita o que veio na entrada. Por isso
+`ResultadoApuracao.seletivo` é um número, não um `Tributo` — dar-lhe um campo
+`credito` seria convidar alguém a preenchê-lo. Tratá-lo como CBS e IBS
+reduziria o imposto devido pelo valor do IS das compras, num resultado com a
+mesma cara de uma apuração correta.
+
+**As duas parcelas do IBS são apuradas em separado.** A estadual e a municipal
+vão para entes diferentes, e uma pode ter saldo credor enquanto a outra tem
+imposto a pagar. Compensar uma com a outra seria pagar o estado com dinheiro
+do município. `ibs_total_devido` existe só para exibição, e soma os dois
+*devidos* — não os débitos e créditos brutos.
+
+**O total de 2026 não é o valor a recolher.** No ano de teste, CBS a 0,9% e
+IBS a 0,1% são destacados no documento, com mecanismo de compensação e
+dispensa para quem cumpre as obrigações acessórias — que o sistema não modela.
+O resultado avisa isso enquanto o período tocar 2026, e só enquanto tocar: um
+aviso que sai sempre não informa nada.
+
+**Nota sem os grupos novos não quebra a apuração.** A transição dura sete
+anos e o mesmo período mistura documentos com e sem IBS/CBS/IS; os campos
+ausentes valem zero.
+
 ## O que ainda não existe
 
 Esta página descreve o que o modelo de dados representa. Não existe ainda:
 
-- apuração de CBS, IBS ou IS;
 - escrituração dos tributos novos em obrigação acessória;
+- monofásico, retenção, diferimento, crédito presumido e devolução de tributo
+  na apuração — os campos são lidos, e a soma direta não os consome;
 - validação de CST contra a tabela oficial;
 - tratamento do split payment;
 - regimes específicos e diferenciados.

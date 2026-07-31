@@ -40,21 +40,31 @@ from src.escrituracoes.efd_contribuicoes import (
     GeradorEFDContribuicoes,
 )
 from src.escrituracoes.efd_icms import BLOCOS, COD_VER, GeradorEFDICMS
+from src.escrituracoes.reforma import (
+    ANO_DE_TESTE,
+    ApuracaoIBSCBS,
+    ResultadoApuracao,
+    Tributo,
+)
 
 __all__ = [
+    "ANO_DE_TESTE",
     "ATIVIDADES",
     "BLOCOS",
     "COD_VER",
     "REGIMES",
     "TIPOS",
+    "ApuracaoIBSCBS",
     "CampoObrigatorioAusente",
     "Comparacao",
     "GeradorBase",
     "GeradorEFDContribuicoes",
     "GeradorEFDICMS",
     "Registro",
+    "ResultadoApuracao",
     "ResultadoGeracao",
     "TipoDesconhecido",
+    "Tributo",
     "arquivar",
     "avisos_de",
     "comparar",

@@ -9,6 +9,16 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **A apuração dos tributos da Reforma já funciona.** CBS, IBS e Imposto
+  Seletivo são somados por período, a partir dos documentos importados. Os
+  grupos passam a ser exigidos na NF-e em 03/08/2026, e até aqui os valores
+  entravam no sistema sem que nada os consumisse. Três pontos que o resultado
+  deixa explícito: o **Imposto Seletivo não gera crédito** (o que veio na
+  compra é custo); as parcelas **estadual e municipal do IBS** são apuradas em
+  separado, porque vão para entes diferentes e uma não abate a outra; e o
+  total de **2026 não é o valor a recolher** — é ano de teste, com compensação
+  e dispensa que o sistema não calcula. Nota antiga, sem os grupos novos, não
+  quebra a apuração: os dois regimes convivem até 2033.
 - **`sped-hub fiscal`: dá para importar XML de nota, gerar a EFD e conferir o
   que foi entregue.** A Central de Documentos, os geradores da EFD ICMS/IPI e
   da EFD-Contribuições e o registro do que foi enviado já existiam por dentro,
