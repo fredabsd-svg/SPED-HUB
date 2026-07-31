@@ -26,6 +26,8 @@ def nfe_xml(
     com_reforma: bool = True,
     is_especifico: bool = False,
     itens: int = 1,
+    mod_frete: str | None = None,
+    valor_frete: float = 0.0,
 ) -> bytes:
     """Monta uma NF-e completa.
 
@@ -49,6 +51,10 @@ def nfe_xml(
         if com_reforma
         else ""
     )
+    # O grupo `transp` é opcional aqui de propósito: nota sem ele é o que se
+    # recebe de emissor que não preenche o frete, e é o caso que o gerador
+    # precisa tratar sem inventar quem pagou.
+    transporte = f"\n      <transp><modFrete>{mod_frete}</modFrete></transp>" if mod_frete else ""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe>
@@ -85,7 +91,7 @@ def nfe_xml(
           <vICMS>{180.00 * itens:.2f}</vICMS>
           <vST>0.00</vST>
           <vProd>{total_prod:.2f}</vProd>
-          <vFrete>0.00</vFrete>
+          <vFrete>{valor_frete:.2f}</vFrete>
           <vSeg>0.00</vSeg>
           <vDesc>0.00</vDesc>
           <vOutro>0.00</vOutro>
@@ -94,7 +100,7 @@ def nfe_xml(
           <vCOFINS>{76.00 * itens:.2f}</vCOFINS>
           <vNF>{total_prod:.2f}</vNF>
         </ICMSTot>{reforma_tot}
-      </total>
+      </total>{transporte}
     </infNFe>
   </NFe>
   <protNFe versao="4.00">

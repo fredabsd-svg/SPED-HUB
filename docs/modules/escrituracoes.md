@@ -24,6 +24,12 @@ de registro e as contagens do bloco 9. Essa última é a razão principal de a
 base existir — é onde gerador próprio erra, e acertá-la numa escrituração e
 errá-la na seguinte seria o resultado natural de duplicar o código.
 
+`leiaute.py` guarda os campos de cada registro na ordem oficial, e `_add`
+confere cada linha escrita contra essa lista. É estrutural, não teste: campo
+esquecido no meio de um registro desloca todos os seguintes e produz um arquivo
+que parece certo — o `C100` saiu sem o `IND_FRT` até que essa conferência
+existisse.
+
 ## O que expõe
 
 | Símbolo | Para quê |
@@ -34,7 +40,10 @@ errá-la na seguinte seria o resultado natural de duplicar o código.
 | `ResultadoGeracao.texto()` | O arquivo, com CRLF. |
 | `ResultadoGeracao.avisos` | O que a apuração não cobre — para ser lido antes de transmitir. |
 | `ResultadoGeracao.contagem_por_tipo()` | Quantos registros de cada tipo. |
-| `GeradorBase` | O que os geradores compartilham; base de um gerador novo. |
+| `GeradorBase` | O que os geradores compartilham; base de um gerador novo. Precisa declarar `LEIAUTE`. |
+| `EFD_ICMS` / `EFD_CONTRIBUICOES` | Os campos de cada registro, na ordem do leiaute. |
+| `conferir(leiaute, tipo, campos)` | Levanta `RegistroForaDoLeiaute` ou `CamposEmDesacordo`. |
+| `MODALIDADES_DE_FRETE` | Os códigos válidos de `modFrete` / `IND_FRT`. |
 | `Registro` | Uma linha, com os campos ainda em lista. |
 | `formatar_valor` / `formatar_data` | Vírgula decimal e `ddmmaaaa`. |
 | `CampoObrigatorioAusente` | Falta cadastro sem o qual o arquivo sairia errado. |
@@ -84,6 +93,27 @@ arquivadas.
 
 ## Decisões não óbvias e armadilhas
 
+- **Campo esquecido no meio de um registro não parece erro nenhum.** O `C100`
+  saía sem o `IND_FRT`, que é o campo 17, logo depois do `VL_MERC`. O arquivo
+  saía bem-formado, com as barras nos lugares certos — e os doze valores
+  seguintes ocupando a posição do vizinho: o frete no campo do indicador de
+  frete, a base do ICMS em "outras despesas", e assim até o fim da linha. A
+  suíte inteira passava, porque os testes procuravam os números na linha e
+  nenhum olhava para a **posição**. Daí `leiaute.py` e a conferência dentro de
+  `_add`: teste confere o que alguém lembrou de exercitar, e isto confere toda
+  linha escrita. Faltavam também o `VL_ABAT_NT` do `C170` e o `DEB_ESP` do
+  `E110`, os dois no fim do registro.
+- **O `IND_FRT` é repasse do documento, não dedução do gerador.** O `modFrete`
+  da NF-e e o `IND_FRT` do C100 têm a mesma tabela desde 01/01/2018, então o
+  campo viaja sem conversão. Quando o documento não traz a modalidade e também
+  não tem frete, `9` (sem frete) é o único código possível e sai calado; quando
+  há frete e não se sabe quem pagou, sai `9` do mesmo jeito — o campo é
+  obrigatório, e vazio só trocaria um erro por outro — mas o resultado avisa
+  nomeando os documentos. Escolher `0` afirmaria que o remetente pagou, e
+  afirmação errada num campo que o validador aceita é o pior desfecho: ninguém
+  descobre.
+- **`modFrete` fora da tabela não é repassado.** O grupo `transp` vem de quem
+  emitiu a nota; não há razão para confiar nele mais do que na ausência dele.
 - **No regime cumulativo não há crédito.** A empresa que apura pelo lucro
   presumido paga PIS e Cofins sobre a receita e não desconta nada das compras.
   Um gerador que somasse os créditos das entradas ali produziria contribuição a

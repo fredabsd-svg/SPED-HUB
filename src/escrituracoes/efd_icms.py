@@ -19,7 +19,7 @@ empresa, e o gerador recusa gerar sem ele em vez de inventar um padrão.
 
 A apuração do bloco E é a soma direta dos débitos e créditos dos documentos
 escriturados. Empresa com ajuste, benefício ou saldo credor anterior precisa
-conferir e complementar — está registrado em `docs/escrituracoes.md`.
+conferir e complementar — está registrado em `docs/modules/escrituracoes.md`.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from src.escrituracoes.base import (
     formatar_valor,
 )
 from src.escrituracoes.base import texto as _texto
+from src.escrituracoes.leiaute import EFD_ICMS
 
 logger = logging.getLogger("sped-hub.escrituracoes")
 
@@ -61,6 +62,8 @@ _ATIVIDADES = {"0", "1"}
 
 class GeradorEFDICMS(GeradorBase):
     """Monta a EFD ICMS/IPI de um período."""
+
+    LEIAUTE = EFD_ICMS
 
     def __init__(
         self,
@@ -85,7 +88,7 @@ class GeradorEFDICMS(GeradorBase):
         documentos = self._documentos()
         visoes = [self._visao(d) for d in documentos]
 
-        self._resultado = ResultadoGeracao(documentos_ids=[d.id for d in documentos])
+        self._reiniciar([d.id for d in documentos])
         self._bloco_0(visoes)
         self._bloco_c(visoes)
         self._bloco_e(visoes)
@@ -95,6 +98,7 @@ class GeradorEFDICMS(GeradorBase):
             self._resultado.avisos.append(
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
+        self._avisar_frete_sem_modalidade()
         return self._resultado
 
     def _conferir_cadastro(self) -> None:
@@ -282,6 +286,7 @@ class GeradorEFDICMS(GeradorBase):
             formatar_valor(c["valor_desconto"]),
             "",  # VL_ABAT_NT
             formatar_valor(c["valor_produtos"]),
+            self._ind_frt(c),
             formatar_valor(c["valor_frete"]),
             formatar_valor(c["valor_seguro"]),
             formatar_valor(c["valor_outras"]),
@@ -340,6 +345,7 @@ class GeradorEFDICMS(GeradorBase):
             "",  # ALIQ_COFINS_QUANT
             formatar_valor(item["valor_cofins"]),
             "",  # COD_CTA
+            "",  # VL_ABAT_NT
         )
 
     def _analitico_c190(self, visao: dict) -> list[list[str]]:
@@ -400,7 +406,7 @@ class GeradorEFDICMS(GeradorBase):
 
         Soma direta, sem ajuste da tabela 5.1.1 e sem saldo credor anterior —
         que este gerador não conhece. Empresa que tenha qualquer um dos dois
-        precisa complementar; está dito em `docs/escrituracoes.md` e num aviso
+        precisa complementar; está dito em `docs/modules/escrituracoes.md` e num aviso
         do resultado.
         """
         debitos = credito = 0.0
@@ -427,6 +433,7 @@ class GeradorEFDICMS(GeradorBase):
             "",  # VL_TOT_DED
             formatar_valor(saldo) if saldo > 0 else "",
             formatar_valor(-saldo) if saldo < 0 else "",
+            "",  # DEB_ESP
         )
         self._resultado.avisos.append(
             "apuração do E110 é a soma direta dos documentos: não inclui ajustes da "
