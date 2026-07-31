@@ -52,6 +52,31 @@ from src.documentos.ajustes import valor_efetivo
 # e dispensa que este módulo não modela.
 ANO_DE_TESTE = 2026
 
+# Os campos que o documento traz e que esta apuração **não** consome.  Estão
+# aqui para serem MEDIDOS, não para serem somados: o aviso genérico "não cobre
+# monofásico, diferimento…" é idêntico para quem tem cinquenta mil reais de
+# diferimento e para quem tem zero, e um aviso que aparece sempre treina a
+# pessoa a ignorar todos os outros.
+#
+# Medir é livre de palpite: são valores destacados no próprio documento, não
+# códigos cuja semântica seria preciso interpretar.
+NAO_CONSUMIDOS = {
+    "valor_diferido": "diferimento",
+    "valor_credito_presumido": "crédito presumido",
+    "valor_credito_presumido_susp": "crédito presumido suspenso",
+    "valor_devolucao_tributo": "devolução de tributo",
+    "valor_ibs_mono": "IBS monofásico",
+    "valor_cbs_mono": "CBS monofásica",
+    "valor_ibs_mono_retido": "IBS monofásico retido",
+    "valor_cbs_mono_retido": "CBS monofásica retida",
+}
+
+# O CST que dispensa tratamento específico.  É o único código da tabela do
+# IBS/CBS cuja leitura é consensual entre as fontes consultadas; os demais são
+# LISTADOS, nunca interpretados — a IT 002/2025 ainda está em revisão e as
+# fontes secundárias divergem entre si.  Ver `docs/reforma-tributaria.md`.
+CST_TRIBUTACAO_INTEGRAL = "000"
+
 
 @dataclass
 class Tributo:
@@ -85,6 +110,12 @@ class ResultadoApuracao:
     # O IS é só débito.  Não é `Tributo` de propósito: dar-lhe um campo
     # `credito` seria convidar alguém a preenchê-lo.
     seletivo: float = 0.0
+    # Rótulo → (valor somado, quantidade de itens).  O que o documento trouxe e
+    # esta apuração não consumiu.
+    nao_cobertos: dict[str, tuple[float, int]] = field(default_factory=dict)
+    # CST de IBS/CBS diferentes de `000`, com quantos itens em cada.  São
+    # listados, não interpretados.
+    cst_encontrados: dict[str, int] = field(default_factory=dict)
     avisos: list[str] = field(default_factory=list)
 
     @property
@@ -111,6 +142,11 @@ class ResultadoApuracao:
                 "credito": self.ibs_municipal.credito,
             },
             "seletivo": self.seletivo,
+            "nao_cobertos": {
+                rotulo: {"valor": valor, "itens": itens}
+                for rotulo, (valor, itens) in sorted(self.nao_cobertos.items())
+            },
+            "cst_encontrados": dict(sorted(self.cst_encontrados.items())),
             "total_devido": round(self.total_devido, 2),
             "avisos": list(self.avisos),
         }
@@ -192,6 +228,27 @@ class ApuracaoIBSCBS:
             if saida:
                 resultado.seletivo += efetivo("valor_is")
 
+            self._medir_o_que_nao_cobre(item, do_item, resultado)
+
+    def _medir_o_que_nao_cobre(self, item, ajustes: list, resultado: ResultadoApuracao) -> None:
+        """Registra o que o documento trouxe e a apuração não consumiu.
+
+        Medir em vez de avisar sempre: o aviso genérico é idêntico para quem
+        tem diferimento e para quem não tem, e aviso que aparece sempre treina
+        a pessoa a ignorar todos os outros. Com valor e contagem, quem lê sabe
+        se aquilo é o mês dele.
+        """
+        for campo, rotulo in NAO_CONSUMIDOS.items():
+            valor = valor_efetivo(item, campo, ajustes) or 0.0
+            if not valor:
+                continue
+            somado, itens = resultado.nao_cobertos.get(rotulo, (0.0, 0))
+            resultado.nao_cobertos[rotulo] = (somado + valor, itens + 1)
+
+        cst = (valor_efetivo(item, "cst_ibscbs", ajustes) or "").strip()
+        if cst and cst != CST_TRIBUTACAO_INTEGRAL:
+            resultado.cst_encontrados[cst] = resultado.cst_encontrados.get(cst, 0) + 1
+
     def _avisar(self, resultado: ResultadoApuracao) -> None:
         """O que o número não diz — e sem o que ele engana."""
         if not resultado.documentos:
@@ -217,8 +274,30 @@ class ApuracaoIBSCBS:
             "vão para entes diferentes; o município do fato gerador pode não ser o do "
             "destinatário"
         )
+        # O aviso genérico continua, porque split payment e regimes
+        # específicos não têm campo próprio no documento para serem medidos.
         resultado.avisos.append(
             "esta apuração é a soma direta do que está destacado nos documentos: não "
-            "cobre monofásico, retenção, diferimento, crédito presumido, devolução de "
-            "tributo, split payment nem regimes específicos"
+            "cobre split payment nem regimes específicos e diferenciados"
         )
+
+        if resultado.nao_cobertos:
+            detalhe = "; ".join(
+                f"{rotulo}: {valor:.2f} em {itens} item(ns)"
+                for rotulo, (valor, itens) in sorted(resultado.nao_cobertos.items())
+            )
+            resultado.avisos.append(
+                f"HÁ valores no período que esta apuração NÃO consumiu — {detalhe}. "
+                "Não estão no total; precisam de tratamento próprio antes de recolher"
+            )
+
+        if resultado.cst_encontrados:
+            detalhe = ", ".join(
+                f"{cst} ({itens} item(ns))"
+                for cst, itens in sorted(resultado.cst_encontrados.items())
+            )
+            resultado.avisos.append(
+                f"há itens com CST de IBS/CBS diferente de {CST_TRIBUTACAO_INTEGRAL} "
+                f"(tributação integral): {detalhe}. O valor destacado foi somado sem "
+                "tratamento específico — confira o enquadramento de cada um"
+            )

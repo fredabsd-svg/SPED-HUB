@@ -1643,3 +1643,56 @@ class TestCadastroFiscal:
                 cli_fiscal._cadastro(sessao, args)
 
             assert empresa.ind_perfil == "A", "o valor anterior sobrevive"
+
+
+class TestApurarMostraOQueFicaDeFora:
+    """Valor que a apuração não consome não pode sumir da tela."""
+
+    def _com_diferimento(self, url, valor=1500.0):
+        with _sessao(url) as sessao:
+            documento = sessao.execute(select(DocumentoFiscal)).scalars().first()
+            for item in documento.itens:
+                aplicar_ajuste(
+                    sessao,
+                    documento=documento,
+                    item=item,
+                    campo="valor_diferido",
+                    valor_novo=valor,
+                    origem=ORIGEM_USUARIO,
+                )
+            sessao.commit()
+
+    def test_valor_nao_consumido_aparece_fora_do_total(self, importado, capsys):
+        self._com_diferimento(importado)
+        capsys.readouterr()
+
+        _apurar(importado)
+
+        saida = capsys.readouterr().out
+        assert "FORA DO TOTAL" in saida
+        assert "diferimento" in saida
+        assert "1.500,00" in saida
+
+    def test_sem_esses_valores_a_secao_nao_aparece(self, importado, capsys):
+        _apurar(importado)
+
+        assert "FORA DO TOTAL" not in capsys.readouterr().out
+
+    def test_cst_fora_da_tributacao_integral_e_listado(self, importado, capsys):
+        with _sessao(importado) as sessao:
+            documento = sessao.execute(select(DocumentoFiscal)).scalars().first()
+            for item in documento.itens:
+                aplicar_ajuste(
+                    sessao,
+                    documento=documento,
+                    item=item,
+                    campo="cst_ibscbs",
+                    valor_novo="620",
+                    origem=ORIGEM_USUARIO,
+                )
+            sessao.commit()
+        capsys.readouterr()
+
+        _apurar(importado)
+
+        assert "CST de IBS/CBS fora da tributação integral: 620" in capsys.readouterr().out
