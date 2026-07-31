@@ -25,6 +25,12 @@ interno da implementação.
 - Gerar **sempre** registra a escrituração; não há como produzir um arquivo
   sem deixar rastro do que saiu. Gerar de novo cria um registro novo, sem
   apagar o anterior.
+- **`sped-hub fiscal regras` cadastra as regras de classificação sem precisar
+  de programador.** `--se ncm:comeca_com:2203 --entao cfop:2102` guarda o que
+  antes só existia na cabeça de alguém. A listagem mostra as condições e as
+  ações de cada regra, para conferência. Remover **desativa** em vez de
+  apagar: os ajustes que a regra já gerou guardam o nome dela, e quem for
+  auditar o mês precisa poder ver qual era a condição.
 - **`sped-hub fiscal classificar` mostra o que as regras propõem, sem aplicar
   nada.** A lista traz o valor de agora, o sugerido e qual regra propôs, para
   ser conferida antes. Só grava com `--aplicar`, e num lote que pode ser

@@ -23,9 +23,10 @@ Códigos de saída, porque isto vai para dentro de script de fechamento:
 from __future__ import annotations
 
 import datetime
+import json
 import pathlib
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
@@ -34,6 +35,7 @@ from src.db.models import (
     Empresa,
     Escrituracao,
     ItemDocumentoFiscal,
+    RegraFiscal,
     criar_engine,
 )
 from src.documentos import (
@@ -53,6 +55,7 @@ from src.documentos import (
 )
 from src.documentos.ajustes import desserializar
 from src.documentos.classificacao import aplicar as aplicar_classificacao
+from src.documentos.classificacao import criar_regra
 from src.escrituracoes import (
     TIPOS,
     CampoObrigatorioAusente,
@@ -405,6 +408,112 @@ def _filtro(bruto: str) -> Filtro:
     )
 
 
+def _condicao(bruto: str) -> dict:
+    """A condição de uma regra, na mesma sintaxe do `--filtro`.
+
+    Reusa `_filtro` de propósito: as duas coisas são a mesma pergunta — "quais
+    documentos casam com isto" —, e duas sintaxes para a mesma pergunta
+    acabariam divergindo, com quem usa tendo de lembrar qual vale onde.
+    """
+    filtro = _filtro(bruto)
+    condicao = {"campo": filtro.campo, "operador": filtro.operador}
+    # `vazio` e `preenchido` não têm valor; gravar `"valor": None` faria a
+    # regra parecer comparar com nulo.
+    if filtro.valor is not None:
+        condicao["valor"] = filtro.valor
+    return condicao
+
+
+def _acao(bruto: str) -> dict:
+    """`campo:valor` — a ação não tem operador, ela atribui."""
+    campo, separador, valor = bruto.partition(":")
+    if not separador or not campo:
+        raise ValueError(
+            f"ação {bruto!r} não tem forma reconhecida — use campo:valor, " "como cfop:2102"
+        )
+    return {"campo": campo, "valor": valor}
+
+
+def _regras(sessao: Session, args) -> int:
+    """Cadastra, lista e remove as regras de classificação.
+
+    Sem isto, `classificar` não tem o que aplicar: a única forma de criar uma
+    regra era escrever Python.
+    """
+    if args.acao_regra == "listar":
+        return _regras_listar(sessao, args)
+    if args.acao_regra == "remover":
+        return _regras_remover(sessao, args)
+    return _regras_criar(sessao, args)
+
+
+def _regras_listar(sessao: Session, args) -> int:
+    consulta = select(RegraFiscal).order_by(RegraFiscal.prioridade.desc(), RegraFiscal.id)
+    if args.empresa:
+        consulta = consulta.where(
+            or_(RegraFiscal.empresa_id == args.empresa, RegraFiscal.empresa_id.is_(None))
+        )
+    regras = sessao.execute(consulta).scalars().all()
+    if not regras:
+        print("Nenhuma regra cadastrada.")
+        return 0
+
+    print(f"\n{'ID':>4}  {'Prio':>5} {'Ativa':6} {'Vigência':24} Nome")
+    for r in regras:
+        vigencia = f"{r.vigencia_inicio or '—'} a {r.vigencia_fim or '—'}"
+        print(
+            f"{r.id:>4}  {r.prioridade:>5} {'sim' if r.ativa else 'não':6} "
+            f"{vigencia:24} {r.nome}"
+        )
+        for condicao in json.loads(r.condicoes):
+            valor = condicao.get("valor")
+            alvo = "" if valor is None else f" {valor!r}"
+            print(f"        se   {condicao['campo']} {condicao.get('operador', 'igual')}{alvo}")
+        for acao in json.loads(r.acoes):
+            print(f"        então {acao['campo']} = {acao['valor']!r}")
+    print()
+    return 0
+
+
+def _regras_criar(sessao: Session, args) -> int:
+    regra = criar_regra(
+        sessao,
+        nome=args.nome,
+        condicoes=[_condicao(c) for c in args.se or []],
+        acoes=[_acao(a) for a in args.entao or []],
+        escritorio_id=args.escritorio,
+        empresa_id=args.empresa,
+        descricao=args.descricao,
+        prioridade=args.prioridade,
+        obrigacao=args.tipo if args.obrigacao else None,
+        vigencia_inicio=_data(args.de) if args.de else None,
+        vigencia_fim=_data(args.ate) if args.ate else None,
+    )
+    sessao.commit()
+    print(f"\nRegra #{regra.id} criada: {regra.nome}")
+    print("  confira com `sped-hub fiscal classificar` antes de aplicar.\n")
+    return 0
+
+
+def _regras_remover(sessao: Session, args) -> int:
+    """Desativa em vez de apagar.
+
+    Uma regra apagada deixaria os ajustes que ela gerou sem explicação: o
+    `AjusteFiscal` guarda o nome da regra, e quem for auditar o mês vai
+    procurar qual era a condição.
+    """
+    regra = sessao.get(RegraFiscal, args.regra)
+    if regra is None:
+        raise LookupError(
+            f"não existe regra #{args.regra} — `sped-hub fiscal regras listar` mostra as cadastradas"
+        )
+    regra.ativa = False
+    sessao.commit()
+    print(f"\nRegra #{regra.id} desativada: {regra.nome}")
+    print("  os ajustes que ela já gerou continuam; desfaça o lote para revertê-los.\n")
+    return 0
+
+
 def _valor_tipado(campo: str, bruto: str):
     """O texto da linha de comando, no tipo que a coluna espera.
 
@@ -515,6 +624,7 @@ ACOES = {
     "alterar": _alterar,
     "desfazer": _desfazer,
     "gerar": _gerar,
+    "regras": _regras,
     "historico": _historico,
     "conferir": _conferir,
 }
@@ -620,6 +730,35 @@ def registrar(sub) -> None:
     p.add_argument("--motivo", help="Por que a alteração foi feita; vai para o histórico")
     p.add_argument("--lote", help="Lote a desfazer (em `desfazer`)")
 
+    # ── regras ─────────────────────────────────────────────────────────────
+    p.add_argument(
+        "--acao-regra",
+        choices=["listar", "criar", "remover"],
+        default="listar",
+        help="Em `regras`: listar (default) | criar | remover",
+    )
+    p.add_argument("--nome", help="Nome da regra (em `regras criar`)")
+    p.add_argument("--descricao", help="Descrição da regra")
+    p.add_argument(
+        "--se",
+        action="append",
+        metavar="CAMPO:[OPERADOR:]VALOR",
+        help="Condição da regra; repetível, todas precisam casar. Mesma sintaxe do --filtro",
+    )
+    p.add_argument(
+        "--entao",
+        action="append",
+        metavar="CAMPO:VALOR",
+        help="O que a regra propõe; repetível",
+    )
+    p.add_argument(
+        "--prioridade",
+        type=int,
+        default=0,
+        help="Maior vence; empate no mesmo campo é conflito, e o motor o denuncia",
+    )
+    p.add_argument("--regra", type=int, help="ID da regra (em `regras remover`)")
+
     p.add_argument("--db", default=None, help="Banco (URL ou caminho SQLite)")
 
 
@@ -635,11 +774,28 @@ OBRIGATORIOS = {
     "conferir": ("escrituracao",),
 }
 
+# `regras` depende da ação: criar exige o que define a regra, remover exige o
+# alvo, listar não exige nada.
+OBRIGATORIOS_REGRAS = {
+    "criar": ("nome", "se", "entao"),
+    "remover": ("regra",),
+}
+
 
 def conferir_argumentos(args) -> str | None:
     """A mensagem de erro, ou `None` se está tudo lá."""
-    faltando = [nome for nome in OBRIGATORIOS.get(args.acao, ()) if not getattr(args, nome, None)]
+    if args.acao == "regras":
+        exigidos = OBRIGATORIOS_REGRAS.get(args.acao_regra, ())
+        onde = f"fiscal regras --acao-regra {args.acao_regra}"
+    else:
+        exigidos = OBRIGATORIOS.get(args.acao, ())
+        onde = f"fiscal {args.acao}"
+
+    faltando = [nome for nome in exigidos if not getattr(args, nome, None)]
     if not faltando:
         return None
-    rotulos = ", ".join("caminhos" if n == "caminhos" else f"--{n}" for n in faltando)
-    return f"ERRO: {rotulos} {'são obrigatórios' if len(faltando) > 1 else 'é obrigatório'} em `fiscal {args.acao}`."
+    rotulos = ", ".join(
+        "caminhos" if n == "caminhos" else f"--{n.replace('_', '-')}" for n in faltando
+    )
+    verbo = "são obrigatórios" if len(faltando) > 1 else "é obrigatório"
+    return f"ERRO: {rotulos} {verbo} em `{onde}`."
