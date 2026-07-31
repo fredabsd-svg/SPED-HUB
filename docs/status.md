@@ -66,6 +66,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 54 | A apuração da Reforma mede o que não consome, em vez de avisar sempre | concluída | `tests/test_apuracao_reforma.py`, `tests/test_cli_fiscal.py` | diferimento, crédito presumido, devolução e monofásico saem com valor e contagem, fora do total; CST de IBS/CBS diferente de `000` é **listado, não interpretado** — a IT 002/2025 segue em revisão e as fontes divergem |
 
+| 55 | Ajustes de apuração do ICMS (E111) e a fórmula completa do E110 | concluída | `tests/test_ajustes_de_apuracao.py`, `tests/test_cli_fiscal.py` | o sistema conhece a **estrutura** do código da tabela 5.1.1, não a tabela — a 4ª posição decide o campo do E110. O sinal está no código: valor negativo é recusado. Ajustes de documento (C197/D197) seguem fora |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

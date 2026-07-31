@@ -43,8 +43,8 @@ efetiva (ajustes com reversão por lote), o motor de classificação, as
 alterações em massa com simulação, os geradores da EFD ICMS/IPI e da
 EFD-Contribuições, a escrituração arquivada — a terceira camada, o arquivo
 que efetivamente saiu —, a apuração de CBS, IBS e IS, o espelho legível antes
-de gerar, a marca de qual escrituração foi transmitida, e o comando `sped-hub
-fiscal` que alcança tudo isso; ver [`status.md`](status.md). Sobre a Reforma
+de gerar, a marca de qual escrituração foi transmitida, os ajustes de apuração
+(E111), e o comando `sped-hub fiscal` que alcança tudo isso; ver [`status.md`](status.md). Sobre a Reforma
 Tributária, ver [`reforma-tributaria.md`](reforma-tributaria.md).
 
 O que falta:
@@ -55,14 +55,14 @@ O que falta:
 | Recálculo do vNF (total do documento) | Os totais que são soma de parcela são recompostos; o `valor_total` não, porque a fórmula usa termos que o modelo não carrega (ICMS desonerado, imposto de importação, serviços) | `src.documentos.massa:recompor_vnf` |
 | Blocos G, H e 1 da EFD ICMS/IPI | O gerador cobre 0, C, E e 9 | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_h` |
 | Documentos de serviço, energia e transporte na EFD (C500, D100) | Só o C100 de mercadorias é gerado | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_d` |
-| Ajustes de apuração pela tabela 5.1.1 (E111) | O E110 soma os documentos e carrega o saldo credor do período anterior; ajustes por código e deduções seguem fora | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_apuracao` |
+| Ajustes que nascem de um documento (C197/D197) | Os do período já entram pelo E111; os de documento compõem os campos `VL_TOT_AJ_*` do E110 e seguem fora | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_documento` |
 | Blocos A, D, F e I da EFD-Contribuições | O gerador cobre 0, C, M e 9. O bloco A depende da importação de NFS-e, acima | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.bloco_f` |
 | Créditos extemporâneos e ajustes da EFD-Contribuições | Os blocos M são soma direta das saídas menos as entradas | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.ajustes_de_apuracao` |
 | Bases próprias do monofásico e da alíquota por unidade no PIS/Cofins | O CST já decide se o valor destacado entra na apuração; o que falta é **calcular** base e alíquota próprias em vez de usar o destacado | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |
 | Tela de cadastro fiscal da empresa | O cadastro é preenchido por `sped-hub fiscal cadastro`, que valida contra as tabelas oficiais; falta a tela | `src.routes.empresas:cadastro_fiscal` |
 | Registro 0035 (identificação da SCP) na EFD-Contribuições | Exigido quando `IND_NAT_PJ` é 03, 04 ou 05; o gerador avisa e não escreve | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.registro_0035` |
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
-| Monofásico, diferimento, crédito presumido e split payment | Os campos são lidos do documento; a apuração é soma direta e não os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
+| Monofásico, diferimento, crédito presumido e split payment na Reforma | A apuração **mede e relata** esses valores, fora do total; o que falta é consumi-los, e para isso é preciso a tabela de CST do IBS/CBS estabilizada | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
 | Excel bidirecional de documentos | — | `src.documentos.planilha:reimportar` |
 
 ## Dívida técnica conhecida

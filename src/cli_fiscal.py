@@ -63,17 +63,21 @@ from src.escrituracoes import (
     PERFIS,
     REGIMES,
     TIPOS,
+    AjusteInvalido,
     ApuracaoIBSCBS,
     CampoObrigatorioAusente,
     GeradorEFDContribuicoes,
     GeradorEFDICMS,
     TransmissaoInvalida,
+    ajustes_do_periodo,
     arquivar,
     avisos_de,
     comparar,
+    criar_ajuste,
     espelho,
     marcar_transmitida,
     transmitidas_do_periodo,
+    utilizacao,
 )
 
 # O mesmo formato dos relatórios — 1.234.567,89.  `f"{v:,.2f}"` daria
@@ -363,6 +367,65 @@ def _espelho(sessao: Session, args) -> int:
         print(f"  espelho gravado em {args.saida}\n")
 
     return DIVERGENTE if visao.divergencias() else 0
+
+
+def _ajuste(sessao: Session, args) -> int:
+    """Cadastra ou lista os ajustes de apuração (E111) do período.
+
+    O código vem da tabela 5.1.1 do **seu estado**: o sistema confere a
+    estrutura — UF, apuração e utilização — e não o sequencial, que muda por
+    ato normativo e é diferente em cada Secretaria da Fazenda. Guardar essa
+    tabela aqui seria guardar uma tabela errada para 26 dos 27 estados.
+    """
+    empresa = _empresa(sessao, args.empresa)
+    inicio, fim = _periodo(args)
+
+    if args.codigo:
+        if args.valor is None:
+            raise ValueError("`--valor` é obrigatório quando se informa `--codigo`")
+        ajuste = criar_ajuste(
+            sessao,
+            empresa=empresa,
+            data_inicio=inicio,
+            data_fim=fim,
+            cod_aj=args.codigo,
+            valor=_numero_do_terminal(args.valor),
+            descricao=args.descricao,
+        )
+        sessao.commit()
+        rotulo, campo = utilizacao(ajuste.cod_aj)
+        destino = campo or "NENHUM campo do E110 — é controle extra-apuração"
+        print(f"\nAjuste #{ajuste.id} cadastrado: {ajuste.cod_aj} ({rotulo})")
+        print(f"  valor    {fmt_moeda(ajuste.valor)}")
+        print(f"  vai para {destino}\n")
+        return 0
+
+    ajustes = ajustes_do_periodo(sessao, empresa_id=empresa.id, data_inicio=inicio, data_fim=fim)
+    if not ajustes:
+        print(f"\nNenhum ajuste de apuração em {inicio} a {fim}.\n")
+        return 0
+
+    print(f"\nAjustes de apuração — {empresa.nome}, {inicio} a {fim}")
+    print(f"\n{'ID':>5}  {'Código':10} {'Valor':>14}  {'Vai para':20} Utilização")
+    for a in ajustes:
+        rotulo, campo = utilizacao(a.cod_aj)
+        print(
+            f"{a.id:>5}  {a.cod_aj:10} {fmt_moeda(a.valor):>14}  "
+            f"{(campo or '— fora da apuração'):20} {rotulo}"
+        )
+    print()
+    return 0
+
+
+def _numero_do_terminal(bruto: str) -> float:
+    """`1.234,56` ou `1234.56` — quem digita usa o formato que conhece."""
+    texto = str(bruto).strip()
+    if "," in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    try:
+        return float(texto)
+    except ValueError as erro:
+        raise ValueError(f"{bruto!r} não é um valor numérico") from erro
 
 
 def _apurar(sessao: Session, args) -> int:
@@ -839,6 +902,7 @@ ACOES = {
     "desfazer": _desfazer,
     "gerar": _gerar,
     "espelho": _espelho,
+    "ajuste": _ajuste,
     "apurar": _apurar,
     "regras": _regras,
     "historico": _historico,
@@ -869,6 +933,7 @@ def cmd_fiscal(args) -> int:
         CampoObrigatorioAusente,
         LookupError,
         OSError,
+        AjusteInvalido,
         RegraInvalida,
         SelecaoVazia,
         TransmissaoInvalida,
@@ -909,6 +974,7 @@ def registrar(sub) -> None:
     p.add_argument("--escrituracao", type=int, help="ID da escrituração (em `conferir`)")
     p.add_argument("--diff", action="store_true", help="Mostra as linhas divergentes")
     p.add_argument("--recibo", help="Número do recibo do Fisco (em `transmitida`)")
+    p.add_argument("--codigo", help="Código da tabela 5.1.1 do seu estado (em `ajuste`)")
 
     # ── cadastro fiscal ────────────────────────────────────────────────────
     # Sem `choices=`: o argparse recusaria com código 2, que nesta CLI quer
@@ -976,7 +1042,7 @@ def registrar(sub) -> None:
         help="Em `regras`: listar (default) | criar | remover",
     )
     p.add_argument("--nome", help="Nome da regra (em `regras criar`)")
-    p.add_argument("--descricao", help="Descrição da regra")
+    p.add_argument("--descricao", help="Descrição da regra ou do ajuste de apuração")
     p.add_argument(
         "--se",
         action="append",
@@ -1011,6 +1077,7 @@ OBRIGATORIOS = {
     "desfazer": ("lote",),
     "gerar": ("empresa", "de", "ate"),
     "espelho": ("empresa", "de", "ate"),
+    "ajuste": ("empresa", "de", "ate"),
     "apurar": ("empresa", "de", "ate"),
     "conferir": ("escrituracao",),
     "transmitida": ("escrituracao",),

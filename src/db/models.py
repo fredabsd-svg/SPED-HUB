@@ -1052,6 +1052,55 @@ class RegraFiscal(Base):
         return f"<RegraFiscal {self.nome!r} p={self.prioridade}>"
 
 
+class AjusteApuracao(Base):
+    """Um ajuste da apuração do ICMS — o registro E111 e o que ele compõe.
+
+    A apuração do bloco E era a soma dos documentos e mais nada.  Empresa com
+    benefício fiscal, crédito outorgado, estorno ou dedução tem valores que
+    **não estão em nota nenhuma**, e sem eles o imposto sai errado nos dois
+    sentidos.
+
+    O código vem da **tabela 5.1.1**, que é de cada Secretaria da Fazenda: os
+    quatro últimos dígitos e o que cada um significa mudam por estado, e o
+    sistema não os conhece nem tenta conhecer.  O que ele lê é a estrutura, que
+    é nacional (Ato COTEPE/ICMS 09/2008) — `PRBCDDDD`:
+
+      * `PR` — a UF, que tem de ser a da empresa;
+      * `B`  — a apuração: 0 ICMS, 1 ICMS-ST, 2 DIFAL, 3 FCP;
+      * `C`  — a utilização, que decide em que campo do E110 o valor entra:
+        0 outros débitos, 1 estorno de créditos, 2 outros créditos, 3 estorno
+        de débitos, 4 deduções, 5 débito especial, 9 controle extra-apuração;
+      * `DDDD` — o sequencial da tabela do estado.
+
+    Ou seja: **quem informa o código informa junto o tratamento**, e o sistema
+    deriva o resto sem palpite.
+    """
+
+    __tablename__ = "ajustes_apuracao"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    escritorio_id: Mapped[int | None] = mapped_column(ForeignKey("escritorios.id"), index=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), nullable=False, index=True)
+
+    # A obrigação a que o ajuste pertence.  Hoje só `efd_icms`; o campo existe
+    # para que um ajuste de outra escrituração não entre nesta por engano.
+    tipo: Mapped[str] = mapped_column(String(30), nullable=False, default="efd_icms", index=True)
+    data_inicio: Mapped[datetime.date] = mapped_column(nullable=False, index=True)
+    data_fim: Mapped[datetime.date] = mapped_column(nullable=False)
+
+    cod_aj: Mapped[str] = mapped_column(String(8), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(String(255))
+    valor: Mapped[float] = mapped_column(nullable=False, default=0.0)
+
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+
+    def __repr__(self):
+        return f"<AjusteApuracao {self.cod_aj} {self.valor}>"
+
+
 class Escrituracao(Base):
     """A terceira camada: o arquivo que efetivamente saiu.
 
