@@ -6,7 +6,7 @@ O subcomando `sped-hub fiscal` — a cadeia da Central de Documentos pela linha
 de comando, na ordem em que ela acontece:
 
 ```
-regras → importar → documentos → classificar → alterar → gerar → conferir
+regras → importar → documentos → classificar → alterar → apurar → gerar → conferir
                                              ↘ desfazer ↙
 ```
 
@@ -42,6 +42,7 @@ Ações:
 | `classificar --empresa [--de --ate --aplicar]` | O que as regras propõem. Sem `--aplicar`, **não grava**. |
 | `alterar --empresa --campo --valor [--filtro --apenas-vazios --confirmar --forcar --motivo]` | Alteração em massa. Sem `--confirmar`, **só simula**. |
 | `desfazer --lote` | Reverte um lote inteiro de ajustes. |
+| `apurar --empresa --de --ate` | CBS, IBS e IS do período. Só leitura: **não grava nada**. |
 | `gerar --empresa --de --ate [--tipo --saida]` | Gera a EFD **e arquiva** a escrituração. |
 | `historico [--empresa]` | As escriturações geradas, com hash. |
 | `conferir --escrituracao [--diff]` | O entregue contra o que sairia agora. |
@@ -103,6 +104,14 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   classificação parecer completa quando ela parou no meio.
 - **A confiança da sugestão só é impressa quando não é total.** Repeti-la em
   toda linha esconderia justamente a que merece atenção.
+- **`apurar` não grava nada, ao contrário de `gerar`.** Os tributos da Reforma
+  ainda não têm obrigação acessória neste sistema; apresentar o número como se
+  fosse uma escrituração daria a entender que algo foi entregue. É leitura, e
+  é por isso que ele não tem contrapartida arquivada.
+- **O Seletivo aparece com travessão na coluna de crédito, não com zero.** Ele
+  não tem crédito — `0,00` faria parecer que tem e ficou zerado. O saldo credor
+  sai na própria linha do tributo: numa linha à parte, pareceria um quarto
+  tributo.
 - **`gerar` sempre arquiva, e não existe `--sem-arquivar`.** A ausência é
   deliberada. A terceira camada existe para responder "o que você enviou", e
   um arquivo que sai do sistema sem deixar registro é exatamente o buraco que

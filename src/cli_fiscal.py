@@ -58,6 +58,7 @@ from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.classificacao import criar_regra
 from src.escrituracoes import (
     TIPOS,
+    ApuracaoIBSCBS,
     CampoObrigatorioAusente,
     GeradorEFDContribuicoes,
     GeradorEFDICMS,
@@ -250,6 +251,46 @@ def _gerar(sessao: Session, args) -> int:
         print("\n  LEIA ANTES DE TRANSMITIR:")
         for aviso in resultado.avisos:
             print(f"    · {aviso}")
+    print()
+    return 0
+
+
+def _apurar(sessao: Session, args) -> int:
+    """CBS, IBS e Imposto Seletivo do período.
+
+    Não gera arquivo nem grava nada: é leitura. Os tributos da Reforma ainda
+    não têm obrigação acessória neste sistema, e apresentar o número como se
+    fosse uma escrituração daria a entender que algo foi entregue.
+    """
+    empresa = _empresa(sessao, args.empresa)
+    inicio, fim = _periodo(args)
+    resultado = ApuracaoIBSCBS(sessao, empresa=empresa, data_inicio=inicio, data_fim=fim).apurar()
+
+    print(f"\nApuração da Reforma — {inicio} a {fim}")
+    print(f"  documentos    {resultado.documentos}\n")
+
+    print(f"  {'Tributo':16} {'Débito':>14} {'Crédito':>14} {'Devido':>14}")
+    for tributo in (resultado.cbs, resultado.ibs_uf, resultado.ibs_municipal):
+        # O saldo credor sai na própria linha do tributo: numa linha à parte,
+        # ele parece um quarto tributo.
+        sobra = f"   saldo credor {fmt_moeda(tributo.saldo_credor)}" if tributo.saldo_credor else ""
+        print(
+            f"  {tributo.nome:16} {fmt_moeda(tributo.debito):>14} "
+            f"{fmt_moeda(tributo.credito):>14} {fmt_moeda(tributo.devido):>14}{sobra}"
+        )
+
+    # O Seletivo leva travessão na coluna de crédito, não zero: ele não tem
+    # crédito, e "0,00" faria parecer que tem e ficou zerado.
+    print(
+        f"  {'Seletivo':16} {fmt_moeda(resultado.seletivo):>14} {'—':>14} "
+        f"{fmt_moeda(resultado.seletivo):>14}"
+    )
+
+    print(f"\n  {'TOTAL':16} {'':>29} {fmt_moeda(resultado.total_devido):>14}")
+
+    print("\n  LEIA ANTES DE USAR ESTE NÚMERO:")
+    for aviso in resultado.avisos:
+        print(f"    · {aviso}")
     print()
     return 0
 
@@ -624,6 +665,7 @@ ACOES = {
     "alterar": _alterar,
     "desfazer": _desfazer,
     "gerar": _gerar,
+    "apurar": _apurar,
     "regras": _regras,
     "historico": _historico,
     "conferir": _conferir,
@@ -771,6 +813,7 @@ OBRIGATORIOS = {
     "alterar": ("empresa", "campo", "valor"),
     "desfazer": ("lote",),
     "gerar": ("empresa", "de", "ate"),
+    "apurar": ("empresa", "de", "ate"),
     "conferir": ("escrituracao",),
 }
 
