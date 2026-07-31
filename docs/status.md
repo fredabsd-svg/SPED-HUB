@@ -54,6 +54,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 48 | Leiaute conferido a cada linha escrita, e os campos que faltavam no C100, C170 e E110 | concluída | `tests/test_leiaute_sped.py` | `_add` recusa registro fora do leiaute ou com contagem diferente; o `IND_FRT` vem do `modFrete` do XML e, quando o documento não o traz mas tem frete, sai `9` com aviso nomeando o documento |
 
+| 49 | Espelho da escrituração: ler o arquivo antes de transmitir, com as conferências do validador | concluída | `tests/test_espelho.py`, `tests/test_cli_fiscal.py` | é lido dos **registros**, não do banco; confere itens × documento, C190 × C170, apuração × documentos e as contagens do bloco 9. `sped-hub fiscal espelho` **não arquiva** e sai com 2 quando alguma conferência falha |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

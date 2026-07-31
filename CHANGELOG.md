@@ -9,6 +9,16 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **`sped-hub fiscal espelho` mostra o arquivo em português antes de
+  transmitir.** Um arquivo SPED é ilegível — `|C100|0|1|55|00|...` —, e até
+  agora só dava para saber se ele estava certo depois de entregue. O espelho
+  lista os documentos que entraram, o total de entradas e saídas, quanto deu a
+  apuração, e roda as mesmas conferências que o Fisco faz: a soma dos itens
+  contra o total de cada nota, o consolidado contra os itens, a apuração
+  contra os documentos e as contagens do bloco 9. O que não bater aparece com
+  o número do documento e os dois valores lado a lado. O comando **não** gera
+  nem registra escrituração — é leitura — e sai com código 2 quando alguma
+  conferência falha, para caber em rotina de fechamento.
 - **A apuração dos tributos da Reforma já funciona.** CBS, IBS e Imposto
   Seletivo são somados por período, a partir dos documentos importados. Os
   grupos passam a ser exigidos na NF-e em 03/08/2026, e até aqui os valores

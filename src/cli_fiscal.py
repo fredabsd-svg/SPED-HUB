@@ -65,6 +65,7 @@ from src.escrituracoes import (
     arquivar,
     avisos_de,
     comparar,
+    espelho,
 )
 
 # O mesmo formato dos relatórios — 1.234.567,89.  `f"{v:,.2f}"` daria
@@ -253,6 +254,33 @@ def _gerar(sessao: Session, args) -> int:
             print(f"    · {aviso}")
     print()
     return 0
+
+
+def _espelho(sessao: Session, args) -> int:
+    """O arquivo em forma de leitura, ANTES de gerar.
+
+    Não grava escrituração e não escreve arquivo SPED, ao contrário de
+    `gerar`. Não é exceção à regra de que gerar sempre arquiva: o espelho é
+    prosa, não arquivo transmissível, e ninguém o entrega por engano.
+
+    Sai com 2 quando alguma conferência falhou — o mesmo código de `conferir`,
+    pela mesma razão: cabe em rotina de fechamento que decide se prossegue.
+    """
+    empresa = _empresa(sessao, args.empresa)
+    inicio, fim = _periodo(args)
+
+    gerador = GERADORES[args.tipo](sessao, empresa=empresa, data_inicio=inicio, data_fim=fim)
+    visao = espelho(gerador.gerar(), tipo=args.tipo)
+
+    texto = visao.texto()
+    print()
+    print(texto)
+
+    if args.saida:
+        gravar(pathlib.Path(args.saida), texto)
+        print(f"  espelho gravado em {args.saida}\n")
+
+    return DIVERGENTE if visao.divergencias() else 0
 
 
 def _apurar(sessao: Session, args) -> int:
@@ -665,6 +693,7 @@ ACOES = {
     "alterar": _alterar,
     "desfazer": _desfazer,
     "gerar": _gerar,
+    "espelho": _espelho,
     "apurar": _apurar,
     "regras": _regras,
     "historico": _historico,
@@ -813,6 +842,7 @@ OBRIGATORIOS = {
     "alterar": ("empresa", "campo", "valor"),
     "desfazer": ("lote",),
     "gerar": ("empresa", "de", "ate"),
+    "espelho": ("empresa", "de", "ate"),
     "apurar": ("empresa", "de", "ate"),
     "conferir": ("escrituracao",),
 }

@@ -42,7 +42,7 @@ regimes tributários), o importador em lote com deduplicação, a camada
 efetiva (ajustes com reversão por lote), o motor de classificação, as
 alterações em massa com simulação, os geradores da EFD ICMS/IPI e da
 EFD-Contribuições, a escrituração arquivada — a terceira camada, o arquivo
-que efetivamente saiu —, a apuração de CBS, IBS e IS, e o comando
+que efetivamente saiu —, a apuração de CBS, IBS e IS, o espelho legível antes de gerar, e o comando
 `sped-hub fiscal` que alcança tudo isso; ver [`status.md`](status.md). Sobre a
 Reforma Tributária, ver [`reforma-tributaria.md`](reforma-tributaria.md).
 
@@ -62,7 +62,6 @@ O que falta:
 | Tela de cadastro fiscal da empresa | `ind_perfil`, `ind_ativ`, `ind_ativ_contribuicoes` e `cod_inc_trib` só podem ser preenchidos direto no banco | `src.routes.empresas:cadastro_fiscal` |
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
 | Monofásico, diferimento, crédito presumido e split payment | Os campos são lidos do documento; a apuração é soma direta e não os consome | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
-| Espelhos antes da geração | A escrituração arquivada já guarda o que saiu e sabe comparar com uma geração nova; falta o espelho legível **antes** de gerar | `src.escrituracoes.espelhos:Espelho` |
 | Marcar qual escrituração foi transmitida | Todas as gerações ficam guardadas; qual delas foi entregue é informação que o sistema não tem, e por isso nenhuma é marcada | `src.escrituracoes.arquivadas:marcar_transmitida` |
 | Excel bidirecional de documentos | — | `src.documentos.planilha:reimportar` |
 
