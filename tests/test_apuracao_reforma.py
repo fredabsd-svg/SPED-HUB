@@ -349,14 +349,21 @@ class TestAvisos:
 
         assert not any("por falta de dado" in a for a in avisos)
 
-    def test_o_que_nao_cobre_esta_dito(self, sessao, escritorio):
+    def test_o_que_nao_tem_campo_proprio_e_dito_sempre(self, sessao, escritorio):
+        """Split payment e regimes específicos não têm valor no documento.
+
+        Não dá para medi-los, então o aviso genérico continua — só que
+        reduzido ao que de fato não se pode medir. Monofásico, diferimento e
+        crédito presumido saíram daqui: têm campo próprio e passaram a ser
+        medidos, e avisar sobre eles quando valem zero treinaria a ignorar.
+        """
         empresa = _empresa(sessao, escritorio)
 
-        avisos = _apurar(sessao, empresa).avisos
+        texto = " ".join(_apurar(sessao, empresa).avisos)
 
-        texto = " ".join(avisos)
-        for fora in ("monofásico", "diferimento", "crédito presumido", "split payment"):
-            assert fora in texto, fora
+        assert "split payment" in texto
+        assert "regimes específicos" in texto
+        assert "diferimento" not in texto, "não há diferimento neste período"
 
 
 class TestSerializacao:
@@ -419,3 +426,138 @@ class TestNotaSemOsGruposNovos:
 
         assert resultado.documentos == 2
         assert resultado.cbs.debito == pytest.approx(CBS_POR_ITEM)
+
+
+class TestOQueNaoEConsumidoEMedido:
+    """Aviso genérico é o mesmo para quem tem e para quem não tem.
+
+    E aviso que aparece sempre treina a pessoa a ignorar todos os outros. Os
+    campos que a apuração não consome têm valor no próprio documento, então
+    dá para medi-los — sem depender de interpretar código nenhum.
+    """
+
+    def _com_valor(self, sessao, escritorio, campo, valor, **kwargs):
+        _importar(sessao, escritorio, **kwargs)
+        documento = sessao.execute(select(DocumentoFiscal)).scalars().first()
+        for item in documento.itens:
+            aplicar_ajuste(
+                sessao,
+                documento=documento,
+                item=item,
+                campo=campo,
+                valor_novo=valor,
+                origem=ORIGEM_USUARIO,
+            )
+        sessao.commit()
+        return documento
+
+    def test_sem_esses_valores_nao_ha_aviso(self, sessao, escritorio):
+        empresa = _empresa(sessao, escritorio)
+        _importar(sessao, escritorio)
+
+        resultado = _apurar(sessao, empresa)
+
+        assert resultado.nao_cobertos == {}
+        assert not [a for a in resultado.avisos if "NÃO consumiu" in a]
+
+    def test_diferimento_e_medido_com_valor_e_contagem(self, sessao, escritorio):
+        empresa = _empresa(sessao, escritorio)
+        self._com_valor(sessao, escritorio, "valor_diferido", 1500.0, itens=2)
+
+        resultado = _apurar(sessao, empresa)
+
+        assert resultado.nao_cobertos["diferimento"] == (3000.0, 2)
+        aviso = next(a for a in resultado.avisos if "NÃO consumiu" in a)
+        assert "diferimento: 3000.00 em 2 item(ns)" in aviso
+
+    @pytest.mark.parametrize(
+        ("campo", "rotulo"),
+        [
+            ("valor_credito_presumido", "crédito presumido"),
+            ("valor_devolucao_tributo", "devolução de tributo"),
+            ("valor_ibs_mono", "IBS monofásico"),
+            ("valor_cbs_mono_retido", "CBS monofásica retida"),
+        ],
+    )
+    def test_cada_campo_tem_o_seu_rotulo(self, sessao, escritorio, campo, rotulo):
+        empresa = _empresa(sessao, escritorio)
+        self._com_valor(sessao, escritorio, campo, 10.0)
+
+        assert rotulo in _apurar(sessao, empresa).nao_cobertos
+
+    def test_o_valor_medido_nao_entra_no_total(self, sessao, escritorio):
+        """Medir é para avisar, não para somar — ninguém sabe o tratamento."""
+        empresa = _empresa(sessao, escritorio)
+        self._com_valor(sessao, escritorio, "valor_diferido", 9999.0)
+
+        resultado = _apurar(sessao, empresa)
+
+        assert resultado.nao_cobertos["diferimento"] == (9999.0, 1)
+        assert resultado.total_devido == 0.0, "a nota é de entrada: só crédito"
+
+    def test_a_medicao_vale_para_entrada_e_para_saida(self, sessao, escritorio):
+        """Diferimento numa compra também precisa de tratamento próprio."""
+        emitente = _empresa(sessao, escritorio, cnpj="12345678000195")
+        self._com_valor(sessao, escritorio, "valor_diferido", 20.0)
+
+        assert "diferimento" in _apurar(sessao, emitente).nao_cobertos
+
+
+class TestOsCSTSaoListadosNaoInterpretados:
+    """A IT 002/2025 ainda está em revisão e as fontes divergem.
+
+    Codificar a semântica de cada CST a partir de fonte secundária seria o
+    mesmo erro que esta suíte vem corrigindo. Listar o que apareceu é honesto
+    e útil; interpretar não é.
+    """
+
+    def _com_cst(self, sessao, escritorio, cst, **kwargs):
+        _importar(sessao, escritorio, **kwargs)
+        documento = sessao.execute(select(DocumentoFiscal)).scalars().first()
+        for item in documento.itens:
+            aplicar_ajuste(
+                sessao,
+                documento=documento,
+                item=item,
+                campo="cst_ibscbs",
+                valor_novo=cst,
+                origem=ORIGEM_USUARIO,
+            )
+        sessao.commit()
+
+    def test_tributacao_integral_nao_vira_aviso(self, sessao, escritorio):
+        """`000` é o caso comum: avisá-lo seria avisar sobre tudo."""
+        empresa = _empresa(sessao, escritorio)
+        self._com_cst(sessao, escritorio, "000")
+
+        resultado = _apurar(sessao, empresa)
+
+        assert resultado.cst_encontrados == {}
+        assert not [a for a in resultado.avisos if "CST de IBS/CBS" in a]
+
+    def test_outros_cst_sao_listados_com_a_contagem(self, sessao, escritorio):
+        empresa = _empresa(sessao, escritorio)
+        self._com_cst(sessao, escritorio, "620", itens=3)
+
+        resultado = _apurar(sessao, empresa)
+
+        assert resultado.cst_encontrados == {"620": 3}
+        aviso = next(a for a in resultado.avisos if "CST de IBS/CBS" in a)
+        assert "620 (3 item(ns))" in aviso
+
+    def test_o_valor_do_cst_diferente_continua_somado(self, sessao, escritorio):
+        """Listar não é descartar: ninguém sabe o tratamento para descartar."""
+        emitente = _empresa(sessao, escritorio, cnpj="12345678000195")
+        self._com_cst(sessao, escritorio, "510")
+
+        resultado = _apurar(sessao, emitente)
+
+        assert resultado.cbs.debito == 9.0
+        assert resultado.cst_encontrados == {"510": 1}
+
+    def test_cst_vazio_nao_vira_aviso(self, sessao, escritorio):
+        """Nota anterior à reforma não traz o grupo, e isso não é anomalia."""
+        empresa = _empresa(sessao, escritorio)
+        _importar(sessao, escritorio, com_reforma=False)
+
+        assert _apurar(sessao, empresa).cst_encontrados == {}

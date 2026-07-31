@@ -48,6 +48,16 @@ interno da implementação.
   o número do documento e os dois valores lado a lado. O comando **não** gera
   nem registra escrituração — é leitura — e sai com código 2 quando alguma
   conferência falha, para caber em rotina de fechamento.
+- **A apuração da Reforma passou a dizer o que fica de fora, com valor.** Ela
+  avisava, em toda apuração, que não cobre monofásico, diferimento, crédito
+  presumido e devolução de tributo — a mesma frase para quem tem esses valores
+  e para quem não tem, o que ensina a ignorar avisos. Agora esses valores são
+  somados e contados a partir dos próprios documentos e aparecem numa seção
+  "fora do total", com o número e em quantos itens. Quando não há nenhum, não
+  há aviso. Os códigos de situação tributária do IBS/CBS diferentes de
+  tributação integral também passam a ser listados — listados, e não
+  interpretados: a nota técnica que define a tabela ainda está em revisão, e o
+  valor destacado continua sendo somado como antes.
 - **A apuração dos tributos da Reforma já funciona.** CBS, IBS e Imposto
   Seletivo são somados por período, a partir dos documentos importados. Os
   grupos passam a ser exigidos na NF-e em 03/08/2026, e até aqui os valores

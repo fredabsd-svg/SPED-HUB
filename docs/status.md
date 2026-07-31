@@ -64,6 +64,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 53 | O CST decide se o valor destacado entra na apuração do PIS/Cofins | concluída | `tests/test_cst_na_apuracao.py` | entrada com CST 70 a 75 não gera crédito; saída 04, 06 a 09 não gera débito. CST do outro sentido — o estado de toda nota recém-importada — soma e aponta `fiscal classificar`; valor descartado é dito com o total |
 
+| 54 | A apuração da Reforma mede o que não consome, em vez de avisar sempre | concluída | `tests/test_apuracao_reforma.py`, `tests/test_cli_fiscal.py` | diferimento, crédito presumido, devolução e monofásico saem com valor e contagem, fora do total; CST de IBS/CBS diferente de `000` é **listado, não interpretado** — a IT 002/2025 segue em revisão e as fontes divergem |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

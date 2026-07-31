@@ -398,6 +398,20 @@ def _apurar(sessao: Session, args) -> int:
 
     print(f"\n  {'TOTAL':16} {'':>29} {fmt_moeda(resultado.total_devido):>14}")
 
+    # Fora do total de propósito: são valores que o documento traz e que a
+    # apuração não sabe tratar.  Somá-los seria inventar o tratamento; omiti-los
+    # da tela seria esconder que existem.
+    if resultado.nao_cobertos:
+        print("\n  FORA DO TOTAL — precisam de tratamento próprio:")
+        for rotulo, (valor, itens) in sorted(resultado.nao_cobertos.items()):
+            print(f"    {rotulo:34} {fmt_moeda(valor):>14}  em {itens} item(ns)")
+
+    if resultado.cst_encontrados:
+        codigos = ", ".join(
+            f"{cst} ({itens})" for cst, itens in sorted(resultado.cst_encontrados.items())
+        )
+        print(f"\n  CST de IBS/CBS fora da tributação integral: {codigos}")
+
     print("\n  LEIA ANTES DE USAR ESTE NÚMERO:")
     for aviso in resultado.avisos:
         print(f"    · {aviso}")
