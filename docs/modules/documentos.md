@@ -138,9 +138,17 @@ na planilha, de `openpyxl` — que o projeto já usava para os relatórios. Quem
   condicionais que ninguém altera sem quebrar outro município.
 - **Os tributos da reforma convivem com os antigos** em `ItemDocumentoFiscal`,
   não os substituem: os dois regimes coexistem de 2026 a 2032. Ver
-  [`../reforma-tributaria.md`](../reforma-tributaria.md), inclusive quanto à
-  procedência das informações — o portal oficial da NF-e não respondeu na
-  consulta, e os códigos vieram de fontes secundárias.
+  [`../reforma-tributaria.md`](../reforma-tributaria.md).
+- **Cada grupo da reforma é lido do nó em que a NT o põe, e nem sempre é o
+  óbvio.** Redução, diferimento e devolução existem uma vez dentro de cada
+  destinação (`gIBSUF`, `gIBSMun`, `gCBS`), com as mesmas tags nos três; o
+  crédito presumido é `gCredPresOper`, irmão de `gIBSCBS`; o monofásico está a
+  dois níveis, sob uma de quatro variantes; `cMunFGIBS` é campo do `ide`, do
+  documento. Procurar no nó errado **não levanta erro** — devolve `None`, que
+  vira `0.0` —, e foi assim que o leitor passou a existir sem ler nada disso.
+  Por isso a fixture de NF-e é montada a partir da Nota Técnica, e não a partir
+  do leitor: montada a partir do leitor, ela reproduz o mesmo engano e os
+  testes concordam com o erro.
 - **A tabela de CST do IBS/CBS não está embutida no código.** É publicada e
   atualizada pela SVRS; uma cópia congelada viraria fonte de erro no primeiro
   ato normativo.

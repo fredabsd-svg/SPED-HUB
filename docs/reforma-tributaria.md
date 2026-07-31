@@ -1,16 +1,24 @@
 # Reforma Tributária do Consumo no SPED-HUB
 
-**Legislação consultada em:** 2026-07-30
-**Grau de segurança das informações desta página:** **médio** — ver
-"Procedência" ao final.
+**Legislação consultada em:** 2026-07-31
+**Grau de segurança das informações desta página:** **alto para o leiaute** —
+a NT 2025.002 v1.50 foi obtida do portal DF-e da SVRS e conferida campo a
+campo; **médio para a tabela de classificação tributária** — ver "Procedência"
+ao final.
 
 Como o sistema representa CBS, IBS e Imposto Seletivo, e por quê.
 
 ## O prazo que importa
 
-A partir de **03/08/2026**, pela Nota Técnica 2025.002 (versão 1.40, de
-20/05/2026), a NF-e e a NFC-e passam a **rejeitar** documentos sem os grupos de
-IBS e CBS. Não é advertência: é rejeição na autorização.
+A partir de **03/08/2026**, pela Nota Técnica 2025.002 (versão **1.50**, de
+02/06/2026), a NF-e e a NFC-e passam a **rejeitar** documentos sem os grupos de
+IBS e CBS. Não é advertência: é rejeição na autorização. Para Simples Nacional
+e MEI o prazo é **04/01/2027**; em homologação a exigência vale desde
+01/07/2026.
+
+A v1.50 **reformulou o leiaute da tributação monofásica de combustíveis**,
+separando ad rem de ad valorem em quatro grupos. Quem tenha lido a v1.40 e
+parado ali está lendo um leiaute que a NT substituiu.
 
 Para o SPED-HUB isso quer dizer que todo XML importado a partir dessa data traz
 os grupos novos, e um importador que os ignore perde informação que a
@@ -46,14 +54,51 @@ municipal, e o sistema preserva essa separação:
 
 | Campo do modelo | Origem no XML |
 |---|---|
-| `aliquota_ibs_uf`, `valor_ibs_uf` | `gIBSUF` |
-| `aliquota_ibs_mun`, `valor_ibs_mun` | `gIBSMun` |
-| `municipio_fg_ibs` | `cMunFGIBS` |
+| `aliquota_ibs_uf`, `valor_ibs_uf` | `gIBSUF/pIBSUF`, `gIBSUF/vIBSUF` |
+| `aliquota_ibs_mun`, `valor_ibs_mun` | `gIBSMun/pIBSMun`, `gIBSMun/vIBSMun` |
+| `municipio_fg_ibs` (no **documento**) | `ide/cMunFGIBS` (B12a) |
 
 Somar as duas parcelas numa coluna só pareceria mais simples e destruiria a
 informação de que a apuração depende: a partilha entre os entes é o cerne do
 imposto. O município do fato gerador pode ainda diferir do município do
-destinatário, e é ele que decide para onde vai a parcela municipal.
+destinatário, e é ele que decide para onde vai a parcela municipal — por isso
+ele fica no documento, onde a NT o põe, e não no imposto do item.
+
+**E a separação vale também para os benefícios.** A NT repete `gRed`, `gDif` e
+`gDevTrib` dentro de cada destinação, com as mesmas tags nos três; o item pode
+ter diferimento só na parcela estadual. Por isso são três colunas de cada:
+
+| Campo do modelo | Origem no XML |
+|---|---|
+| `percentual_reducao_*`, `aliquota_efetiva_*` | `gRed/pRedAliq`, `gRed/pAliqEfet` da destinação |
+| `valor_diferido_*` | `gDif/vDif` da destinação |
+| `valor_devolucao_*` | `gDevTrib/vDevTrib` da destinação |
+
+onde `*` é `ibs_uf`, `ibs_mun` ou `cbs`. Percentuais, aliás, não somam: três
+reduções de 10%, 20% e 30% não são uma de 60%.
+
+## Crédito presumido e monofásico
+
+O crédito presumido fica em `gCredPresOper` (UB120), **irmão** de `gIBSCBS` e
+não filho: o código (`cCredPres`) é um só para a operação, e o percentual e o
+valor vêm separados em `gIBSCredPres` (UB123) e `gCBSCredPres` (UB127).
+
+O monofásico de combustíveis foi reformulado na v1.50 em quatro variantes —
+IBS e CBS, cada um ad rem ou ad valorem —, escolhidas por tributo e por ano.
+Um item pode ter IBS ad rem e CBS ad valorem ao mesmo tempo, e aí carrega as
+duas bases: quantidade (`qBCMono`) por um e valor (`vBCMono`) pelo outro.
+
+O que a apuração usa é o total do item, que a própria NT fecha em
+`vTotIBSMonoItem` e `vTotCBSMonoItem` (UB105a/UB105b) — filhos diretos de
+`gIBSCBSMono`, iguais qualquer que tenha sido a variante. Refazer essa soma a
+partir das variantes seria recalcular, com menos informação, o que já veio
+pronto.
+
+**`gMonoReten` e `gMonoRet` são coisas opostas com nomes quase iguais:** o
+primeiro é o imposto sobre o biocombustível a ser misturado, que **soma** ao
+que se recolhe (art. 178 da LC 214/2025); o segundo é o que já foi cobrado
+antes. Daí `valor_*_mono_reten` e `valor_*_mono_retido` serem colunas
+distintas — trocar uma pela outra erra o sinal do monofásico inteiro.
 
 ## Classificação: CST e cClassTrib
 
@@ -112,25 +157,50 @@ e a quantidade tributável viajam junto com os valores:
 
 ## Procedência das informações
 
-O portal oficial da NF-e (`nfe.fazenda.gov.br`) respondeu **HTTP 503** nas
-tentativas de consulta em 2026-07-30. As informações desta página vêm de fontes
-secundárias — publicações técnicas de fornecedores de software fiscal — que
-concordam entre si, mas **não substituem o documento oficial**.
+**O leiaute está conferido contra o documento oficial.** Em 2026-07-31 o
+portal DF-e da SVRS voltou a responder e a NT 2025.002 v1.50 foi baixada e
+lida: o aninhamento de cada grupo desta página vem dela, com o identificador
+do campo (UB…) anotado no código onde a decisão dependeu dele.
 
-Antes de usar qualquer código desta página como verdade fiscal, confira em:
+`nfe.fazenda.gov.br` seguiu fora do ar; o mirror que respondeu foi:
 
-- Portal da NF-e — Nota Técnica 2025.002:
-  <https://www.nfe.fazenda.gov.br/portal/listaConteudo.aspx?tipoConteudo=04BIflQt1aY%3D>
+- Portal DF-e da SVRS — documentos técnicos da NF-e:
+  <https://dfe-portal.svrs.rs.gov.br/Nfe/Documentos>
 - Tabela de Classificação Tributária (SVRS):
   <https://dfe-portal.svrs.rs.gov.br/DFE/TabelaClassificacaoTributaria>
 - Tabela de Crédito Presumido (SVRS):
   <https://dfe-portal.svrs.rs.gov.br/DFE/TabelaCreditoPresumido>
 
-O que está **verificado no código**, independentemente da fonte, é a
-*estrutura*: quais campos existem, que o IBS tem duas parcelas, que o IS aceita
-alíquota específica, e que os dois regimes convivem. Os **valores** de alíquota
-e os **códigos** de classificação são dado de entrada, lido do XML — o sistema
-não os calcula nem os presume.
+**O que segue vindo de fonte secundária é a semântica dos códigos** — o que
+cada CST do IBS/CBS e cada `cClassTrib` significa. A IT 2025.002 v1.50 existe
+no portal, mas o sistema não a embute: ela é atualizada por ato normativo, e
+uma cópia congelada no código viraria fonte de erro na primeira revisão.
+
+O que está **verificado no código** é a *estrutura*: quais campos existem, em
+que grupo cada um vive, que o IBS tem duas parcelas, que o IS aceita alíquota
+específica, e que os dois regimes convivem. Os **valores** de alíquota e os
+**códigos** de classificação são dado de entrada, lido do XML — o sistema não
+os calcula nem os presume.
+
+### O que a conferência encontrou
+
+A leitura estava errada em cinco pontos, todos com o mesmo formato: o campo era
+procurado num nó que não é o pai dele. Procurar uma tag no nó errado não levanta
+erro — devolve `None`, que vira `0,0`. Em NF-e montada como a NT manda, **todo
+grupo opcional da reforma lia zero**:
+
+| Grupo | Onde era procurado | Onde a NT o põe |
+|---|---|---|
+| `gRed`, `gDif`, `gDevTrib` | filhos de `gIBSCBS` | um de cada dentro de `gIBSUF`, `gIBSMun` e `gCBS` |
+| crédito presumido | `gCredPres` em `gIBSCBS` | `gCredPresOper` (UB120), irmão de `gIBSCBS`, com `gIBSCredPres` e `gCBSCredPres` |
+| monofásico | filhos de `gIBSCBSMono` | dentro de `gMonoPadrao`/`gMonoReten`/`gMonoRet`, sob uma das quatro variantes ad rem/ad valorem |
+| `cMunFGIBS` | dentro de `gIBSCBS`, no item | campo B12a do `ide`, do documento |
+| `vIBSMonoReten` | gravado como "retido" | é o **sujeito à** retenção; o retido anteriormente é `vIBSMonoRet` |
+
+Os testes passavam porque a fixture de NF-e era montada a partir do leitor, e
+não a partir da NT: reproduzia o mesmo engano, e concordava com ele. A fixture
+agora segue o documento oficial, e `tests/test_leitura_reforma_nt.py` fixa o
+aninhamento de cada grupo.
 
 ## A apuração
 
@@ -167,7 +237,10 @@ Esta página descreve o que o modelo de dados representa. Não existe ainda:
 
 - escrituração dos tributos novos em obrigação acessória;
 - monofásico, retenção, diferimento, crédito presumido e devolução de tributo
-  na apuração — os campos são lidos, e a soma direta não os consome;
+  na apuração — os campos são lidos e **medidos**, e a soma direta não os
+  consome;
+- os grupos `gTransfCred` (UB106), `gAjusteCompet` (UB112), `gEstornoCred`
+  (UB116) e `gpBioDiferenca`, que o leitor ainda não lê;
 - validação de CST contra a tabela oficial;
 - tratamento do split payment;
 - regimes específicos e diferenciados.

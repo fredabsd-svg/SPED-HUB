@@ -462,21 +462,26 @@ class TestOQueNaoEConsumidoEMedido:
 
     def test_diferimento_e_medido_com_valor_e_contagem(self, sessao, escritorio):
         empresa = _empresa(sessao, escritorio)
-        self._com_valor(sessao, escritorio, "valor_diferido", 1500.0, itens=2)
+        self._com_valor(sessao, escritorio, "valor_diferido_cbs", 1500.0, itens=2)
 
         resultado = _apurar(sessao, empresa)
 
-        assert resultado.nao_cobertos["diferimento"] == (3000.0, 2)
+        assert resultado.nao_cobertos["diferimento da CBS"] == (3000.0, 2)
         aviso = next(a for a in resultado.avisos if "NÃO consumiu" in a)
-        assert "diferimento: 3000.00 em 2 item(ns)" in aviso
+        assert "diferimento da CBS: 3000.00 em 2 item(ns)" in aviso
 
     @pytest.mark.parametrize(
         ("campo", "rotulo"),
         [
-            ("valor_credito_presumido", "crédito presumido"),
-            ("valor_devolucao_tributo", "devolução de tributo"),
+            ("valor_credito_presumido_ibs", "crédito presumido do IBS"),
+            ("valor_devolucao_ibs_mun", "devolução do IBS municipal"),
             ("valor_ibs_mono", "IBS monofásico"),
-            ("valor_cbs_mono_retido", "CBS monofásica retida"),
+            ("valor_cbs_mono_reten", "CBS monofásica sujeita à retenção"),
+            ("valor_cbs_mono_retido", "CBS monofásica retida anteriormente"),
+            # As três destinações do diferimento têm rótulos distintos: um
+            # rótulo comum esconderia que o benefício é só de uma delas.
+            ("valor_diferido_ibs_uf", "diferimento do IBS estadual"),
+            ("valor_diferido_ibs_mun", "diferimento do IBS municipal"),
         ],
     )
     def test_cada_campo_tem_o_seu_rotulo(self, sessao, escritorio, campo, rotulo):
@@ -488,19 +493,19 @@ class TestOQueNaoEConsumidoEMedido:
     def test_o_valor_medido_nao_entra_no_total(self, sessao, escritorio):
         """Medir é para avisar, não para somar — ninguém sabe o tratamento."""
         empresa = _empresa(sessao, escritorio)
-        self._com_valor(sessao, escritorio, "valor_diferido", 9999.0)
+        self._com_valor(sessao, escritorio, "valor_diferido_cbs", 9999.0)
 
         resultado = _apurar(sessao, empresa)
 
-        assert resultado.nao_cobertos["diferimento"] == (9999.0, 1)
+        assert resultado.nao_cobertos["diferimento da CBS"] == (9999.0, 1)
         assert resultado.total_devido == 0.0, "a nota é de entrada: só crédito"
 
     def test_a_medicao_vale_para_entrada_e_para_saida(self, sessao, escritorio):
         """Diferimento numa compra também precisa de tratamento próprio."""
         emitente = _empresa(sessao, escritorio, cnpj="12345678000195")
-        self._com_valor(sessao, escritorio, "valor_diferido", 20.0)
+        self._com_valor(sessao, escritorio, "valor_diferido_cbs", 20.0)
 
-        assert "diferimento" in _apurar(sessao, emitente).nao_cobertos
+        assert "diferimento da CBS" in _apurar(sessao, emitente).nao_cobertos
 
 
 class TestOsCSTSaoListadosNaoInterpretados:

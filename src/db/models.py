@@ -775,6 +775,12 @@ class DocumentoFiscal(Base):
     destinatario_ie: Mapped[str | None] = mapped_column(String(20))
     destinatario_uf: Mapped[str | None] = mapped_column(String(2))
     municipio_codigo: Mapped[str | None] = mapped_column(String(7))
+    # Município de consumo, fato gerador do IBS/CBS (`cMunFGIBS`, B12a).  Fica
+    # no documento, não no item: a NT o põe no `ide`, e só o exige quando a
+    # operação é presencial fora do estabelecimento (`indPres=5`) e não há
+    # endereço de destinatário nem local de entrega.  É ele que decide para
+    # qual município vai a parcela municipal do IBS.
+    municipio_fg_ibs: Mapped[str | None] = mapped_column(String(7))
 
     # Datas
     data_emissao: Mapped[datetime.date | None] = mapped_column(index=True)
@@ -906,28 +912,61 @@ class ItemDocumentoFiscal(Base):
     valor_ibs_uf: Mapped[float] = mapped_column(default=0.0)
     aliquota_ibs_mun: Mapped[float] = mapped_column(default=0.0)
     valor_ibs_mun: Mapped[float] = mapped_column(default=0.0)
-    # Município do fato gerador do IBS — pode diferir do município do
-    # destinatário, e é ele que decide a destinação da parcela municipal.
-    municipio_fg_ibs: Mapped[str | None] = mapped_column(String(7))
 
     aliquota_cbs: Mapped[float] = mapped_column(default=0.0)
     valor_cbs: Mapped[float] = mapped_column(default=0.0)
 
-    # Reduções, diferimento e devolução
-    percentual_reducao_aliquota: Mapped[float] = mapped_column(default=0.0)
-    aliquota_efetiva: Mapped[float] = mapped_column(default=0.0)
-    valor_diferido: Mapped[float] = mapped_column(default=0.0)
-    valor_devolucao_tributo: Mapped[float] = mapped_column(default=0.0)
+    # Reduções, diferimento e devolução.
+    #
+    # São TRÊS de cada, e não uma: a NT põe um `gRed`, um `gDif` e um
+    # `gDevTrib` dentro de `gIBSUF`, de `gIBSMun` e de `gCBS`, cada um com o
+    # seu percentual.  Uma coluna só obrigaria a somar valores de tributos
+    # diferentes — e, no caso dos percentuais, a somar percentuais, que não
+    # somam.  Ver UB21/UB24/UB26 (UF), UB40/UB43/UB45 (município) e
+    # UB59/UB62/UB64 (CBS) da NT 2025.002 v1.50.
+    percentual_reducao_ibs_uf: Mapped[float] = mapped_column(default=0.0)
+    aliquota_efetiva_ibs_uf: Mapped[float] = mapped_column(default=0.0)
+    valor_diferido_ibs_uf: Mapped[float] = mapped_column(default=0.0)
+    valor_devolucao_ibs_uf: Mapped[float] = mapped_column(default=0.0)
 
-    # Crédito presumido
+    percentual_reducao_ibs_mun: Mapped[float] = mapped_column(default=0.0)
+    aliquota_efetiva_ibs_mun: Mapped[float] = mapped_column(default=0.0)
+    valor_diferido_ibs_mun: Mapped[float] = mapped_column(default=0.0)
+    valor_devolucao_ibs_mun: Mapped[float] = mapped_column(default=0.0)
+
+    percentual_reducao_cbs: Mapped[float] = mapped_column(default=0.0)
+    aliquota_efetiva_cbs: Mapped[float] = mapped_column(default=0.0)
+    valor_diferido_cbs: Mapped[float] = mapped_column(default=0.0)
+    valor_devolucao_cbs: Mapped[float] = mapped_column(default=0.0)
+
+    # Crédito presumido da operação (`gCredPresOper`, UB120).  O código é um
+    # só; o percentual e o valor vêm separados para IBS (UB123) e CBS (UB127).
     codigo_credito_presumido: Mapped[str | None] = mapped_column(String(10))
-    valor_credito_presumido: Mapped[float] = mapped_column(default=0.0)
-    valor_credito_presumido_susp: Mapped[float] = mapped_column(default=0.0)
+    percentual_credito_presumido_ibs: Mapped[float] = mapped_column(default=0.0)
+    valor_credito_presumido_ibs: Mapped[float] = mapped_column(default=0.0)
+    valor_credito_presumido_ibs_susp: Mapped[float] = mapped_column(default=0.0)
+    percentual_credito_presumido_cbs: Mapped[float] = mapped_column(default=0.0)
+    valor_credito_presumido_cbs: Mapped[float] = mapped_column(default=0.0)
+    valor_credito_presumido_cbs_susp: Mapped[float] = mapped_column(default=0.0)
 
-    # Monofásico
+    # Monofásico.  A v1.50 da NT separou ad rem de ad valorem em quatro grupos
+    # (IBS e CBS × ad rem e ad valorem), e o que vale para a apuração é o total
+    # do item, que a própria NT fecha em `vTotIBSMonoItem`/`vTotCBSMonoItem`
+    # (UB105a/UB105b) — filhos diretos de `gIBSCBSMono`, únicos qualquer que
+    # tenha sido o regime.  Guardar o total é ler o que a NT já somou.
+    #
+    # A base é `qBCMono` (quantidade) no ad rem e `vBCMono` (valor) no ad
+    # valorem: são grandezas diferentes e por isso colunas diferentes.
     quantidade_bc_mono: Mapped[float] = mapped_column(default=0.0)
+    valor_bc_mono: Mapped[float] = mapped_column(default=0.0)
     valor_ibs_mono: Mapped[float] = mapped_column(default=0.0)
     valor_cbs_mono: Mapped[float] = mapped_column(default=0.0)
+    # `gMonoReten` e `gMonoRet` são coisas opostas, e a NT as nomeia quase
+    # igual: `Reten` é o imposto sobre o biocombustível a ser misturado, que
+    # **soma** ao que se recolhe; `Ret` é o que já foi cobrado antes.  Trocar
+    # um pelo outro erra o sinal do monofásico inteiro.
+    valor_ibs_mono_reten: Mapped[float] = mapped_column(default=0.0)
+    valor_cbs_mono_reten: Mapped[float] = mapped_column(default=0.0)
     valor_ibs_mono_retido: Mapped[float] = mapped_column(default=0.0)
     valor_cbs_mono_retido: Mapped[float] = mapped_column(default=0.0)
 
