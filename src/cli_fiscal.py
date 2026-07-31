@@ -62,10 +62,13 @@ from src.escrituracoes import (
     CampoObrigatorioAusente,
     GeradorEFDContribuicoes,
     GeradorEFDICMS,
+    TransmissaoInvalida,
     arquivar,
     avisos_de,
     comparar,
     espelho,
+    marcar_transmitida,
+    transmitidas_do_periodo,
 )
 
 # O mesmo formato dos relatórios — 1.234.567,89.  `f"{v:,.2f}"` daria
@@ -327,19 +330,67 @@ def _historico(sessao: Session, args) -> int:
     consulta = select(Escrituracao).order_by(Escrituracao.gerada_em, Escrituracao.id)
     if args.empresa:
         consulta = consulta.where(Escrituracao.empresa_id == args.empresa)
+    if args.transmitidas:
+        consulta = consulta.where(Escrituracao.transmitida_em.is_not(None))
     escrituracoes = sessao.execute(consulta).scalars().all()
 
     if not escrituracoes:
-        print("Nenhuma escrituração gerada.")
+        print(
+            "Nenhuma escrituração transmitida."
+            if args.transmitidas
+            else "Nenhuma escrituração gerada."
+        )
         return 0
 
-    print(f"\n{'ID':>5}  {'Empresa':>8} {'Tipo':20} {'Período':24} {'Linhas':>7} Hash")
+    print(
+        f"\n{'ID':>5}  {'Empresa':>8} {'Tipo':20} {'Período':24} {'Linhas':>7} Entrega          Hash"
+    )
     for e in escrituracoes:
         periodo = f"{e.data_inicio} a {e.data_fim}"
+        # A coluna diz "gerada mas não entregue" com um travessão, não com
+        # vazio: campo em branco se lê como coluna que não se aplica.
+        entrega = f"{e.transmitida_em:%d/%m/%Y}" if e.transmitida else "—"
+        if e.recibo:
+            entrega += f" {e.recibo}"
         print(
             f"{e.id:>5}  {e.empresa_id:>8} {e.tipo:20} {periodo:24} "
-            f"{e.total_linhas:>7} {e.hash_conteudo[:16]}…"
+            f"{e.total_linhas:>7} {entrega:16} {e.hash_conteudo[:16]}…"
         )
+    print()
+    return 0
+
+
+def _transmitida(sessao: Session, args) -> int:
+    """Registra qual geração foi a entregue.
+
+    O sistema não transmite — quem transmite é o programa da Receita —, então
+    a informação vem de fora e precisa ser dita. Enquanto ninguém disser,
+    nenhuma escrituração é marcada.
+    """
+    escrituracao = sessao.get(Escrituracao, args.escrituracao)
+    if escrituracao is None:
+        raise LookupError(
+            f"não existe escrituração #{args.escrituracao} — "
+            "`sped-hub fiscal historico` lista as geradas"
+        )
+
+    marcar_transmitida(
+        sessao,
+        escrituracao,
+        recibo=args.recibo,
+        forcar=args.forcar,
+    )
+    sessao.commit()
+
+    print(f"\nEscrituração #{escrituracao.id} — {TIPOS[escrituracao.tipo]}")
+    print(f"  período       {escrituracao.data_inicio} a {escrituracao.data_fim}")
+    print(f"  transmitida   {escrituracao.transmitida_em:%d/%m/%Y %H:%M}")
+    print(f"  recibo        {escrituracao.recibo or '— não informado'}")
+    print(f"  hash          {escrituracao.hash_conteudo[:16]}…")
+
+    if outras := transmitidas_do_periodo(sessao, escrituracao):
+        ids = ", ".join(f"#{e.id}" for e in outras)
+        print(f"\n  o período já tinha entrega: {ids} — esta é uma retificação.")
     print()
     return 0
 
@@ -697,6 +748,7 @@ ACOES = {
     "apurar": _apurar,
     "regras": _regras,
     "historico": _historico,
+    "transmitida": _transmitida,
     "conferir": _conferir,
 }
 
@@ -725,6 +777,7 @@ def cmd_fiscal(args) -> int:
         OSError,
         RegraInvalida,
         SelecaoVazia,
+        TransmissaoInvalida,
         ValueError,
     ) as erro:
         # Todas menos `OSError` já são `ValueError`; estão nomeadas porque a
@@ -761,6 +814,12 @@ def registrar(sub) -> None:
     p.add_argument("--saida", help="Caminho do arquivo gerado")
     p.add_argument("--escrituracao", type=int, help="ID da escrituração (em `conferir`)")
     p.add_argument("--diff", action="store_true", help="Mostra as linhas divergentes")
+    p.add_argument("--recibo", help="Número do recibo do Fisco (em `transmitida`)")
+    p.add_argument(
+        "--transmitidas",
+        action="store_true",
+        help="Em `historico`: só as que foram entregues",
+    )
 
     # ── classificar ────────────────────────────────────────────────────────
     p.add_argument(
@@ -845,6 +904,7 @@ OBRIGATORIOS = {
     "espelho": ("empresa", "de", "ate"),
     "apurar": ("empresa", "de", "ate"),
     "conferir": ("escrituracao",),
+    "transmitida": ("escrituracao",),
 }
 
 # `regras` depende da ação: criar exige o que define a regra, remover exige o

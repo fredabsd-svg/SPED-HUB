@@ -15,8 +15,16 @@ O que este módulo oferece:
 
   * `arquivar` — grava o resultado de uma geração, com os documentos que
     entraram nele;
+  * `marcar_transmitida` — diz qual das gerações foi de fato entregue;
   * `comparar` — confronta o arquivado com uma geração nova e diz o que mudou;
   * `escrituracoes_do_documento` — em que arquivos uma nota entrou.
+
+**Guardar todas as gerações não responde qual foi entregue.** Um mês costuma
+ter várias: a primeira, a de depois da correção, a que se gerou só para
+conferir. O sistema não transmite — quem transmite é o programa validador da
+Receita — então a informação vem de fora e precisa ser dita. Enquanto ninguém
+disser, nenhuma é marcada: deduzir pela mais recente responderia que foi
+entregue justamente a que se acabou de gerar para olhar.
 """
 
 from __future__ import annotations
@@ -105,6 +113,102 @@ def arquivar(
         session.add(
             EscrituracaoDocumento(escrituracao_id=escrituracao.id, documento_id=documento_id)
         )
+    session.flush()
+    return escrituracao
+
+
+class TransmissaoInvalida(ValueError):
+    """Marcar como transmitida algo que não pode ser marcado assim."""
+
+
+def _finalidade(escrituracao: Escrituracao) -> str:
+    """`0` = original, `1` = retificadora — lido do arquivo que saiu.
+
+    É o campo 2 do `0000` nas duas escriturações: `COD_FIN` na EFD ICMS/IPI e
+    `TIPO_ESCRIT` na EFD-Contribuições, mesma posição e mesmos valores. Lido do
+    conteúdo, e não do cadastro ou do parâmetro de geração, porque o que o
+    Fisco recebeu foi o arquivo.
+    """
+    for linha in escrituracao.conteudo.replace("\r\n", "\n").split("\n"):
+        campos = linha.split("|")
+        if len(campos) > 3 and campos[1] == "0000":
+            return campos[3]
+    return ""
+
+
+def transmitidas_do_periodo(session: Session, escrituracao: Escrituracao) -> list[Escrituracao]:
+    """As já transmitidas do mesmo período, empresa e obrigação.
+
+    Da mais antiga para a mais nova, sem contar a própria — é o histórico de
+    entregas daquele mês, que é o que decide se uma nova entrega é retificação
+    ou engano.
+    """
+    consulta = (
+        select(Escrituracao)
+        .where(
+            Escrituracao.empresa_id == escrituracao.empresa_id,
+            Escrituracao.tipo == escrituracao.tipo,
+            Escrituracao.data_inicio == escrituracao.data_inicio,
+            Escrituracao.data_fim == escrituracao.data_fim,
+            Escrituracao.transmitida_em.is_not(None),
+            Escrituracao.id != escrituracao.id,
+        )
+        .order_by(Escrituracao.transmitida_em, Escrituracao.id)
+    )
+    return list(session.execute(consulta).scalars().all())
+
+
+def marcar_transmitida(
+    session: Session,
+    escrituracao: Escrituracao,
+    *,
+    recibo: str | None = None,
+    quando: datetime.datetime | None = None,
+    usuario_id: int | None = None,
+    forcar: bool = False,
+) -> Escrituracao:
+    """Registra que **esta** geração foi a entregue.
+
+    Três regras, e cada uma existe por um motivo:
+
+    **Marcar não se desfaz.** Transmitir é fato do mundo, não estado do
+    sistema; apagar a marca apagaria o registro de que aconteceu. Errou o
+    arquivo? Transmite-se uma retificadora — que é outra escrituração, com o
+    `0000` declarando finalidade `1` — e ela é marcada por sua vez. As duas
+    ficam, na ordem em que saíram.
+
+    **Uma segunda entrega original no mesmo período é recusada.** Se o período
+    já tem transmissão e o arquivo novo se declara original, ou o arquivo devia
+    ter sido gerado como retificadora, ou a marca anterior está errada. Nos
+    dois casos alguém precisa olhar. `forcar=True` passa por cima — existe
+    porque o caso legítimo existe: transmissão rejeitada pelo Fisco e
+    reenviada como original.
+
+    **O conteúdo não é tocado.** Marcar não altera texto nem hash: a linha
+    continua valendo como prova.
+    """
+    if escrituracao.transmitida:
+        raise TransmissaoInvalida(
+            f"a escrituração #{escrituracao.id} já está marcada como transmitida em "
+            f"{escrituracao.transmitida_em:%d/%m/%Y %H:%M} — transmitir é fato do "
+            "mundo, não estado do sistema. Se o arquivo entregue estava errado, gere "
+            "uma retificadora e marque essa"
+        )
+
+    anteriores = transmitidas_do_periodo(session, escrituracao)
+    if anteriores and _finalidade(escrituracao) == "0" and not forcar:
+        ids = ", ".join(f"#{e.id}" for e in anteriores)
+        raise TransmissaoInvalida(
+            f"o período {escrituracao.data_inicio} a {escrituracao.data_fim} já tem "
+            f"escrituração transmitida ({ids}), e a #{escrituracao.id} se declara "
+            "ORIGINAL no 0000 — uma segunda entrega do mesmo período é retificadora "
+            "(finalidade 1). Gere de novo com a finalidade certa, ou use forcar=True "
+            "se a entrega anterior foi rejeitada pelo Fisco e esta a substitui"
+        )
+
+    escrituracao.transmitida_em = quando or datetime.datetime.now(datetime.UTC)
+    escrituracao.recibo = recibo
+    escrituracao.transmitida_por_id = usuario_id
     session.flush()
     return escrituracao
 

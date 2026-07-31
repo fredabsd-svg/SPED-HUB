@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 from unittest import mock
 
 import pytest
@@ -1398,3 +1399,125 @@ class TestEspelho:
 
         assert codigo == 1
         assert "--de" in capsys.readouterr().out
+
+
+class TestTransmitida:
+    """Qual das gerações foi de fato entregue."""
+
+    def test_marcar_registra_e_mostra(self, importado, tmp_path, capsys):
+        _gerar(importado, tmp_path / "efd.txt")
+
+        codigo = main(
+            [
+                "fiscal",
+                "transmitida",
+                "--escrituracao",
+                "1",
+                "--recibo",
+                "REC-2026-0001",
+                "--db",
+                importado,
+            ]
+        )
+
+        saida = capsys.readouterr().out
+        assert codigo == 0
+        assert "REC-2026-0001" in saida
+        with _sessao(importado) as sessao:
+            assert sessao.get(Escrituracao, 1).transmitida
+
+    def test_marcar_duas_vezes_e_um_com_o_motivo(self, importado, tmp_path, capsys):
+        _gerar(importado, tmp_path / "efd.txt")
+        main(["fiscal", "transmitida", "--escrituracao", "1", "--db", importado])
+
+        codigo = main(["fiscal", "transmitida", "--escrituracao", "1", "--db", importado])
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert "já está marcada" in saida
+        assert "Traceback" not in saida
+
+    def test_segunda_original_do_periodo_e_um(self, importado, tmp_path, capsys):
+        """A recusa que evita entregar duas originais do mesmo mês."""
+        _gerar(importado, tmp_path / "a.txt")
+        main(["fiscal", "transmitida", "--escrituracao", "1", "--db", importado])
+        _gerar(importado, tmp_path / "b.txt")
+
+        codigo = main(["fiscal", "transmitida", "--escrituracao", "2", "--db", importado])
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert "ORIGINAL" in saida
+
+    def test_forcar_passa_e_avisa_que_e_retificacao(self, importado, tmp_path, capsys):
+        _gerar(importado, tmp_path / "a.txt")
+        main(["fiscal", "transmitida", "--escrituracao", "1", "--db", importado])
+        _gerar(importado, tmp_path / "b.txt")
+
+        codigo = main(
+            ["fiscal", "transmitida", "--escrituracao", "2", "--forcar", "--db", importado]
+        )
+
+        saida = capsys.readouterr().out
+        assert codigo == 0
+        assert "retificação" in saida
+        assert "#1" in saida
+
+    def test_escrituracao_inexistente_e_um(self, banco, capsys):
+        codigo = main(["fiscal", "transmitida", "--escrituracao", "42", "--db", banco])
+
+        assert codigo == 1
+        assert "não existe escrituração #42" in capsys.readouterr().out
+
+    def test_historico_mostra_travessao_para_a_nao_entregue(self, importado, tmp_path, capsys):
+        """Campo em branco se lê como coluna que não se aplica."""
+        _gerar(importado, tmp_path / "efd.txt")
+        capsys.readouterr()
+
+        main(["fiscal", "historico", "--db", importado])
+
+        linha = next(ln for ln in capsys.readouterr().out.splitlines() if re.match(r"^\s+1\s", ln))
+        assert "—" in linha
+        assert not re.search(r"\d{2}/\d{2}/\d{4}", linha), "não entregue não tem data"
+
+    def test_historico_mostra_a_data_e_o_recibo_da_entregue(self, importado, tmp_path, capsys):
+        """A data é o que distingue entregue de não entregue.
+
+        Conferir só o recibo passaria mesmo com a coluna de entrega fixa em
+        travessão: o recibo é concatenado depois dela.
+        """
+        _gerar(importado, tmp_path / "efd.txt")
+        main(["fiscal", "transmitida", "--escrituracao", "1", "--recibo", "R-7", "--db", importado])
+        capsys.readouterr()
+
+        main(["fiscal", "historico", "--db", importado])
+
+        linha = next(ln for ln in capsys.readouterr().out.splitlines() if re.match(r"^\s+1\s", ln))
+        assert re.search(r"\d{2}/\d{2}/\d{4}", linha), "entregue tem data"
+        assert "R-7" in linha
+        assert "—" not in linha
+
+    def test_historico_transmitidas_filtra(self, importado, tmp_path, capsys):
+        _gerar(importado, tmp_path / "a.txt")
+        _gerar(importado, tmp_path / "b.txt")
+        main(["fiscal", "transmitida", "--escrituracao", "1", "--db", importado])
+        capsys.readouterr()  # descarta a saída de gerar e marcar
+
+        main(["fiscal", "historico", "--transmitidas", "--db", importado])
+
+        linhas = [ln for ln in capsys.readouterr().out.splitlines() if re.match(r"^\s+\d+\s", ln)]
+        assert len(linhas) == 1
+
+    def test_historico_sem_transmitida_nenhuma_diz_isso(self, importado, tmp_path, capsys):
+        _gerar(importado, tmp_path / "efd.txt")
+
+        main(["fiscal", "historico", "--transmitidas", "--db", importado])
+
+        assert "Nenhuma escrituração transmitida" in capsys.readouterr().out
+
+    def test_escrituracao_e_obrigatorio(self, banco, capsys):
+        codigo = main(["fiscal", "transmitida", "--db", banco])
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert "--escrituracao" in saida

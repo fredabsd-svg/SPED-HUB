@@ -1089,9 +1089,22 @@ class Escrituracao(Base):
     )
     usuario_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
 
+    # Qual das gerações foi de fato entregue.  Nulo em todas até que alguém
+    # diga — o sistema não transmite, e adivinhar pela mais recente diria que
+    # foi entregue justamente a que se acabou de gerar para conferir.
+    transmitida_em: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+    # O número do recibo devolvido pelo Fisco.  É o que liga o arquivo daqui
+    # ao que está lá; sem ele, "transmitida" é palavra de quem marcou.
+    recibo: Mapped[str | None] = mapped_column(String(60))
+    transmitida_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+
     documentos: Mapped[list["EscrituracaoDocumento"]] = relationship(
         back_populates="escrituracao", cascade="all, delete-orphan"
     )
+
+    @property
+    def transmitida(self) -> bool:
+        return self.transmitida_em is not None
 
     def __repr__(self):
         return f"<Escrituracao {self.tipo} {self.data_inicio}..{self.data_fim}>"

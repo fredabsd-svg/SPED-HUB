@@ -56,6 +56,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 49 | Espelho da escrituração: ler o arquivo antes de transmitir, com as conferências do validador | concluída | `tests/test_espelho.py`, `tests/test_cli_fiscal.py` | é lido dos **registros**, não do banco; confere itens × documento, C190 × C170, apuração × documentos e as contagens do bloco 9. `sped-hub fiscal espelho` **não arquiva** e sai com 2 quando alguma conferência falha |
 
+| 50 | Marcar qual escrituração foi transmitida, com recibo | concluída | `tests/test_escrituracao_transmitida.py`, `tests/test_cli_fiscal.py` | nenhuma é marcada sozinha; marcar **não se desfaz**; segunda entrega original do mesmo período é recusada (a finalidade é lida do `0000` do arquivo), com `--forcar` para o caso de entrega rejeitada e reenviada |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é
