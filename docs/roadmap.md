@@ -58,7 +58,7 @@ O que falta:
 | Ajustes de apuração pela tabela 5.1.1 (E111) | O E110 soma os documentos e carrega o saldo credor do período anterior; ajustes por código e deduções seguem fora | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_apuracao` |
 | Blocos A, D, F e I da EFD-Contribuições | O gerador cobre 0, C, M e 9. O bloco A depende da importação de NFS-e, acima | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.bloco_f` |
 | Créditos extemporâneos e ajustes da EFD-Contribuições | Os blocos M são soma direta das saídas menos as entradas | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.ajustes_de_apuracao` |
-| Monofásico, substituição e alíquota por unidade no PIS/Cofins | A apuração usa o valor destacado no documento, qualquer que seja o CST | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |
+| Bases próprias do monofásico e da alíquota por unidade no PIS/Cofins | O CST já decide se o valor destacado entra na apuração; o que falta é **calcular** base e alíquota próprias em vez de usar o destacado | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |
 | Tela de cadastro fiscal da empresa | O cadastro é preenchido por `sped-hub fiscal cadastro`, que valida contra as tabelas oficiais; falta a tela | `src.routes.empresas:cadastro_fiscal` |
 | Registro 0035 (identificação da SCP) na EFD-Contribuições | Exigido quando `IND_NAT_PJ` é 03, 04 ou 05; o gerador avisa e não escreve | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.registro_0035` |
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |

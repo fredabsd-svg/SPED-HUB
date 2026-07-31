@@ -97,6 +97,18 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **A apuração do PIS/Cofins ignorava o CST e podia recolher a menos.** O
+  sistema somava o valor destacado em cada item, qualquer que fosse o código de
+  situação tributária. Compra que não dá direito a crédito — aquisição isenta,
+  suspensa, a alíquota zero, por substituição — entrava como crédito se o
+  fornecedor tivesse destacado o valor na nota, e o resultado era contribuição
+  devida a menor, num arquivo que o validador aceita sem reclamar. Venda com
+  contribuição já paga no início da cadeia (monofásica) ou sem incidência
+  entrava como débito pelo mesmo motivo. Agora o código de situação decide, nos
+  dois sentidos. Quando o valor destacado é descartado, a geração diz quanto e
+  por quê. E como o código que vem no XML de uma compra é o do fornecedor, nota
+  ainda não classificada continua entrando na conta como antes — mas com aviso
+  apontando `sped-hub fiscal classificar`, que é o que resolve.
 - **Empresa com saldo credor de ICMS recolhia a mais.** A apuração do mês
   ignorava o crédito acumulado do mês anterior: o E110 saía com o campo de
   saldo credor anterior vazio, e o "ICMS a recolher" — que é o número que vai

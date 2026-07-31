@@ -62,6 +62,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 52 | Cadastro fiscal pela linha de comando, e a natureza jurídica da empresa | concluída | `tests/test_cli_fiscal.py`, `tests/test_gerador_efd_contribuicoes.py` | `fiscal cadastro` mostra o que falta para cada obrigação e valida contra as tabelas oficiais; o `IND_NAT_PJ` deixa de sair fixo em `00`. Cooperativa (01) e entidade de folha (02) passam a ser declaráveis; as naturezas de SCP (03, 04, 05) avisam que o registro 0035 não é gerado |
 
+| 53 | O CST decide se o valor destacado entra na apuração do PIS/Cofins | concluída | `tests/test_cst_na_apuracao.py` | entrada com CST 70 a 75 não gera crédito; saída 04, 06 a 09 não gera débito. CST do outro sentido — o estado de toda nota recém-importada — soma e aponta `fiscal classificar`; valor descartado é dito com o total |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é
