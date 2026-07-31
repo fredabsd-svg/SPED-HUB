@@ -18,7 +18,9 @@ interno da implementação.
   separado, porque vão para entes diferentes e uma não abate a outra; e o
   total de **2026 não é o valor a recolher** — é ano de teste, com compensação
   e dispensa que o sistema não calcula. Nota antiga, sem os grupos novos, não
-  quebra a apuração: os dois regimes convivem até 2033.
+  quebra a apuração: os dois regimes convivem até 2033. `sped-hub fiscal
+  apurar --empresa 1 --de 2026-07-01 --ate 2026-07-31` mostra o quadro, com os
+  avisos junto — o número sozinho engana.
 - **`sped-hub fiscal`: dá para importar XML de nota, gerar a EFD e conferir o
   que foi entregue.** A Central de Documentos, os geradores da EFD ICMS/IPI e
   da EFD-Contribuições e o registro do que foi enviado já existiam por dentro,

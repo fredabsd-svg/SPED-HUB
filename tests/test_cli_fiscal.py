@@ -1166,3 +1166,128 @@ class TestArgumentosDeRegras:
 
     def test_listar_nao_exige_nada(self, banco):
         assert main(["fiscal", "regras", "--db", banco]) == 0
+
+
+# ── Apuração da Reforma ────────────────────────────────────────────────────
+
+
+def _apurar(url, empresa="1"):
+    return main(
+        [
+            "fiscal",
+            "apurar",
+            "--empresa",
+            empresa,
+            "--de",
+            "2026-07-01",
+            "--ate",
+            "2026-07-31",
+            "--db",
+            url,
+        ]
+    )
+
+
+class TestApurar:
+    def test_mostra_os_tres_tributos(self, importado, capsys):
+        assert _apurar(importado) == 0
+
+        saida = capsys.readouterr().out
+        for tributo in ("CBS", "IBS estadual", "IBS municipal", "Seletivo"):
+            assert tributo in saida, tributo
+
+    def test_as_parcelas_do_ibs_aparecem_com_valores_proprios(self, importado, capsys):
+        """Uma linha só de "IBS" esconderia a partilha entre os entes."""
+        _apurar(importado)
+
+        saida = capsys.readouterr().out
+        estadual = next(ln for ln in saida.splitlines() if "IBS estadual" in ln)
+        municipal = next(ln for ln in saida.splitlines() if "IBS municipal" in ln)
+
+        assert "2,10" in estadual, "3 itens × 0,70"
+        assert "0,90" in municipal, "3 itens × 0,30"
+
+    def test_o_seletivo_nao_tem_coluna_de_credito(self, importado, capsys):
+        """`0,00` faria parecer que ele tem crédito e ficou zerado."""
+        _apurar(importado)
+
+        linha = next(ln for ln in capsys.readouterr().out.splitlines() if "Seletivo" in ln)
+
+        assert "—" in linha
+
+    def test_o_saldo_credor_sai_na_linha_do_tributo(self, importado, capsys):
+        """Numa linha à parte, ele pareceria um quarto tributo."""
+        _apurar(importado)
+
+        linha = next(ln for ln in capsys.readouterr().out.splitlines() if "CBS" in ln)
+
+        assert "saldo credor" in linha
+        assert "27,00" in linha, "3 itens × 9,00, tudo crédito porque é entrada"
+
+    def test_sem_saldo_credor_a_linha_nao_traz_o_texto(self, banco, capsys):
+        """`saldo credor 0,00` em toda linha esconderia a que tem saldo.
+
+        Sem documento nenhum não há crédito, e a menção não cabe.
+        """
+        _apurar(banco)
+
+        saida = capsys.readouterr().out
+
+        assert "CBS" in saida
+        assert "saldo credor" not in saida
+
+    def test_os_avisos_aparecem(self, importado, capsys):
+        """O número sem os avisos engana — 2026 não é valor a recolher."""
+        _apurar(importado)
+
+        saida = capsys.readouterr().out
+
+        assert "LEIA ANTES DE USAR ESTE NÚMERO" in saida
+        assert "NÃO é o valor a recolher" in saida
+        assert "não gera crédito" in saida
+
+    def test_valores_no_formato_brasileiro(self, importado, capsys):
+        _apurar(importado)
+
+        saida = capsys.readouterr().out
+
+        assert "27,00" in saida
+        assert "27.00" not in saida
+
+    def test_apurar_nao_grava_nada(self, importado):
+        """É leitura: não há obrigação acessória para os tributos novos."""
+        _apurar(importado)
+
+        with _sessao(importado) as sessao:
+            assert sessao.execute(select(Escrituracao)).scalars().all() == []
+        assert _ajustes(importado) == []
+
+    def test_empresa_inexistente_e_um(self, banco, capsys):
+        codigo = _apurar(banco, empresa="999")
+
+        assert codigo == 1
+        assert "não existe empresa #999" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("faltando", ["--empresa", "--de", "--ate"])
+    def test_periodo_e_empresa_sao_obrigatorios(self, banco, capsys, faltando):
+        argv = ["fiscal", "apurar", "--db", banco]
+        if faltando != "--empresa":
+            argv += ["--empresa", "1"]
+        if faltando != "--de":
+            argv += ["--de", "2026-07-01"]
+        if faltando != "--ate":
+            argv += ["--ate", "2026-07-31"]
+
+        codigo = main(argv)
+
+        saida = capsys.readouterr().out
+        assert codigo == 1
+        assert faltando in saida
+
+    def test_periodo_vazio_distingue_zero_de_ausencia(self, banco, capsys):
+        codigo = _apurar(banco)
+
+        saida = capsys.readouterr().out
+        assert codigo == 0
+        assert "documentos    0" in saida
+        assert "por falta de dado" in saida
