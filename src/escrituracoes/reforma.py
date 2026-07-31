@@ -60,15 +60,27 @@ ANO_DE_TESTE = 2026
 #
 # Medir é livre de palpite: são valores destacados no próprio documento, não
 # códigos cuja semântica seria preciso interpretar.
+#
+# Diferimento e devolução aparecem por destinação porque é assim que a NT os
+# destaca: o item pode ter diferimento só na parcela estadual, e um total
+# somado esconderia justamente isso.
 NAO_CONSUMIDOS = {
-    "valor_diferido": "diferimento",
-    "valor_credito_presumido": "crédito presumido",
-    "valor_credito_presumido_susp": "crédito presumido suspenso",
-    "valor_devolucao_tributo": "devolução de tributo",
+    "valor_diferido_ibs_uf": "diferimento do IBS estadual",
+    "valor_diferido_ibs_mun": "diferimento do IBS municipal",
+    "valor_diferido_cbs": "diferimento da CBS",
+    "valor_devolucao_ibs_uf": "devolução do IBS estadual",
+    "valor_devolucao_ibs_mun": "devolução do IBS municipal",
+    "valor_devolucao_cbs": "devolução da CBS",
+    "valor_credito_presumido_ibs": "crédito presumido do IBS",
+    "valor_credito_presumido_ibs_susp": "crédito presumido do IBS suspenso",
+    "valor_credito_presumido_cbs": "crédito presumido da CBS",
+    "valor_credito_presumido_cbs_susp": "crédito presumido da CBS suspenso",
     "valor_ibs_mono": "IBS monofásico",
     "valor_cbs_mono": "CBS monofásica",
-    "valor_ibs_mono_retido": "IBS monofásico retido",
-    "valor_cbs_mono_retido": "CBS monofásica retida",
+    "valor_ibs_mono_reten": "IBS monofásico sujeito à retenção",
+    "valor_cbs_mono_reten": "CBS monofásica sujeita à retenção",
+    "valor_ibs_mono_retido": "IBS monofásico retido anteriormente",
+    "valor_cbs_mono_retido": "CBS monofásica retida anteriormente",
 }
 
 # O CST que dispensa tratamento específico.  É o único código da tabela do

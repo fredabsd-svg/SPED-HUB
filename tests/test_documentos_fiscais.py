@@ -148,7 +148,16 @@ class TestReformaTributaria:
         item = AdaptadorNFe().normalizar(nfe_xml()).itens[0]
         assert (item.aliquota_ibs_uf, item.valor_ibs_uf) == (0.07, 0.70)
         assert (item.aliquota_ibs_mun, item.valor_ibs_mun) == (0.03, 0.30)
-        assert item.municipio_fg_ibs == "3550308"
+
+    def test_municipio_do_fato_gerador_do_ibs_vem_do_ide(self):
+        """`cMunFGIBS` é campo do documento (B12a), não do imposto do item.
+
+        E é diferente do `cMunFG` do ICMS de propósito: são o município da
+        operação e o município de consumo, e podem não ser o mesmo.
+        """
+        documento = AdaptadorNFe().normalizar(nfe_xml())
+        assert documento.municipio_fg_ibs == "3106200"
+        assert documento.municipio_codigo == "3550308"
 
     def test_cbs(self):
         item = AdaptadorNFe().normalizar(nfe_xml()).itens[0]

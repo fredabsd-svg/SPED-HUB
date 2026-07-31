@@ -9,6 +9,28 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **Os grupos da Reforma passaram a ser lidos de onde a Nota Técnica os põe.**
+  Três dias antes de a NF-e começar a rejeitar documentos sem IBS e CBS
+  (03/08/2026), a NT 2025.002 v1.50 foi baixada do portal da SVRS e conferida
+  campo a campo contra o leitor. O leitor procurava redução, diferimento,
+  devolução, crédito presumido e monofásico como filhos diretos de `gIBSCBS`,
+  e nenhum deles está ali: os três primeiros existem **uma vez dentro de cada
+  destinação** do imposto, o crédito presumido é um grupo irmão, e o monofásico
+  foi reformulado pela v1.50 em quatro variantes. Procurar uma tag no nó errado
+  não dá erro — devolve zero. Em nota emitida como a NT manda, **todo grupo
+  opcional da Reforma vinha zerado**, e a medição do que a apuração não consome
+  media zero. Os testes concordavam porque a nota de teste era montada a partir
+  do leitor, não da Nota Técnica.
+- **O município de consumo do IBS voltou para o documento.** `cMunFGIBS` é
+  campo do `ide` — nunca esteve no imposto do item — e é ele que decide para
+  qual município vai a parcela municipal do IBS.
+- **Diferimento, devolução e redução agora têm um valor por destinação.** Um
+  item pode ter diferimento só na parcela estadual, e um total somado esconderia
+  exatamente isso; percentuais, além do mais, não somam.
+- **O monofásico distingue o que soma do que já foi cobrado.** A Nota Técnica
+  nomeia quase igual duas coisas opostas — o imposto sobre o biocombustível a
+  ser misturado (que soma ao que se recolhe) e o cobrado anteriormente —, e o
+  sistema guardava o primeiro no campo do segundo.
 - **Correção item a item passou a caber numa planilha.** A alteração em massa
   resolve "todos os itens com NCM 2203 viram CFOP 2102"; não resolve o caso
   mais comum do saneamento, em que cada linha tem um valor diferente e quem

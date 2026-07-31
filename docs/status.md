@@ -70,6 +70,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 56 | Excel de mão dupla: exportar os itens, corrigir fora, reimportar | concluída | `tests/test_planilha_de_documentos.py`, `tests/test_cli_fiscal.py` | a planilha sai com a camada **efetiva** aplicada, e a volta **não grava**: devolve a mesma `Simulacao` de `simular`, que `confirmar` grava num lote reversível. Cada linha leva `documento_id` e `item_id`, e a chave da nota é reconferida contra o banco — planilha de outra base é recusada linha a linha, não aplicada no documento errado. Só as colunas editáveis voltam |
 
+| 57 | Os grupos da reforma lidos onde a NT 2025.002 v1.50 os põe | concluída | `tests/test_leitura_reforma_nt.py`, `tests/test_documentos_fiscais.py` | redução, diferimento e devolução existem **uma por destinação** (`gIBSUF`, `gIBSMun`, `gCBS`); o crédito presumido está em `gCredPresOper`, irmão de `gIBSCBS`; o monofásico foi reformulado em quatro variantes e fecha em `vTotIBSMonoItem`/`vTotCBSMonoItem`; `cMunFGIBS` é campo do `ide`, do documento. Procurados como filhos diretos de `gIBSCBS`, todos liam **zero** sem levantar erro — a fixture reproduzia o mesmo engano |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

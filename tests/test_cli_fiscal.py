@@ -1658,7 +1658,7 @@ class TestApurarMostraOQueFicaDeFora:
                     sessao,
                     documento=documento,
                     item=item,
-                    campo="valor_diferido",
+                    campo="valor_diferido_cbs",
                     valor_novo=valor,
                     origem=ORIGEM_USUARIO,
                 )

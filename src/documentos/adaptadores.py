@@ -81,19 +81,35 @@ class ItemNormalizado:
     valor_ibs_uf: float = 0.0
     aliquota_ibs_mun: float = 0.0
     valor_ibs_mun: float = 0.0
-    municipio_fg_ibs: str | None = None
     aliquota_cbs: float = 0.0
     valor_cbs: float = 0.0
-    percentual_reducao_aliquota: float = 0.0
-    aliquota_efetiva: float = 0.0
-    valor_diferido: float = 0.0
-    valor_devolucao_tributo: float = 0.0
+    # Uma redução, um diferimento e uma devolução por destinação — é assim que
+    # a NT os organiza, e somá-los numa coluna só somaria tributos diferentes.
+    percentual_reducao_ibs_uf: float = 0.0
+    aliquota_efetiva_ibs_uf: float = 0.0
+    valor_diferido_ibs_uf: float = 0.0
+    valor_devolucao_ibs_uf: float = 0.0
+    percentual_reducao_ibs_mun: float = 0.0
+    aliquota_efetiva_ibs_mun: float = 0.0
+    valor_diferido_ibs_mun: float = 0.0
+    valor_devolucao_ibs_mun: float = 0.0
+    percentual_reducao_cbs: float = 0.0
+    aliquota_efetiva_cbs: float = 0.0
+    valor_diferido_cbs: float = 0.0
+    valor_devolucao_cbs: float = 0.0
     codigo_credito_presumido: str | None = None
-    valor_credito_presumido: float = 0.0
-    valor_credito_presumido_susp: float = 0.0
+    percentual_credito_presumido_ibs: float = 0.0
+    valor_credito_presumido_ibs: float = 0.0
+    valor_credito_presumido_ibs_susp: float = 0.0
+    percentual_credito_presumido_cbs: float = 0.0
+    valor_credito_presumido_cbs: float = 0.0
+    valor_credito_presumido_cbs_susp: float = 0.0
     quantidade_bc_mono: float = 0.0
+    valor_bc_mono: float = 0.0
     valor_ibs_mono: float = 0.0
     valor_cbs_mono: float = 0.0
+    valor_ibs_mono_reten: float = 0.0
+    valor_cbs_mono_reten: float = 0.0
     valor_ibs_mono_retido: float = 0.0
     valor_cbs_mono_retido: float = 0.0
     cst_is: str | None = None
@@ -138,6 +154,7 @@ class DocumentoNormalizado:
     destinatario_ie: str | None = None
     destinatario_uf: str | None = None
     municipio_codigo: str | None = None
+    municipio_fg_ibs: str | None = None
 
     data_emissao: datetime.date | None = None
     data_entrada_saida: datetime.date | None = None
@@ -339,6 +356,7 @@ class AdaptadorNFe:
             natureza_operacao=_texto(ide, "natOp"),
             tipo_operacao_emitente=_texto(ide, "tpNF"),
             municipio_codigo=_texto(ide, "cMunFG"),
+            municipio_fg_ibs=_texto(ide, "cMunFGIBS"),
             data_emissao=_data(_texto(ide, "dhEmi") or _texto(ide, "dEmi")),
             data_entrada_saida=_data(_texto(ide, "dhSaiEnt") or _texto(ide, "dSaiEnt")),
             modalidade_frete=_texto(inf, "transp", "modFrete"),
@@ -442,48 +460,61 @@ class AdaptadorNFe:
 
     @staticmethod
     def _reforma(imposto: ET.Element | None, item: ItemNormalizado) -> None:
-        """IBS, CBS e Imposto Seletivo (NT 2025.002).
+        """IBS, CBS e Imposto Seletivo (NT 2025.002 v1.50).
 
         Ausentes na NF-e emitida antes de 03/08/2026 — daí tudo ser opcional.
         Ver ``docs/reforma-tributaria.md``.
+
+        **Cada valor é lido do grupo em que a NT o põe, e não do `gIBSCBS`.**
+        Redução, diferimento e devolução existem uma vez por destinação, dentro
+        de `gIBSUF`, `gIBSMun` e `gCBS`; o crédito presumido fica em
+        `gCredPresOper`, irmão de `gIBSCBS`; o monofásico está a dois níveis de
+        profundidade. Procurá-los como filhos diretos de `gIBSCBS` não levanta
+        erro nenhum — devolve zero —, e foi assim que o leitor passou a existir
+        sem ler nada disso.
         """
         ibscbs = _achar(imposto, "IBSCBS")
-        if ibscbs is not None:
-            item.cst_ibscbs = _texto(ibscbs, "CST")
-            item.class_trib_ibscbs = _texto(ibscbs, "cClassTrib")
-            grupo = _achar(ibscbs, "gIBSCBS")
-            if grupo is not None:
-                item.base_ibscbs = _numero(grupo, "vBC")
-                item.municipio_fg_ibs = _texto(grupo, "cMunFGIBS")
-                # O IBS é UM tributo com DUAS destinações: a partilha entre
-                # estado e município é o cerne do imposto, e some se somarmos.
-                uf = _achar(grupo, "gIBSUF")
-                item.aliquota_ibs_uf = _numero(uf, "pIBSUF")
-                item.valor_ibs_uf = _numero(uf, "vIBSUF")
-                mun = _achar(grupo, "gIBSMun")
-                item.aliquota_ibs_mun = _numero(mun, "pIBSMun")
-                item.valor_ibs_mun = _numero(mun, "vIBSMun")
-                cbs = _achar(grupo, "gCBS")
-                item.aliquota_cbs = _numero(cbs, "pCBS")
-                item.valor_cbs = _numero(cbs, "vCBS")
+        if ibscbs is None:
+            return
+        item.cst_ibscbs = _texto(ibscbs, "CST")
+        item.class_trib_ibscbs = _texto(ibscbs, "cClassTrib")
 
-                red = _achar(grupo, "gRed")
-                item.percentual_reducao_aliquota = _numero(red, "pRedAliq")
-                item.aliquota_efetiva = _numero(red, "pAliqEfet")
-                item.valor_diferido = _numero(_achar(grupo, "gDif"), "vDif")
-                item.valor_devolucao_tributo = _numero(_achar(grupo, "gDevTrib"), "vDevTrib")
-                cred = _achar(grupo, "gCredPres")
-                item.codigo_credito_presumido = _texto(cred, "cCredPres")
-                item.valor_credito_presumido = _numero(cred, "vCredPres")
-                item.valor_credito_presumido_susp = _numero(cred, "vCredPresCondSus")
+        grupo = _achar(ibscbs, "gIBSCBS")
+        if grupo is not None:
+            item.base_ibscbs = _numero(grupo, "vBC")
+            # O IBS é UM tributo com DUAS destinações: a partilha entre estado
+            # e município é o cerne do imposto, e some se somarmos.
+            uf = _achar(grupo, "gIBSUF")
+            item.aliquota_ibs_uf = _numero(uf, "pIBSUF")
+            item.valor_ibs_uf = _numero(uf, "vIBSUF")
+            AdaptadorNFe._beneficios(uf, item, "ibs_uf")
 
-            mono = _achar(ibscbs, "gIBSCBSMono")
-            if mono is not None:
-                item.quantidade_bc_mono = _numero(mono, "qBCMono")
-                item.valor_ibs_mono = _numero(mono, "vIBSMono")
-                item.valor_cbs_mono = _numero(mono, "vCBSMono")
-                item.valor_ibs_mono_retido = _numero(mono, "vIBSMonoReten")
-                item.valor_cbs_mono_retido = _numero(mono, "vCBSMonoReten")
+            mun = _achar(grupo, "gIBSMun")
+            item.aliquota_ibs_mun = _numero(mun, "pIBSMun")
+            item.valor_ibs_mun = _numero(mun, "vIBSMun")
+            AdaptadorNFe._beneficios(mun, item, "ibs_mun")
+
+            cbs = _achar(grupo, "gCBS")
+            item.aliquota_cbs = _numero(cbs, "pCBS")
+            item.valor_cbs = _numero(cbs, "vCBS")
+            AdaptadorNFe._beneficios(cbs, item, "cbs")
+
+        cred = _achar(ibscbs, "gCredPresOper")
+        if cred is not None:
+            item.codigo_credito_presumido = _texto(cred, "cCredPres")
+            for grupo_cred, sufixo in (("gIBSCredPres", "ibs"), ("gCBSCredPres", "cbs")):
+                no = _achar(cred, grupo_cred)
+                if no is None:
+                    continue
+                setattr(item, f"percentual_credito_presumido_{sufixo}", _numero(no, "pCredPres"))
+                setattr(item, f"valor_credito_presumido_{sufixo}", _numero(no, "vCredPres"))
+                setattr(
+                    item,
+                    f"valor_credito_presumido_{sufixo}_susp",
+                    _numero(no, "vCredPresCondSus"),
+                )
+
+        AdaptadorNFe._monofasico(_achar(ibscbs, "gIBSCBSMono"), item)
 
         seletivo = _achar(imposto, "IS")
         if seletivo is not None:
@@ -498,6 +529,67 @@ class AdaptadorNFe:
             item.unidade_tributavel_is = _texto(seletivo, "uTrib")
             item.quantidade_tributavel_is = _numero(seletivo, "qTrib")
             item.valor_is = _numero(seletivo, "vIS")
+
+    @staticmethod
+    def _beneficios(destinacao: ET.Element | None, item: ItemNormalizado, sufixo: str) -> None:
+        """Redução, diferimento e devolução de UMA destinação do tributo.
+
+        A NT repete os três grupos dentro de `gIBSUF`, `gIBSMun` e `gCBS`, com
+        os mesmos nomes de tag em cada um. São valores de tributos diferentes,
+        e o que os distingue é só o grupo em que estão.
+        """
+        if destinacao is None:
+            return
+        red = _achar(destinacao, "gRed")
+        setattr(item, f"percentual_reducao_{sufixo}", _numero(red, "pRedAliq"))
+        setattr(item, f"aliquota_efetiva_{sufixo}", _numero(red, "pAliqEfet"))
+        setattr(item, f"valor_diferido_{sufixo}", _numero(_achar(destinacao, "gDif"), "vDif"))
+        setattr(
+            item,
+            f"valor_devolucao_{sufixo}",
+            _numero(_achar(destinacao, "gDevTrib"), "vDevTrib"),
+        )
+
+    @staticmethod
+    def _monofasico(mono: ET.Element | None, item: ItemNormalizado) -> None:
+        """O monofásico de combustíveis, reformulado pela v1.50 da NT.
+
+        O grupo tem quatro variantes — IBS e CBS, cada um ad rem ou ad valorem
+        — e qual delas vem depende do ano e do `cClassTrib`. Ler as quatro para
+        depois escolher seria refazer, com menos informação, a conta que a
+        própria NT já fecha: `vTotIBSMonoItem` e `vTotCBSMonoItem` são filhos
+        diretos do grupo e valem qualquer que tenha sido a variante.
+
+        Da variante só se lê o que o total não carrega: a base (quantidade no
+        ad rem, valor no ad valorem) e as duas retenções, que são grandezas à
+        parte e não estão embutidas no total do item.
+        """
+        if mono is None:
+            return
+        item.valor_ibs_mono = _numero(mono, "vTotIBSMonoItem")
+        item.valor_cbs_mono = _numero(mono, "vTotCBSMonoItem")
+
+        for variante in ("gIBSMonoAdRem", "gIBSMonoAdValorem"):
+            AdaptadorNFe._variante_mono(_achar(mono, variante), item, "ibs")
+        for variante in ("gCBSMonoAdRem", "gCBSMonoAdValorem"):
+            AdaptadorNFe._variante_mono(_achar(mono, variante), item, "cbs")
+
+    @staticmethod
+    def _variante_mono(variante: ET.Element | None, item: ItemNormalizado, tributo: str) -> None:
+        if variante is None:
+            return
+        padrao = _achar(variante, "gMonoPadrao")
+        if padrao is not None:
+            # A base é comum aos dois tributos — o ad rem tributa quantidade, o
+            # ad valorem tributa valor, e o item tem uma só de cada.
+            item.quantidade_bc_mono = _numero(padrao, "qBCMono") or item.quantidade_bc_mono
+            item.valor_bc_mono = _numero(padrao, "vBCMono") or item.valor_bc_mono
+
+        sigla = tributo.upper()
+        reten = _achar(variante, "gMonoReten")
+        setattr(item, f"valor_{tributo}_mono_reten", _numero(reten, f"v{sigla}MonoReten"))
+        retido = _achar(variante, "gMonoRet")
+        setattr(item, f"valor_{tributo}_mono_retido", _numero(retido, f"v{sigla}MonoRet"))
 
 
 # cStat do protocolo de autorização.  Só os desfechos que mudam a escrituração.

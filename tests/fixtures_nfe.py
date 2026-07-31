@@ -27,6 +27,7 @@ def nfe_xml(
     c_stat: str = "100",
     com_reforma: bool = True,
     is_especifico: bool = False,
+    beneficios: bool = False,
     itens: int = 1,
     mod_frete: str | None = None,
     valor_frete: float = 0.0,
@@ -47,7 +48,8 @@ def nfe_xml(
         or (datetime.date.fromisoformat(data_emissao) + datetime.timedelta(days=1)).isoformat()
     )
     corpo_itens = "".join(
-        _item(n, com_reforma=com_reforma, is_especifico=is_especifico) for n in range(1, itens + 1)
+        _item(n, com_reforma=com_reforma, is_especifico=is_especifico, beneficios=beneficios)
+        for n in range(1, itens + 1)
     )
     total_prod = 1000.00 * itens
     reforma_tot = (
@@ -82,6 +84,7 @@ def nfe_xml(
         <tpNF>{tp_nf}</tpNF>
         <idDest>1</idDest>
         <cMunFG>3550308</cMunFG>
+        <cMunFGIBS>3106200</cMunFGIBS>
         <finNFe>1</finNFe>
       </ide>
       <emit>
@@ -126,7 +129,7 @@ def nfe_xml(
 """.encode()
 
 
-def _item(numero: int, *, com_reforma: bool, is_especifico: bool) -> str:
+def _item(numero: int, *, com_reforma: bool, is_especifico: bool, beneficios: bool = False) -> str:
     reforma = ""
     if com_reforma:
         seletivo = (
@@ -150,26 +153,57 @@ def _item(numero: int, *, com_reforma: bool, is_especifico: bool) -> str:
             <vIS>10.00</vIS>
           </IS>"""
         )
+
+        # Redução, diferimento e devolução existem UMA VEZ POR DESTINAÇÃO, e
+        # não uma vez por item: a NT repete os três grupos dentro de `gIBSUF`,
+        # de `gIBSMun` e de `gCBS`.  Os valores são diferentes em cada um de
+        # propósito — um leitor que confundisse as destinações passaria se
+        # fossem iguais.
+        def _beneficios(dif: str, dev: str, red: str, efet: str) -> str:
+            if not beneficios:
+                return ""
+            return f"""
+                <gDif><pDif>50.0000</pDif><vDif>{dif}</vDif></gDif>
+                <gDevTrib><vDevTrib>{dev}</vDevTrib></gDevTrib>
+                <gRed><pRedAliq>{red}</pRedAliq><pAliqEfet>{efet}</pAliqEfet></gRed>"""
+
+        credito_presumido = (
+            """
+            <gCredPresOper>
+              <cCredPres>02</cCredPres>
+              <gIBSCredPres>
+                <pCredPres>10.0000</pCredPres>
+                <vCredPres>0.10</vCredPres>
+                <vCredPresCondSus>0.04</vCredPresCondSus>
+              </gIBSCredPres>
+              <gCBSCredPres>
+                <pCredPres>20.0000</pCredPres>
+                <vCredPres>1.80</vCredPres>
+                <vCredPresCondSus>0.60</vCredPresCondSus>
+              </gCBSCredPres>
+            </gCredPresOper>"""
+            if beneficios
+            else ""
+        )
         reforma = f"""
           <IBSCBS>
             <CST>000</CST>
             <cClassTrib>000001</cClassTrib>
             <gIBSCBS>
               <vBC>1000.00</vBC>
-              <cMunFGIBS>3550308</cMunFGIBS>
               <gIBSUF>
-                <pIBSUF>0.0700</pIBSUF>
+                <pIBSUF>0.0700</pIBSUF>{_beneficios("0.35", "0.07", "10.0000", "0.0630")}
                 <vIBSUF>0.70</vIBSUF>
               </gIBSUF>
               <gIBSMun>
-                <pIBSMun>0.0300</pIBSMun>
+                <pIBSMun>0.0300</pIBSMun>{_beneficios("0.15", "0.03", "20.0000", "0.0240")}
                 <vIBSMun>0.30</vIBSMun>
               </gIBSMun>
               <gCBS>
-                <pCBS>0.9000</pCBS>
+                <pCBS>0.9000</pCBS>{_beneficios("4.50", "0.90", "30.0000", "0.6300")}
                 <vCBS>9.00</vCBS>
               </gCBS>
-            </gIBSCBS>
+            </gIBSCBS>{credito_presumido}
           </IBSCBS>{seletivo}"""
 
     return f"""      <det nItem="{numero}">
