@@ -58,6 +58,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 50 | Marcar qual escrituração foi transmitida, com recibo | concluída | `tests/test_escrituracao_transmitida.py`, `tests/test_cli_fiscal.py` | nenhuma é marcada sozinha; marcar **não se desfaz**; segunda entrega original do mesmo período é recusada (a finalidade é lida do `0000` do arquivo), com `--forcar` para o caso de entrega rejeitada e reenviada |
 
+| 51 | Saldo credor anterior no E110, vindo da escrituração transmitida do período anterior | concluída | `tests/test_saldo_credor_anterior.py` | só de escrituração **transmitida** e só se o período for contíguo; o valor é lido do arquivo, não recalculado. Mês sem nota mas com saldo passa a emitir o E110, senão o crédito some da cadeia |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

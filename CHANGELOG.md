@@ -81,6 +81,16 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **Empresa com saldo credor de ICMS recolhia a mais.** A apuração do mês
+  ignorava o crédito acumulado do mês anterior: o E110 saía com o campo de
+  saldo credor anterior vazio, e o "ICMS a recolher" — que é o número que vai
+  para a guia — vinha maior do que o devido. Agora esse saldo é buscado na
+  escrituração **transmitida** do período anterior e lido do próprio arquivo
+  que foi entregue. Geração que ninguém marcou como entregue não estabelece
+  saldo, e período com um mês sem entrega no meio também não: nos dois casos o
+  valor sai zerado e a geração avisa dizendo o que fazer. Mês sem nota nenhuma
+  mas com crédito acumulado passa a gerar a apuração assim mesmo, senão o
+  saldo desaparecia da cadeia.
 - **A EFD saía com os valores do cabeçalho da nota uma casa fora do lugar.**
   Faltava um campo no meio do registro C100 — o indicador de quem paga o frete
   — e, como os campos do SPED são posicionais, tudo o que vem depois dele

@@ -237,6 +237,14 @@ EFD_CONTRIBUICOES: dict[str, tuple[str, ...]] = {
 }
 EFD_CONTRIBUICOES["M600"] = EFD_CONTRIBUICOES["M200"]
 
+# Por obrigação, com as mesmas chaves de `arquivadas.TIPOS` — há teste que
+# cobra a igualdade dos dois conjuntos.  Sem ele, acrescentar uma obrigação
+# nova daria um arquivo que se arquiva e não se sabe ler.
+POR_OBRIGACAO: dict[str, dict[str, tuple[str, ...]]] = {
+    "efd_icms": EFD_ICMS,
+    "efd_contribuicoes": EFD_CONTRIBUICOES,
+}
+
 
 class RegistroForaDoLeiaute(ValueError):
     """O gerador escreveu um registro que a tabela de campos não conhece.

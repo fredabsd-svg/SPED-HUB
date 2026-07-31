@@ -390,10 +390,14 @@ class TestBlocoE:
         assert campos[4] == "", "sem crédito"
 
     def test_apuracao_avisa_o_que_nao_cobre(self, sessao, empresa, com_documento):
-        """Silêncio aqui faria alguém transmitir apuração incompleta."""
+        """Silêncio aqui faria alguém transmitir apuração incompleta.
+
+        O saldo credor anterior saiu desta lista quando passou a ser buscado
+        na escrituração transmitida do período anterior — ver
+        `tests/test_saldo_credor_anterior.py`. Aqui ficou o que segue fora.
+        """
         avisos = _gerar(sessao, empresa).avisos
         assert any("ajustes da tabela 5.1.1" in a for a in avisos)
-        assert any("saldo credor anterior" in a for a in avisos)
 
 
 class TestContagensDoBloco9:

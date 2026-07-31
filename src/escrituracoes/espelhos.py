@@ -36,16 +36,11 @@ from dataclasses import dataclass, field
 
 from src.escrituracoes.arquivadas import TIPOS
 from src.escrituracoes.base import Registro, ResultadoGeracao
-from src.escrituracoes.leiaute import EFD_CONTRIBUICOES, EFD_ICMS
+from src.escrituracoes.leiaute import POR_OBRIGACAO
 
 # O mesmo formato dos relatórios e da CLI — 1.234.567,89.  Escrever outra
 # formatação aqui faria o mesmo número aparecer de dois jeitos no sistema.
 from src.reports.base import fmt_moeda as _moeda
-
-LEIAUTES = {
-    "efd_icms": EFD_ICMS,
-    "efd_contribuicoes": EFD_CONTRIBUICOES,
-}
 
 # Cada valor do arquivo já vem arredondado ao centavo.  A soma de N itens
 # arredondados pode afastar-se do total arredondado em até meio centavo por
@@ -177,11 +172,11 @@ class Espelho:
 
 def espelho(resultado: ResultadoGeracao, *, tipo: str) -> Espelho:
     """Monta o espelho a partir dos registros que serão escritos."""
-    leiaute = LEIAUTES.get(tipo)
+    leiaute = POR_OBRIGACAO.get(tipo)
     if leiaute is None:
         raise TipoSemLeiaute(
             f"não há leiaute descrito para {tipo!r} — o espelho não tem como "
-            f"nomear os campos (conhecidos: {sorted(LEIAUTES)})"
+            f"nomear os campos (conhecidos: {sorted(POR_OBRIGACAO)})"
         )
 
     ler = _Leitor(resultado.registros, leiaute)
@@ -290,15 +285,20 @@ class _Leitor:
         e110 = self.primeiro("E110")
         if e110 is None:
             return []
-        return [
+        linhas = [
             ("débitos das saídas", _valor(self.campo(e110, "VL_TOT_DEBITOS"))),
             ("créditos das entradas", _valor(self.campo(e110, "VL_TOT_CREDITOS"))),
-            ("ICMS a recolher", _valor(self.campo(e110, "VL_ICMS_RECOLHER"))),
-            (
-                "saldo credor a transportar",
-                _valor(self.campo(e110, "VL_SLD_CREDOR_TRANSPORTAR")),
-            ),
         ]
+        # Só aparece quando existe: uma linha de 0,00 todo mês faria a que tem
+        # valor passar despercebida, e é ela que explica por que o imposto a
+        # recolher é menor que débito menos crédito.
+        if anterior := _valor(self.campo(e110, "VL_SLD_CREDOR_ANT")):
+            linhas.append(("saldo credor do período anterior", anterior))
+        linhas.append(("ICMS a recolher", _valor(self.campo(e110, "VL_ICMS_RECOLHER"))))
+        linhas.append(
+            ("saldo credor a transportar", _valor(self.campo(e110, "VL_SLD_CREDOR_TRANSPORTAR")))
+        )
+        return linhas
 
     def _cumulativo(self) -> bool:
         """O regime que o ARQUIVO declara, não o que o cadastro diz.

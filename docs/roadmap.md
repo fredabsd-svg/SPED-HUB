@@ -55,7 +55,7 @@ O que falta:
 | Recálculo do vNF (total do documento) | Os totais que são soma de parcela são recompostos; o `valor_total` não, porque a fórmula usa termos que o modelo não carrega (ICMS desonerado, imposto de importação, serviços) | `src.documentos.massa:recompor_vnf` |
 | Blocos G, H e 1 da EFD ICMS/IPI | O gerador cobre 0, C, E e 9 | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_h` |
 | Documentos de serviço, energia e transporte na EFD (C500, D100) | Só o C100 de mercadorias é gerado | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_d` |
-| Ajustes de apuração pela tabela 5.1.1 (E111) | O E110 é soma direta, sem ajuste nem saldo credor anterior | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_apuracao` |
+| Ajustes de apuração pela tabela 5.1.1 (E111) | O E110 soma os documentos e carrega o saldo credor do período anterior; ajustes por código e deduções seguem fora | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_apuracao` |
 | Blocos A, D, F e I da EFD-Contribuições | O gerador cobre 0, C, M e 9. O bloco A depende da importação de NFS-e, acima | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.bloco_f` |
 | Créditos extemporâneos e ajustes da EFD-Contribuições | Os blocos M são soma direta das saídas menos as entradas | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.ajustes_de_apuracao` |
 | Monofásico, substituição e alíquota por unidade no PIS/Cofins | A apuração usa o valor destacado no documento, qualquer que seja o CST | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |

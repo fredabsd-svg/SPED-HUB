@@ -46,6 +46,7 @@ from src.db.models import (
     EscrituracaoDocumento,
 )
 from src.escrituracoes.base import ResultadoGeracao
+from src.escrituracoes.leiaute import POR_OBRIGACAO
 
 # As obrigações que este pacote gera.  Arquivar sob um tipo desconhecido
 # tornaria a escrituração inencontrável na hora em que ela é procurada.
@@ -121,19 +122,86 @@ class TransmissaoInvalida(ValueError):
     """Marcar como transmitida algo que não pode ser marcado assim."""
 
 
+def campo_do_registro(escrituracao: Escrituracao, tipo: str, nome: str) -> str:
+    """Um campo, pelo nome, do arquivo que foi guardado.
+
+    Ler o arquivo — e não recalcular a partir dos documentos — é o ponto: o
+    que vale é o que foi entregue. Um período reaberto e ajustado produziria
+    outro número, e o Fisco continua com o primeiro.
+
+    Devolve vazio quando o registro não existe no arquivo ou o campo não está
+    no leiaute daquela obrigação.
+    """
+    campos_do_tipo = POR_OBRIGACAO.get(escrituracao.tipo, {}).get(tipo)
+    if not campos_do_tipo or nome not in campos_do_tipo:
+        return ""
+
+    posicao = campos_do_tipo.index(nome) + 2  # +1 pela barra inicial, +1 pelo tipo
+    for linha in escrituracao.conteudo.replace("\r\n", "\n").split("\n"):
+        partes = linha.split("|")
+        if len(partes) > 1 and partes[1] == tipo:
+            return partes[posicao] if posicao < len(partes) else ""
+    return ""
+
+
 def _finalidade(escrituracao: Escrituracao) -> str:
     """`0` = original, `1` = retificadora — lido do arquivo que saiu.
 
-    É o campo 2 do `0000` nas duas escriturações: `COD_FIN` na EFD ICMS/IPI e
-    `TIPO_ESCRIT` na EFD-Contribuições, mesma posição e mesmos valores. Lido do
-    conteúdo, e não do cadastro ou do parâmetro de geração, porque o que o
-    Fisco recebeu foi o arquivo.
+    O campo tem nome diferente nas duas escriturações — `COD_FIN` na EFD
+    ICMS/IPI, `TIPO_ESCRIT` na EFD-Contribuições — e a mesma posição e os
+    mesmos valores. Lido do conteúdo, e não do parâmetro de geração, porque o
+    que o Fisco recebeu foi o arquivo.
     """
-    for linha in escrituracao.conteudo.replace("\r\n", "\n").split("\n"):
-        campos = linha.split("|")
-        if len(campos) > 3 and campos[1] == "0000":
-            return campos[3]
-    return ""
+    return campo_do_registro(escrituracao, "0000", "COD_FIN") or campo_do_registro(
+        escrituracao, "0000", "TIPO_ESCRIT"
+    )
+
+
+def ultima_transmitida_antes(
+    session: Session,
+    *,
+    empresa_id: int,
+    tipo: str,
+    data: datetime.date,
+) -> Escrituracao | None:
+    """A última escrituração **transmitida** que termina antes de `data`.
+
+    Só as transmitidas contam. Uma geração que ninguém entregou não estabelece
+    nada perante o Fisco — e é justamente a que sobra em maior número, porque
+    gerar para conferir é barato.
+    """
+    consulta = (
+        select(Escrituracao)
+        .where(
+            Escrituracao.empresa_id == empresa_id,
+            Escrituracao.tipo == tipo,
+            Escrituracao.data_fim < data,
+            Escrituracao.transmitida_em.is_not(None),
+        )
+        .order_by(Escrituracao.data_fim.desc(), Escrituracao.transmitida_em.desc())
+    )
+    return session.execute(consulta).scalars().first()
+
+
+def existe_geracao_antes(
+    session: Session,
+    *,
+    empresa_id: int,
+    tipo: str,
+    data: datetime.date,
+) -> bool:
+    """Se há qualquer geração anterior, transmitida ou não.
+
+    Serve para distinguir dois silêncios que pedem avisos diferentes: "esta é
+    a primeira escrituração desta empresa" e "existe a do mês passado, mas
+    ninguém disse que foi entregue".
+    """
+    consulta = select(Escrituracao.id).where(
+        Escrituracao.empresa_id == empresa_id,
+        Escrituracao.tipo == tipo,
+        Escrituracao.data_fim < data,
+    )
+    return session.execute(consulta).first() is not None
 
 
 def transmitidas_do_periodo(session: Session, escrituracao: Escrituracao) -> list[Escrituracao]:
