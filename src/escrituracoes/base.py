@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from src.escrituracoes.leiaute import conferir
+
 
 class CampoObrigatorioAusente(ValueError):
     """Falta cadastro sem o qual o arquivo sairia errado — e aceito.
@@ -98,13 +100,79 @@ class ResultadoGeracao:
         return "\r\n".join(r.linha() for r in self.registros) + "\r\n"
 
 
+# `modFrete` da NF-e e `IND_FRT` do C100 têm a mesma tabela desde 01/01/2018:
+# 0 e 3 por conta do remetente, 1 e 4 por conta do destinatário, 2 de
+# terceiros, 9 sem frete.  É repasse, não conversão — e é por isso que o
+# documento precisa trazer o campo em vez de o gerador deduzi-lo.
+MODALIDADES_DE_FRETE = {"0", "1", "2", "3", "4", "9"}
+SEM_FRETE = "9"
+
+
 class GeradorBase:
     """A mecânica de montar registros e fechar as contagens."""
 
+    # Preenchido por cada gerador com a tabela de `src.escrituracoes.leiaute`.
+    # Sem ela `_add` recusa qualquer registro: um gerador sem leiaute declarado
+    # é justamente o que este mecanismo existe para não deixar passar.
+    LEIAUTE: dict[str, tuple[str, ...]] = {}
+
     def __init__(self) -> None:
         self._resultado = ResultadoGeracao()
+        self._frete_sem_modalidade: list[str] = []
+
+    def _reiniciar(self, documentos_ids: list[int]) -> None:
+        """Zera o estado de uma geração.
+
+        Existe para que gerar duas vezes com o mesmo gerador não some os
+        avisos da primeira aos da segunda — o que faria a segunda acusar
+        documento que não está nela.
+        """
+        self._resultado = ResultadoGeracao(documentos_ids=documentos_ids)
+        self._frete_sem_modalidade = []
+
+    def _ind_frt(self, cabecalho: dict) -> str:
+        """O `IND_FRT` do C100 — do documento, não de dedução.
+
+        Quando o documento não trouxe a modalidade e também não tem frete,
+        `9` (sem frete) é o único código possível e sai sem alarde. Quando há
+        frete e não se sabe quem pagou, sai `9` do mesmo jeito — o campo é
+        obrigatório e deixá-lo vazio só troca um erro por outro — mas o
+        documento entra na lista de avisos com nome e número. Escolher `0`
+        seria afirmar que o remetente pagou, e afirmação errada num campo que
+        o validador aceita é o pior dos desfechos: ninguém descobre.
+        """
+        modalidade = cabecalho.get("modalidade_frete")
+        if modalidade in MODALIDADES_DE_FRETE:
+            return str(modalidade)
+        if cabecalho.get("valor_frete") or 0.0:
+            numero = texto(cabecalho.get("numero")) or "sem número"
+            self._frete_sem_modalidade.append(numero)
+        return SEM_FRETE
+
+    def _avisar_frete_sem_modalidade(self) -> None:
+        """Um aviso por geração, com os documentos nomeados.
+
+        Um aviso por documento afogaria os demais num fechamento com centenas
+        de notas, e é justamente aí que os outros avisos importam.
+        """
+        if not self._frete_sem_modalidade:
+            return
+        documentos = ", ".join(self._frete_sem_modalidade)
+        self._resultado.avisos.append(
+            f"IND_FRT saiu como 9 (sem frete) em documento que TEM frete, por não "
+            f"trazer a modalidade: {documentos}. São documentos importados antes de o "
+            "campo existir — reimporte o XML ou corrija o C100 à mão antes de transmitir"
+        )
 
     def _add(self, tipo: str, *campos: Any) -> None:
+        """Escreve uma linha — conferindo os campos contra o leiaute.
+
+        A conferência é aqui, e não num teste, porque teste confere o que
+        alguém lembrou de exercitar. Um campo esquecido no meio de um registro
+        desloca todos os seguintes e produz um arquivo que parece certo; o
+        `C100` saiu sem o `IND_FRT` por meses justamente assim.
+        """
+        conferir(self.LEIAUTE, tipo, list(campos))
         self._resultado.registros.append(Registro(tipo, [texto(c) for c in campos]))
 
     def _encerrar_bloco(self, bloco: str, tipo_encerramento: str) -> None:

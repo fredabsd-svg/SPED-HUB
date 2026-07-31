@@ -58,6 +58,20 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **A EFD saía com os valores do cabeçalho da nota uma casa fora do lugar.**
+  Faltava um campo no meio do registro C100 — o indicador de quem paga o frete
+  — e, como os campos do SPED são posicionais, tudo o que vem depois dele
+  escorregava: o valor do frete ia parar no campo do indicador, a base do ICMS
+  no campo de outras despesas, e assim por diante até o fim da linha. O arquivo
+  saía com aparência normal, e a recusa do validador não diz qual campo faltou.
+  Faltavam também o último campo do C170 e o último do E110. Os três estão
+  corrigidos, e o indicador do frete agora vem do próprio XML da nota. Nota
+  importada antes desta versão não traz esse dado: quando ela tem frete, o
+  arquivo sai com "sem frete" e a geração avisa, nomeando os documentos a
+  corrigir — reimportar o XML resolve. Consequência esperada: escrituração
+  gerada antes desta versão passa a aparecer como divergente em `sped-hub
+  fiscal conferir`, e a divergência é verdadeira — o arquivo entregue estava
+  mesmo com os campos fora de posição.
 - **Corrigir o valor de vários itens deixava o cabeçalho da nota para trás.**
   Quem usava a alteração em massa para ajustar valores dos itens gerava um
   arquivo em que o total do documento dizia uma coisa e a soma dos itens dizia

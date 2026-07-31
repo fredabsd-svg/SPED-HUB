@@ -229,6 +229,7 @@ class ImportadorDeDocumentos:
             municipio_codigo=normalizado.municipio_codigo,
             data_emissao=normalizado.data_emissao,
             data_entrada_saida=normalizado.data_entrada_saida,
+            modalidade_frete=normalizado.modalidade_frete,
             valor_total=normalizado.valor_total,
             valor_produtos=normalizado.valor_produtos,
             valor_desconto=normalizado.valor_desconto,

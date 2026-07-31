@@ -48,6 +48,7 @@ from src.escrituracoes.base import (
     formatar_valor,
 )
 from src.escrituracoes.base import texto as _texto
+from src.escrituracoes.leiaute import EFD_CONTRIBUICOES
 
 logger = logging.getLogger("sped-hub.escrituracoes")
 
@@ -85,6 +86,8 @@ IND_NAT_PJ_GERAL = "00"
 class GeradorEFDContribuicoes(GeradorBase):
     """Monta a EFD-Contribuições de um período."""
 
+    LEIAUTE = EFD_CONTRIBUICOES
+
     def __init__(
         self,
         session: Session,
@@ -108,7 +111,7 @@ class GeradorEFDContribuicoes(GeradorBase):
         documentos = self._documentos()
         visoes = [self._visao(d) for d in documentos]
 
-        self._resultado = ResultadoGeracao(documentos_ids=[d.id for d in documentos])
+        self._reiniciar([d.id for d in documentos])
         self._bloco_0(visoes)
         self._bloco_c(visoes)
         self._bloco_m(visoes)
@@ -118,6 +121,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             self._resultado.avisos.append(
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
+        self._avisar_frete_sem_modalidade()
         return self._resultado
 
     def _conferir_cadastro(self) -> None:
@@ -299,6 +303,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             formatar_valor(c["valor_desconto"]),
             "",  # VL_ABAT_NT
             formatar_valor(c["valor_produtos"]),
+            self._ind_frt(c),
             formatar_valor(c["valor_frete"]),
             formatar_valor(c["valor_seguro"]),
             formatar_valor(c["valor_outras"]),
@@ -355,6 +360,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             "",
             formatar_valor(item["valor_cofins"]),
             "",  # COD_CTA
+            "",  # VL_ABAT_NT
         )
 
     # ── Bloco M: apuração de PIS e Cofins ──────────────────────────────────

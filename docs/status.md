@@ -52,6 +52,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 47 | Apuração de CBS, IBS e Imposto Seletivo | concluída | `tests/test_apuracao_reforma.py` | o IS **não** gera crédito e as duas parcelas do IBS são apuradas em separado; o total de 2026 não é o valor a recolher, e o resultado avisa. Monofásico, diferimento e split payment seguem fora |
 | 46 | `sped-hub fiscal`: a cadeia da Central pela linha de comando | concluída | `tests/test_cli_fiscal.py` | regras, importar, listar, classificar, alterar, desfazer, apurar, gerar e conferir. `classificar` e `alterar` **não gravam** sem que se peça; gerar **sempre** arquiva; `conferir` sai com 2 quando o entregue divergiu. Telas web seguem fora |
 
+| 48 | Leiaute conferido a cada linha escrita, e os campos que faltavam no C100, C170 e E110 | concluída | `tests/test_leiaute_sped.py` | `_add` recusa registro fora do leiaute ou com contagem diferente; o `IND_FRT` vem do `modFrete` do XML e, quando o documento não o traz mas tem frete, sai `9` com aviso nomeando o documento |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

@@ -771,6 +771,11 @@ class DocumentoFiscal(Base):
     data_emissao: Mapped[datetime.date | None] = mapped_column(index=True)
     data_entrada_saida: Mapped[datetime.date | None] = mapped_column()
 
+    # `modFrete` do XML — o mesmo código do `IND_FRT` do C100.  Fica nulo em
+    # documento importado antes de o campo existir, e o gerador avisa em vez
+    # de inventar quem pagou o frete.
+    modalidade_frete: Mapped[str | None] = mapped_column(String(1))
+
     # Totais, como declarados no documento
     valor_total: Mapped[float] = mapped_column(default=0.0)
     valor_produtos: Mapped[float] = mapped_column(default=0.0)

@@ -14,6 +14,11 @@ Gerado o arquivo, :mod:`src.escrituracoes.arquivadas` guarda o que saiu — a
 terceira camada, ao lado do documento original e do tratamento fiscal. O
 conteúdo é gravado, não reconstruído: regerar responde "o que eu enviaria
 hoje", e a pergunta que a intimação faz é "o que você enviou".
+
+:mod:`src.escrituracoes.leiaute` guarda os campos de cada registro na ordem
+oficial, e ``GeradorBase._add`` confere cada linha contra ela — campo esquecido
+no meio de um registro desloca todos os seguintes e produz arquivo que parece
+certo.
 """
 
 from src.escrituracoes.arquivadas import (
@@ -27,6 +32,7 @@ from src.escrituracoes.arquivadas import (
     hash_do_conteudo,
 )
 from src.escrituracoes.base import (
+    MODALIDADES_DE_FRETE,
     CampoObrigatorioAusente,
     GeradorBase,
     Registro,
@@ -40,6 +46,13 @@ from src.escrituracoes.efd_contribuicoes import (
     GeradorEFDContribuicoes,
 )
 from src.escrituracoes.efd_icms import BLOCOS, COD_VER, GeradorEFDICMS
+from src.escrituracoes.leiaute import (
+    EFD_CONTRIBUICOES,
+    EFD_ICMS,
+    CamposEmDesacordo,
+    RegistroForaDoLeiaute,
+    conferir,
+)
 from src.escrituracoes.reforma import (
     ANO_DE_TESTE,
     ApuracaoIBSCBS,
@@ -52,15 +65,20 @@ __all__ = [
     "ATIVIDADES",
     "BLOCOS",
     "COD_VER",
+    "EFD_CONTRIBUICOES",
+    "EFD_ICMS",
+    "MODALIDADES_DE_FRETE",
     "REGIMES",
     "TIPOS",
     "ApuracaoIBSCBS",
     "CampoObrigatorioAusente",
+    "CamposEmDesacordo",
     "Comparacao",
     "GeradorBase",
     "GeradorEFDContribuicoes",
     "GeradorEFDICMS",
     "Registro",
+    "RegistroForaDoLeiaute",
     "ResultadoApuracao",
     "ResultadoGeracao",
     "TipoDesconhecido",
@@ -68,6 +86,7 @@ __all__ = [
     "arquivar",
     "avisos_de",
     "comparar",
+    "conferir",
     "escrituracoes_do_documento",
     "formatar_data",
     "formatar_valor",
