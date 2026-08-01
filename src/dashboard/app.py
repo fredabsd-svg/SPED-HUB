@@ -41,12 +41,13 @@ import asyncio
 import datetime
 import io
 import logging
+import pathlib
 import sys
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from fastapi import FastAPI, File, Query, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -80,7 +81,9 @@ from src.db.models import (
 from src.documentos import (
     Alteracao,
     AlteracaoInvalida,
+    ImportadorDeDocumentos,
     MotorDeClassificacao,
+    PoliticaDeDuplicidade,
     Selecao,
     SelecaoVazia,
     confirmar,
@@ -116,7 +119,7 @@ from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
 from src.settings import database_reference, get_settings
-from src.uploads import save_upload
+from src.uploads import max_upload_bytes, safe_original_name, save_upload
 from src.version import APP_VERSION
 
 logger = logging.getLogger("sped-hub.dashboard")
@@ -2610,6 +2613,130 @@ async def corrigir_desfazer(request: Request):
         return _pagina_corrigir(session, usuario, request, desfeitos=quantos, lote=lote)
     finally:
         session.close()
+
+
+# ── Rotas: importar XML ────────────────────────────────────────────────────
+
+# Um XML de NF-e é pequeno; um lote de mil, não.  O limite é o mesmo dos
+# outros uploads e vale por arquivo — quem manda a pasta inteira do mês recebe
+# a recusa do arquivo grande, e não a do lote.
+EXTENSOES_XML = (".xml",)
+
+
+def _pagina_importar(session, usuario, request, **contexto):
+    dados = {
+        "request": request,
+        "usuario": usuario,
+        "current_page": "importar",
+        "resultado": None,
+        "erro": None,
+        "politica": PoliticaDeDuplicidade.IGNORAR.value,
+        "limite_mb": max_upload_bytes() // (1024 * 1024),
+    }
+    dados.update(contexto)
+    return HTMLResponse(
+        jinja_env.get_template("importar.html").render(dados),
+        status_code=400 if dados["erro"] else 200,
+    )
+
+
+@app.get("/fiscal/importar", response_class=HTMLResponse)
+async def importar_page(request: Request):
+    """A porta de entrada da Central: o XML como o portal o entrega."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    session = get_session(_get_engine())
+    try:
+        return _pagina_importar(session, usuario, request)
+    finally:
+        session.close()
+
+
+@app.post("/fiscal/importar", response_class=HTMLResponse)
+async def importar_xml(request: Request, arquivos: list[UploadFile] = File(default=[])):
+    """Importa os XML enviados, no escritório de quem está logado.
+
+    **O escritório vem do usuário, nunca do formulário.** É ele que decide de
+    quem é o documento importado, e aceitá-lo de um campo escondido deixaria
+    qualquer um plantar nota no acervo alheio — sem precisar sequer enxergar o
+    outro escritório.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    if usuario.escritorio_id is None:
+        return _pagina_importar(
+            session=None,
+            usuario=usuario,
+            request=request,
+            erro=(
+                "Seu usuário não está ligado a nenhum escritório, e o documento "
+                "importado precisa de um dono. Peça a um administrador para "
+                "vincular a sua conta."
+            ),
+        )
+
+    bruto = (await request.form()).get("politica") or PoliticaDeDuplicidade.IGNORAR.value
+    try:
+        politica = PoliticaDeDuplicidade(bruto)
+    except ValueError:
+        return _pagina_importar(None, usuario, request, erro=f"Política {bruto!r} desconhecida.")
+
+    try:
+        lote = await _ler_uploads(arquivos)
+    except HTTPException as erro:
+        return _pagina_importar(None, usuario, request, erro=erro.detail, politica=politica.value)
+    if not lote:
+        return _pagina_importar(
+            None, usuario, request, erro="Nenhum arquivo enviado.", politica=politica.value
+        )
+
+    session = get_session(_get_engine())
+    try:
+        resultado = ImportadorDeDocumentos(
+            session, escritorio_id=usuario.escritorio_id, politica=politica
+        ).importar_lote(lote)
+        session.commit()
+        return _pagina_importar(
+            session, usuario, request, resultado=resultado, politica=politica.value
+        )
+    finally:
+        session.close()
+
+
+async def _ler_uploads(arquivos: list[UploadFile]) -> list[tuple[str, bytes]]:
+    """Os arquivos em memória, com nome saneado e tamanho conferido.
+
+    Vão para a memória, e não para disco, porque o importador os quer em bytes
+    e porque o que sobra deles — o XML original — vai para o banco, não para o
+    sistema de arquivos. Escrever em disco criaria um terceiro lugar onde o
+    documento existe, e um a mais para esquecer de apagar.
+    """
+    limite = max_upload_bytes()
+    lote: list[tuple[str, bytes]] = []
+    for arquivo in arquivos:
+        if not arquivo.filename:
+            continue
+        nome = safe_original_name(arquivo.filename)
+        if pathlib.Path(nome).suffix.lower() not in EXTENSOES_XML:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{nome}: só XML de documento fiscal é importado por aqui.",
+            )
+        conteudo = await arquivo.read(limite + 1)
+        await arquivo.close()
+        if len(conteudo) > limite:
+            raise HTTPException(
+                status_code=413,
+                detail=f"{nome} passa do limite de {limite // (1024 * 1024)} MB.",
+            )
+        if not conteudo:
+            raise HTTPException(status_code=400, detail=f"{nome} está vazio.")
+        lote.append((nome, conteudo))
+    return lote
 
 
 # ── Rotas: Fase 16 — Monitoramento Operacional ─────────────────────────────

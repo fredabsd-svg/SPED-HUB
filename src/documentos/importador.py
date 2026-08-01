@@ -133,10 +133,21 @@ class ImportadorDeDocumentos:
         Um arquivo ruim não derruba o lote: vira uma ocorrência `rejeitado`
         com o motivo, e os outros seguem.  Importar mil XML e perder tudo por
         causa de um corrompido seria inaceitável na rotina de fechamento.
+
+        **Isso vale também para a política `ERRO`.**  Ela existe para que a
+        duplicata não entre em silêncio, e não para interromper o lote: com
+        mil arquivos, uma duplicata na metade levaria junto os quinhentos que
+        vinham depois — que é exatamente o que o parágrafo acima recusa.  No
+        `importar` de um documento só a exceção continua subindo, porque lá
+        não há lote para preservar e quem chamou pediu por um arquivo.
         """
         resultado = ResultadoImportacao()
         for nome, conteudo in arquivos:
-            resultado.ocorrencias.append(self._um(nome, conteudo, origem))
+            try:
+                ocorrencia = self._um(nome, conteudo, origem)
+            except ValueError as erro:
+                ocorrencia = Ocorrencia(Desfecho.REJEITADO, origem=nome, motivo=str(erro))
+            resultado.ocorrencias.append(ocorrencia)
         return resultado
 
     def importar(

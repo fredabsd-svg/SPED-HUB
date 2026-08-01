@@ -80,6 +80,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 61 | Telas de classificar e corrigir, com o total conferido antes de gravar | concluída | `tests/test_telas_classificar_corrigir.py` | as duas **mostram primeiro** e só gravam no segundo passo; o total que a tela mostrou viaja no formulário e é reconferido — se o banco mudou no meio, nada é gravado. Desfazer é escopado por escritório (o domínio não conhece escritório, e na CLI isso está certo); lote alheio responde igual a inexistente, e a recusa vale para o lote **inteiro**. `valor_tipado` sai da CLI para o domínio |
 
+| 62 | Tela de importar XML, e o lote que a política `ERRO` derrubava | concluída | `tests/test_tela_importar.py`, `tests/test_documentos_fiscais.py` | o escritório vem do **usuário logado**, nunca do formulário — aqui não haveria nada a recusar, o documento nasceria no acervo alheio. `importar_lote` passa a converter a exceção da política `ERRO` em rejeição: ela existe para a duplicata não entrar em silêncio, não para levar junto os arquivos seguintes. `importar` de um documento só segue levantando |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é
