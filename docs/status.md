@@ -74,6 +74,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 58 | Os grupos que faltavam da NT, e a retenção que era contada duas vezes | concluída | `tests/test_leitura_reforma_nt.py`, `tests/test_apuracao_reforma.py` | transferência de crédito, ajuste de competência (com a competência, que pode ser retroativa), estorno, diferença de mistura de biocombustível e a base do crédito presumido passam a ser lidos e medidos. A regra UB105a-10 diz que `vTotIBSMonoItem` **já contém** o sujeito à retenção: medi-lo à parte fazia a lista somar 14,00 onde a exposição é 12,00 |
 
+| 59 | Tela do cadastro fiscal, e a regra num lugar só | concluída | `tests/test_tela_cadastro_fiscal.py`, `tests/test_cli_fiscal.py` | `CADASTRO_FISCAL`, `EXIGIDOS` e a validação saem da CLI para `escrituracoes.cadastro`; a tela e o comando usam a mesma. Escopo por escritório aplicado **na consulta**, não conferido depois de carregar; empresa alheia responde igual a inexistente. Campo em branco é "não alterar", e recusa não grava nem os campos válidos que vieram junto |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

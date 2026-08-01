@@ -69,6 +69,14 @@ from src.dashboard.services import DashboardService
 from src.db.models import ECD, Empresa, criar_engine, get_session, init_db, obter_engine
 from src.ecd_importer import ECDImportError, ECDImportService
 from src.email_service import get_email_service
+from src.escrituracoes import (
+    CADASTRO_FISCAL,
+    TIPOS,
+    CadastroInvalido,
+    campos,
+    pendencias,
+    preencher,
+)
 from src.filters.engine import FilterCriteria
 from src.logging_config import configurar_logging
 from src.monitoring import build_operational_snapshot, janela_padrao_minutos, metrics_collector
@@ -1780,6 +1788,118 @@ async def api_keys_page(request: Request):
             }
         )
     )
+
+
+# ── Rotas: cadastro fiscal da empresa ──────────────────────────────────────
+
+
+def _empresa_do_usuario(session, usuario, empresa_id: int) -> Empresa | None:
+    """A empresa, **se** ela for do escritório do usuário.
+
+    O escopo é aplicado na consulta, e não conferido depois de carregar: um
+    `session.get` seguido de `if empresa.escritorio_id != ...` é a mesma
+    proteção até alguém acrescentar um caminho que esquece o `if`. Empresa de
+    outro escritório devolve `None` — igual a empresa inexistente, para não
+    contar a quem tentou que ela existe.
+    """
+    consulta = aplicar_escopo_empresas(select(Empresa).where(Empresa.id == empresa_id), usuario)
+    return session.execute(consulta).scalar_one_or_none()
+
+
+def _pagina_cadastro(session, usuario, request, *, empresa=None, erro=None, salvo=False):
+    empresas = (
+        session.execute(aplicar_escopo_empresas(select(Empresa), usuario).order_by(Empresa.nome))
+        .scalars()
+        .all()
+    )
+    return HTMLResponse(
+        jinja_env.get_template("cadastro_fiscal.html").render(
+            {
+                "request": request,
+                "usuario": usuario,
+                "current_page": "cadastro_fiscal",
+                "empresas": empresas,
+                "empresa": empresa,
+                "campos": campos(empresa) if empresa else [],
+                "pendencias": pendencias(empresa) if empresa else {},
+                "nomes_das_obrigacoes": TIPOS,
+                "erro": erro,
+                "salvo": salvo,
+            }
+        ),
+        status_code=400 if erro else 200,
+    )
+
+
+@app.get("/fiscal/cadastro", response_class=HTMLResponse)
+async def cadastro_fiscal_page(request: Request, empresa: int | None = Query(default=None)):
+    """O cadastro fiscal — os cinco códigos sem os quais não se gera EFD.
+
+    Existe porque até aqui esses campos só podiam ser preenchidos pela linha de
+    comando ou escrevendo no banco, o que deixava a geração de EFD fora do
+    alcance de quem não é programador — que é justamente quem escritura.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    session = get_session(_get_engine())
+    try:
+        alvo = _empresa_do_usuario(session, usuario, empresa) if empresa else None
+        if empresa and alvo is None:
+            return _pagina_cadastro(
+                session, usuario, request, erro=f"Empresa #{empresa} não encontrada."
+            )
+        return _pagina_cadastro(session, usuario, request, empresa=alvo)
+    finally:
+        session.close()
+
+
+@app.post("/fiscal/cadastro", response_class=HTMLResponse)
+async def cadastro_fiscal_salvar(request: Request):
+    """Grava o cadastro, recusando valor fora da tabela oficial.
+
+    A validação é a mesma de `sped-hub fiscal cadastro` — vem do domínio, não
+    daqui. Uma segunda cópia da tabela na tela divergiria da primeira no
+    primeiro ato normativo, e a tela é onde ninguém iria conferir.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    formulario = await request.form()
+    try:
+        empresa_id = int(formulario.get("empresa") or "")
+    except ValueError:
+        return HTMLResponse("Empresa não informada", status_code=400)
+
+    session = get_session(_get_engine())
+    try:
+        alvo = _empresa_do_usuario(session, usuario, empresa_id)
+        if alvo is None:
+            return _pagina_cadastro(
+                session, usuario, request, erro=f"Empresa #{empresa_id} não encontrada."
+            )
+
+        # Campo em branco é "não mexer", não "apagar": o formulário traz todos
+        # os cinco sempre, e um branco significaria zerar o que já estava lá
+        # só porque a pessoa veio corrigir outro campo.
+        informados = {
+            campo: (formulario.get(campo) or "").strip()
+            for campo in CADASTRO_FISCAL
+            if (formulario.get(campo) or "").strip()
+        }
+        try:
+            preencher(alvo, informados)
+        except CadastroInvalido as erro:
+            session.rollback()
+            alvo = _empresa_do_usuario(session, usuario, empresa_id)
+            return _pagina_cadastro(session, usuario, request, empresa=alvo, erro=str(erro))
+
+        session.commit()
+        return _pagina_cadastro(session, usuario, request, empresa=alvo, salvo=bool(informados))
+    finally:
+        session.close()
 
 
 # ── Rotas: Fase 16 — Monitoramento Operacional ─────────────────────────────

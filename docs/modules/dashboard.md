@@ -17,7 +17,7 @@ vem de `reports/`.
 | Grupo | Rotas |
 |---|---|
 | Autenticação | `/login`, `/register`, `POST /api/login`, `POST /api/register`, `/logout` |
-| Páginas | `/`, `/upload`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
+| Páginas | `/`, `/upload`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
 | Upload | `POST /api/upload` (ECD, importa), `/api/upload-efd`, `/api/upload-ecf` (só resumo), `/api/upload-async` + `/api/jobs/*` |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
 | Exportação | `/api/export/pdf`, `/xlsx`, `/multi-formato` (ZIP), `/lote` |
@@ -46,6 +46,16 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   403** — não vaza que ela existe. Listagens passam por
   `aplicar_escopo_empresas`; o upload grava o `escritorio_id` do usuário
   logado.
+- **O escopo do cadastro fiscal é aplicado na consulta, não conferido depois.**
+  `_empresa_do_usuario` monta o `select` já com `aplicar_escopo_empresas`; um
+  `session.get` seguido de `if empresa.escritorio_id != ...` seria a mesma
+  proteção até alguém acrescentar um caminho que esquece o `if`. Empresa de
+  outro escritório responde igual a empresa inexistente — a mesma frase, para
+  a tela não virar oráculo de quais ids existem no banco.
+- **A tela do cadastro não tem tabela própria.** `CADASTRO_FISCAL` e a
+  validação vêm de `escrituracoes.cadastro`, o mesmo módulo que a linha de
+  comando usa. Uma segunda cópia divergiria da primeira no primeiro ato
+  normativo, e a tela é onde ninguém iria conferir.
 - **`SPED_HUB_ALLOWED_HOSTS` valida o cabeçalho `Host`.** Fora da lista, 400;
   `*` aceita qualquer um. Aceita curinga de subdomínio (`*.dominio`, que
   também cobre o domínio nu) e ignora a porta. Antes a variável era

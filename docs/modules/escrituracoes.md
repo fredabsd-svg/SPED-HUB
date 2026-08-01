@@ -39,6 +39,10 @@ existisse.
 
 | Símbolo | Para quê |
 |---|---|
+| `CADASTRO_FISCAL` / `EXIGIDOS` | Os cinco campos do cadastro, com a tabela de cada um, e o que cada obrigação exige. |
+| `campos(empresa)` | O cadastro campo a campo, com a tabela — para a tela montar o formulário. |
+| `pendencias(empresa)` | Por obrigação, o que ainda impede a geração. Obrigação pronta entra com lista vazia. |
+| `validar(campo, valor)` / `preencher(empresa, informados)` | Recusam valor fora da tabela; `preencher` confere tudo antes de atribuir qualquer coisa. |
 | `GeradorEFDICMS(session, empresa=, data_inicio=, data_fim=, cod_fin=)` | Monta a EFD ICMS/IPI do período. |
 | `GeradorEFDContribuicoes(session, empresa=, data_inicio=, data_fim=, tipo_escrituracao=)` | Monta a EFD-Contribuições do período. |
 | `.gerar()` | Devolve `ResultadoGeracao`; levanta `CampoObrigatorioAusente`. |
