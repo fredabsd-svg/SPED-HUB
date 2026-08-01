@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Importar XML — SPED-HUB{% endblock %}
+
+{% block content %}
+<div style="max-width:860px;margin:0 auto;">
+    <h2 style="font-size:1.25rem;margin-bottom:8px;">📥 Importar documentos fiscais</h2>
+    <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
+        O XML da NF-e ou NFC-e, como o portal o entrega. O documento é guardado
+        <strong>inteiro e intocado</strong> — é a primeira das três camadas, e a única
+        que responde “o que o emitente assinou”. A empresa é descoberta pelo CNPJ do
+        emitente ou do destinatário, e o sentido (entrada ou saída) sai daí.
+    </p>
+
+    {% if erro %}
+    <div role="alert" data-secao="erro" style="background:#FEF2F2;border:1px solid var(--danger,#EF4444);
+        border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:.875rem;">
+        <strong>Nada foi importado.</strong> {{ erro }}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/fiscal/importar" enctype="multipart/form-data"
+          class="card" style="padding:20px;margin-bottom:20px;">
+        <label class="upload-zone" for="arquivos" style="display:block;">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text"><strong>Clique para escolher</strong> os XML</div>
+            <div class="upload-hint">
+                Vários de uma vez. Até {{ limite_mb }} MB por arquivo.
+            </div>
+            <input type="file" id="arquivos" name="arquivos" accept=".xml" multiple>
+        </label>
+
+        <div style="margin-top:20px;">
+            <label for="politica" style="font-size:.875rem;font-weight:600;">
+                Quando a chave já existe
+            </label>
+            {# O padrão é ignorar porque reimportar a mesma pasta é rotina — e porque
+               substituir por engano apagaria os ajustes já feitos sobre o documento. #}
+            <select name="politica" id="politica" class="form-select" style="margin-top:6px;">
+                <option value="ignorar" {% if politica == 'ignorar' %}selected{% endif %}>
+                    ignorar — reimportar a mesma pasta não muda nada (padrão)
+                </option>
+                <option value="substituir" {% if politica == 'substituir' %}selected{% endif %}>
+                    substituir — troca o documento e <strong>descarta as correções feitas nele</strong>
+                </option>
+                <option value="erro" {% if politica == 'erro' %}selected{% endif %}>
+                    recusar — a duplicata vira rejeição, para conferir na mão
+                </option>
+            </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top:20px;">Importar</button>
+    </form>
+
+    {% if resultado %}
+    <div class="card" data-secao="resultado" style="padding:20px;">
+        <h3 style="font-size:1rem;margin-bottom:12px;">Resultado</h3>
+        <div style="display:flex;gap:32px;flex-wrap:wrap;font-size:.875rem;margin-bottom:16px;">
+            <div><strong>{{ resultado.total }}</strong> arquivo(s)</div>
+            <div><strong>{{ resultado.importados }}</strong> importado(s)</div>
+            <div><strong>{{ resultado.duplicados }}</strong> duplicado(s)</div>
+            <div><strong>{{ resultado.substituidos }}</strong> substituído(s)</div>
+            <div><strong>{{ resultado.rejeitados }}</strong> rejeitado(s)</div>
+        </div>
+
+        {# Rejeição é o que a pessoa precisa ver; sucesso em silêncio está certo.
+           Um relatório que listasse os mil que deram certo esconderia os três que
+           não deram. #}
+        {% set recusados = resultado.ocorrencias | selectattr('motivo') | list %}
+        {% if recusados %}
+        <h4 style="font-size:.875rem;margin-bottom:6px;">O que não entrou, e por quê</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:.8125rem;">
+            <thead>
+                <tr style="background:var(--gray-50,#F8F9FB);text-align:left;">
+                    <th style="padding:8px 12px;">Arquivo</th>
+                    <th style="padding:8px 12px;">Desfecho</th>
+                    <th style="padding:8px 12px;">Motivo</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for o in recusados %}
+                <tr style="border-top:1px solid var(--gray-200,#E2E2EC);">
+                    <td style="padding:8px 12px;">{{ o.origem or '—' }}</td>
+                    <td style="padding:8px 12px;">{{ o.desfecho }}</td>
+                    <td style="padding:8px 12px;">{{ o.motivo }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if resultado.importados or resultado.substituidos %}
+        <p style="margin-top:16px;font-size:.875rem;">
+            <a href="/fiscal/documentos">Ver os documentos importados →</a>
+        </p>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

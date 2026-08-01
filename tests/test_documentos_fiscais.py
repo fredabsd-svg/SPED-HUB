@@ -347,6 +347,29 @@ class TestDuplicidade:
         with pytest.raises(ValueError, match="já importado"):
             importador.importar(nfe_xml())
 
+    def test_politica_de_erro_nao_derruba_o_lote(self, sessao, escritorio):
+        """A duplicata vira rejeição; os outros arquivos seguem.
+
+        `ERRO` existe para que a duplicata não entre em silêncio, e não para
+        interromper o lote — com mil arquivos, uma duplicata na metade levaria
+        junto os quinhentos que vinham depois.
+        """
+        importador = ImportadorDeDocumentos(
+            sessao, escritorio_id=escritorio.id, politica=PoliticaDeDuplicidade.ERRO
+        )
+        importador.importar(nfe_xml())
+
+        resultado = importador.importar_lote(
+            [
+                ("repetida.xml", nfe_xml()),
+                ("nova.xml", nfe_xml(chave=CHAVE_PADRAO[:-3] + "999", numero="9")),
+            ]
+        )
+
+        assert resultado.rejeitados == 1
+        assert resultado.importados == 1, "a duplicata levou o arquivo seguinte junto"
+        assert "já importado" in resultado.ocorrencias[0].motivo
+
     def test_politica_de_substituir_troca_o_documento(self, sessao, escritorio):
         importador = ImportadorDeDocumentos(
             sessao, escritorio_id=escritorio.id, politica=PoliticaDeDuplicidade.SUBSTITUIR

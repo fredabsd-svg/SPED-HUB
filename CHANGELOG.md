@@ -9,6 +9,12 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **Importar XML ganhou tela.** Vários arquivos de uma vez, com o resultado
+  contado — importados, duplicados, substituídos, rejeitados — e o motivo de
+  cada um que não entrou. A escolha do que fazer com chave repetida fica à
+  vista, com o aviso de que substituir **descarta as correções já feitas** no
+  documento; o padrão continua sendo ignorar, porque reimportar a mesma pasta
+  é rotina.
 - **Classificar e corrigir ganharam tela, e nenhuma delas grava sozinha.** A
   de classificação mostra o que as regras propõem — com a regra, o valor
   anterior, o sugerido, a justificativa e o impacto — e os conflitos que o
@@ -201,6 +207,13 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **Uma duplicata deixou de derrubar a importação inteira.** Com a política
+  "recusar", importar uma pasta em que um arquivo já tinha entrado
+  interrompia o lote — e os arquivos que vinham depois ficavam de fora, sem
+  que nada dissesse quais. A política existe para que a duplicata não entre em
+  silêncio, e não para perder o resto: agora ela vira uma rejeição com o
+  motivo, e os demais seguem. Importar um documento avulso continua
+  recusando de forma explícita.
 - **A apuração do PIS/Cofins ignorava o CST e podia recolher a menos.** O
   sistema somava o valor destacado em cada item, qualquer que fosse o código de
   situação tributária. Compra que não dá direito a crédito — aquisição isenta,
