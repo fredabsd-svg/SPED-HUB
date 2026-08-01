@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Classificar — SPED-HUB{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px;margin:0 auto;">
+    <h2 style="font-size:1.25rem;margin-bottom:8px;">🏷️ Classificação fiscal</h2>
+    <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
+        O que as regras cadastradas propõem para o recorte. Isto é uma <strong>proposta</strong>:
+        nada é gravado até que você aplique, e o que for aplicado sai num lote que se desfaz
+        inteiro.
+    </p>
+
+    <form method="get" action="/fiscal/classificar"
+          style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:24px;">
+        <div style="flex:1;min-width:200px;">
+            <label for="empresa" style="font-size:.875rem;font-weight:600;">Empresa</label>
+            <select name="empresa" id="empresa" class="form-select" style="width:100%;margin-top:6px;">
+                <option value="">— escolha —</option>
+                {% for e in empresas %}
+                <option value="{{ e.id }}" {% if empresa and e.id == empresa.id %}selected{% endif %}>
+                    {{ e.nome }} ({{ e.cnpj }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="de" style="font-size:.875rem;font-weight:600;">De</label>
+            <input type="date" name="de" id="de" value="{{ de }}" class="form-select" style="margin-top:6px;">
+        </div>
+        <div>
+            <label for="ate" style="font-size:.875rem;font-weight:600;">Até</label>
+            <input type="date" name="ate" id="ate" value="{{ ate }}" class="form-select" style="margin-top:6px;">
+        </div>
+        <div>
+            <label for="obrigacao" style="font-size:.875rem;font-weight:600;">Obrigação</label>
+            <select name="obrigacao" id="obrigacao" class="form-select" style="margin-top:6px;">
+                <option value="">todas</option>
+                <option value="efd_icms" {% if obrigacao == 'efd_icms' %}selected{% endif %}>EFD ICMS/IPI</option>
+                <option value="efd_contribuicoes" {% if obrigacao == 'efd_contribuicoes' %}selected{% endif %}>EFD-Contribuições</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Ver o que as regras propõem</button>
+    </form>
+
+    {% if erro %}
+    <div role="alert" data-secao="erro" style="background:#FEF2F2;border:1px solid var(--danger,#EF4444);
+        border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:.875rem;">
+        <strong>Nada foi gravado.</strong> {{ erro }}
+    </div>
+    {% endif %}
+
+    {% if lote %}
+    <div role="status" data-secao="gravado" style="background:#F0FDF4;border:1px solid var(--success,#10B981);
+        border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:.875rem;">
+        {{ aplicadas }} sugestão(ões) aplicada(s), no lote <code>{{ lote }}</code>.
+        Para desfazer tudo de uma vez, use o lote na tela de
+        <a href="/fiscal/corrigir">Corrigir</a>.
+    </div>
+    {% endif %}
+
+    {% if total_conflitos %}
+    <div data-secao="conflitos" class="card" style="padding:20px;margin-bottom:20px;
+         border-left:4px solid var(--warning,#F59E0B);">
+        <h3 style="font-size:1rem;margin-bottom:4px;">{{ total_conflitos }} conflito(s)</h3>
+        <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:12px;">
+            Duas regras de mesma prioridade disputam o mesmo campo. O motor <strong>não
+            escolhe</strong>: escolher por sorteio faria a mesma importação produzir
+            resultados diferentes, e ninguém desconfiaria. O campo fica como está até
+            que uma das regras mude de prioridade.
+        </p>
+        <ul style="font-size:.8125rem;padding-left:20px;">
+            {% for proposta in propostas %}
+            {% for conflito in proposta.resultado.conflitos %}
+            <li>Documento {{ proposta.documento.numero }} — {{ conflito }}</li>
+            {% endfor %}
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if empresa and not propostas %}
+    <p style="color:var(--gray-500);font-size:.875rem;">
+        Nenhuma regra propõe nada para este recorte. Cadastre regras com
+        <code>sped-hub fiscal regras --acao-regra criar</code>.
+    </p>
+    {% elif propostas %}
+    <div data-secao="sugestoes" class="card" style="padding:0;overflow-x:auto;margin-bottom:20px;">
+        <table style="width:100%;border-collapse:collapse;font-size:.8125rem;">
+            <thead>
+                <tr style="background:var(--gray-50,#F8F9FB);text-align:left;">
+                    <th style="padding:10px 12px;">Documento</th>
+                    <th style="padding:10px 12px;">Item</th>
+                    <th style="padding:10px 12px;">Campo</th>
+                    <th style="padding:10px 12px;">De</th>
+                    <th style="padding:10px 12px;">Para</th>
+                    <th style="padding:10px 12px;">Regra</th>
+                    <th style="padding:10px 12px;">Por quê</th>
+                    <th style="padding:10px 12px;text-align:right;">Impacto</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for proposta in propostas %}
+                {% for s in proposta.resultado.sugestoes %}
+                <tr style="border-top:1px solid var(--gray-200,#E2E2EC);">
+                    <td style="padding:10px 12px;">
+                        <a href="/fiscal/documentos/{{ proposta.documento.id }}">{{ proposta.documento.numero }}</a>
+                    </td>
+                    <td style="padding:10px 12px;">{{ s.numero_item or 'cabeçalho' }}</td>
+                    <td style="padding:10px 12px;">{{ s.campo }}</td>
+                    <td style="padding:10px 12px;color:var(--gray-500);">{{ s.valor_anterior if s.valor_anterior is not none else '—' }}</td>
+                    <td style="padding:10px 12px;font-weight:600;">{{ s.valor_sugerido }}</td>
+                    <td style="padding:10px 12px;">{{ s.regra_nome }}</td>
+                    <td style="padding:10px 12px;">{{ s.justificativa }}</td>
+                    <td style="padding:10px 12px;text-align:right;">
+                        {# Trocar um CFOP não tem impacto em reais; trocar uma base tem. #}
+                        {% if s.impacto is not none %}{{ fmt_moeda(s.impacto) }}{% else %}—{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if total_sugestoes %}
+    <form method="post" action="/fiscal/classificar" data-secao="aplicar">
+        <input type="hidden" name="empresa" value="{{ empresa.id }}">
+        <input type="hidden" name="de" value="{{ de }}">
+        <input type="hidden" name="ate" value="{{ ate }}">
+        <input type="hidden" name="obrigacao" value="{{ obrigacao }}">
+        {# O total que a tela mostrou viaja junto: se o banco mudar entre ver e
+           aplicar, nada é gravado e a pessoa confere de novo. #}
+        <input type="hidden" name="esperado" value="{{ total_sugestoes }}">
+        <button type="submit" class="btn btn-primary">
+            Aplicar as {{ total_sugestoes }} sugestões
+        </button>
+        <span style="color:var(--gray-500);font-size:.8125rem;margin-left:8px;">
+            vira um lote reversível, com origem “regra” no histórico
+        </span>
+    </form>
+    {% endif %}
+    {% endif %}
+</div>
+{% endblock %}

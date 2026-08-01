@@ -77,7 +77,21 @@ from src.db.models import (
     init_db,
     obter_engine,
 )
-from src.documentos import efetivo, historico
+from src.documentos import (
+    Alteracao,
+    AlteracaoInvalida,
+    MotorDeClassificacao,
+    Selecao,
+    SelecaoVazia,
+    confirmar,
+    desfazer_lote,
+    efetivo,
+    historico,
+    novo_lote,
+    simular,
+    valor_tipado,
+)
+from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.planilha import EDITAVEIS
 from src.ecd_importer import ECDImportError, ECDImportService
 from src.email_service import get_email_service
@@ -2148,6 +2162,452 @@ async def documento_xml(request: Request, documento_id: int):
                 "Content-Disposition": f'attachment; filename="{documento.chave or documento.id}.xml"'
             },
         )
+    finally:
+        session.close()
+
+
+# ── Rotas: classificar e corrigir ──────────────────────────────────────────
+#
+# As duas telas têm a mesma forma, e ela não é acidental: **mostrar, e só
+# depois gravar**. É a mesma garantia que os motores dão por dentro e que a
+# linha de comando dá com `--aplicar`/`--confirmar`; invertê-la na tela — que
+# é por onde a maioria vai passar — desfaria a proteção justamente na porta
+# mais usada.
+#
+# Sobre a segunda etapa: o POST **re-simula** a partir dos mesmos parâmetros e
+# confere o total contra o que a tela mostrou. Não é preciosismo. Entre ver e
+# confirmar cabe uma importação, outra pessoa corrigindo, uma regra nova; sem
+# a conferência, alguém aprovaria trinta mudanças e gravaria trezentas.
+
+
+def _selecao_do_recorte(empresa, de, ate, filtros=()):
+    return Selecao(
+        empresa_id=empresa.id,
+        escritorio_id=empresa.escritorio_id,
+        data_inicio=_data_opcional(de),
+        data_fim=_data_opcional(ate),
+        filtros=list(filtros),
+    )
+
+
+def _documentos_da_selecao(session, empresa, de, ate):
+    consulta = (
+        select(DocumentoFiscal)
+        .options(selectinload(DocumentoFiscal.itens))
+        .where(DocumentoFiscal.empresa_id == empresa.id)
+    )
+    inicio, fim = _data_opcional(de), _data_opcional(ate)
+    if inicio:
+        consulta = consulta.where(DocumentoFiscal.data_emissao >= inicio)
+    if fim:
+        consulta = consulta.where(DocumentoFiscal.data_emissao <= fim)
+    return list(
+        session.execute(consulta.order_by(DocumentoFiscal.data_emissao, DocumentoFiscal.id))
+        .scalars()
+        .unique()
+        .all()
+    )
+
+
+def _classificacao(session, empresa, de, ate, obrigacao):
+    """O que as regras propõem para o recorte — sem tocar no banco."""
+    motor = MotorDeClassificacao(session, obrigacao=obrigacao or None)
+    propostas = []
+    for documento in _documentos_da_selecao(session, empresa, de, ate):
+        resultado = motor.avaliar(documento)
+        if resultado.sugestoes or resultado.conflitos:
+            propostas.append({"documento": documento, "resultado": resultado})
+    return propostas
+
+
+def _pagina_classificar(session, usuario, request, **contexto):
+    empresas = (
+        session.execute(aplicar_escopo_empresas(select(Empresa), usuario).order_by(Empresa.nome))
+        .scalars()
+        .all()
+    )
+    dados = {
+        "request": request,
+        "usuario": usuario,
+        "current_page": "classificar",
+        "empresas": empresas,
+        "empresa": None,
+        "propostas": [],
+        "total_sugestoes": 0,
+        "total_conflitos": 0,
+        "erro": None,
+        "lote": None,
+        "aplicadas": 0,
+        "de": "",
+        "ate": "",
+        "obrigacao": "",
+        "fmt_moeda": fmt_moeda,
+    }
+    dados.update(contexto)
+    return HTMLResponse(
+        jinja_env.get_template("classificar.html").render(dados),
+        status_code=400 if dados["erro"] else 200,
+    )
+
+
+@app.get("/fiscal/classificar", response_class=HTMLResponse)
+async def classificar_page(
+    request: Request,
+    empresa: int | None = Query(default=None),
+    de: str | None = Query(default=None),
+    ate: str | None = Query(default=None),
+    obrigacao: str | None = Query(default=None),
+):
+    """O que as regras propõem. **Não grava** — propor não é decidir."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    session = get_session(_get_engine())
+    try:
+        alvo = _empresa_do_usuario(session, usuario, empresa) if empresa else None
+        if empresa and alvo is None:
+            return _pagina_classificar(
+                session, usuario, request, erro=f"Empresa #{empresa} não encontrada."
+            )
+        propostas = _classificacao(session, alvo, de, ate, obrigacao) if alvo else []
+        return _pagina_classificar(
+            session,
+            usuario,
+            request,
+            empresa=alvo,
+            propostas=propostas,
+            total_sugestoes=sum(len(p["resultado"].sugestoes) for p in propostas),
+            total_conflitos=sum(len(p["resultado"].conflitos) for p in propostas),
+            de=de or "",
+            ate=ate or "",
+            obrigacao=obrigacao or "",
+        )
+    finally:
+        session.close()
+
+
+@app.post("/fiscal/classificar", response_class=HTMLResponse)
+async def classificar_aplicar(request: Request):
+    """Aplica as sugestões, num lote reversível.
+
+    As sugestões viram ajustes de origem `regra`, e não `usuario`: o histórico
+    tem de distinguir o que uma regra propôs do que uma pessoa decidiu, senão
+    "por que este campo está assim?" perde a única resposta que ele tem.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    formulario = await request.form()
+    de = (formulario.get("de") or "").strip()
+    ate = (formulario.get("ate") or "").strip()
+    obrigacao = (formulario.get("obrigacao") or "").strip()
+
+    session = get_session(_get_engine())
+    try:
+        try:
+            empresa_id = int(formulario.get("empresa") or "")
+        except ValueError:
+            return _pagina_classificar(session, usuario, request, erro="Empresa não informada.")
+
+        alvo = _empresa_do_usuario(session, usuario, empresa_id)
+        if alvo is None:
+            return _pagina_classificar(
+                session, usuario, request, erro=f"Empresa #{empresa_id} não encontrada."
+            )
+
+        propostas = _classificacao(session, alvo, de, ate, obrigacao)
+        total = sum(len(p["resultado"].sugestoes) for p in propostas)
+        divergencia = _confere_o_que_foi_visto(formulario.get("esperado"), total)
+        if divergencia:
+            return _pagina_classificar(
+                session,
+                usuario,
+                request,
+                empresa=alvo,
+                propostas=propostas,
+                total_sugestoes=total,
+                total_conflitos=sum(len(p["resultado"].conflitos) for p in propostas),
+                de=de,
+                ate=ate,
+                obrigacao=obrigacao,
+                erro=divergencia,
+            )
+
+        lote = novo_lote()
+        for proposta in propostas:
+            aplicar_classificacao(
+                session,
+                proposta["documento"],
+                proposta["resultado"].sugestoes,
+                lote=lote,
+                usuario_id=usuario.id,
+            )
+        session.commit()
+        return _pagina_classificar(
+            session,
+            usuario,
+            request,
+            empresa=alvo,
+            propostas=_classificacao(session, alvo, de, ate, obrigacao),
+            de=de,
+            ate=ate,
+            obrigacao=obrigacao,
+            lote=lote,
+            aplicadas=total,
+        )
+    finally:
+        session.close()
+
+
+def _confere_o_que_foi_visto(esperado: str | None, total: int) -> str | None:
+    """A tela mostrou N; o banco agora tem M. Se diferem, ninguém grava.
+
+    Entre ver e confirmar cabe uma importação, outra pessoa corrigindo, uma
+    regra nova. Sem esta conferência, alguém aprovaria trinta mudanças e
+    gravaria trezentas — e o lote que desfaz não ajuda quem não percebeu.
+    """
+    try:
+        visto = int(esperado or "")
+    except ValueError:
+        return "Não deu para saber o que você viu na tela; confira e envie de novo."
+    if visto != total:
+        return (
+            f"A tela mostrava {visto} e agora há {total}. Nada foi gravado — "
+            "alguma coisa mudou no meio do caminho. Confira de novo."
+        )
+    return None
+
+
+def _pagina_corrigir(session, usuario, request, **contexto):
+    empresas = (
+        session.execute(aplicar_escopo_empresas(select(Empresa), usuario).order_by(Empresa.nome))
+        .scalars()
+        .all()
+    )
+    dados = {
+        "request": request,
+        "usuario": usuario,
+        "current_page": "corrigir",
+        "empresas": empresas,
+        "empresa": None,
+        "simulacao": None,
+        "erro": None,
+        "lote": None,
+        "gravadas": 0,
+        "desfeitos": None,
+        "de": "",
+        "ate": "",
+        "campo": "",
+        "valor": "",
+        "motivo": "",
+        "apenas_vazios": False,
+        "editaveis": EDITAVEIS,
+        "fmt_moeda": fmt_moeda,
+    }
+    dados.update(contexto)
+    return HTMLResponse(
+        jinja_env.get_template("corrigir.html").render(dados),
+        status_code=400 if dados["erro"] else 200,
+    )
+
+
+def _simular_do_formulario(session, alvo, dados):
+    """A simulação do recorte + alteração pedidos, ou `None` se falta algo."""
+    if not dados["campo"] or not dados["valor"]:
+        return None
+    selecao = _selecao_do_recorte(alvo, dados["de"], dados["ate"])
+    alteracao = Alteracao(
+        campo=dados["campo"],
+        valor=valor_tipado(dados["campo"], dados["valor"]),
+        apenas_vazios=dados["apenas_vazios"],
+    )
+    return simular(session, selecao, [alteracao])
+
+
+@app.get("/fiscal/corrigir", response_class=HTMLResponse)
+async def corrigir_page(
+    request: Request,
+    empresa: int | None = Query(default=None),
+    de: str | None = Query(default=None),
+    ate: str | None = Query(default=None),
+    campo: str | None = Query(default=None),
+    valor: str | None = Query(default=None),
+    apenas_vazios: bool = Query(default=False),
+):
+    """A alteração em massa — **simulada**. Gravar exige o segundo passo."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    dados = {
+        "de": de or "",
+        "ate": ate or "",
+        "campo": campo or "",
+        "valor": valor or "",
+        "apenas_vazios": apenas_vazios,
+    }
+    session = get_session(_get_engine())
+    try:
+        alvo = _empresa_do_usuario(session, usuario, empresa) if empresa else None
+        if empresa and alvo is None:
+            return _pagina_corrigir(
+                session, usuario, request, erro=f"Empresa #{empresa} não encontrada.", **dados
+            )
+        simulacao = None
+        if alvo is not None:
+            try:
+                simulacao = _simular_do_formulario(session, alvo, dados)
+            except (AlteracaoInvalida, SelecaoVazia, ValueError) as erro:
+                return _pagina_corrigir(
+                    session, usuario, request, empresa=alvo, erro=str(erro), **dados
+                )
+        return _pagina_corrigir(
+            session, usuario, request, empresa=alvo, simulacao=simulacao, **dados
+        )
+    finally:
+        session.close()
+
+
+@app.post("/fiscal/corrigir", response_class=HTMLResponse)
+async def corrigir_confirmar(request: Request):
+    """Grava o que a simulação mostrou, num lote reversível."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    formulario = await request.form()
+    dados = {
+        "de": (formulario.get("de") or "").strip(),
+        "ate": (formulario.get("ate") or "").strip(),
+        "campo": (formulario.get("campo") or "").strip(),
+        "valor": (formulario.get("valor") or "").strip(),
+        "motivo": (formulario.get("motivo") or "").strip(),
+        "apenas_vazios": bool(formulario.get("apenas_vazios")),
+    }
+
+    session = get_session(_get_engine())
+    try:
+        try:
+            empresa_id = int(formulario.get("empresa") or "")
+        except ValueError:
+            return _pagina_corrigir(
+                session, usuario, request, erro="Empresa não informada.", **dados
+            )
+        alvo = _empresa_do_usuario(session, usuario, empresa_id)
+        if alvo is None:
+            return _pagina_corrigir(
+                session, usuario, request, erro=f"Empresa #{empresa_id} não encontrada.", **dados
+            )
+
+        try:
+            simulacao = _simular_do_formulario(session, alvo, dados)
+        except (AlteracaoInvalida, SelecaoVazia, ValueError) as erro:
+            return _pagina_corrigir(
+                session, usuario, request, empresa=alvo, erro=str(erro), **dados
+            )
+        if simulacao is None:
+            return _pagina_corrigir(
+                session, usuario, request, empresa=alvo, erro="Informe o campo e o valor.", **dados
+            )
+
+        divergencia = _confere_o_que_foi_visto(formulario.get("esperado"), simulacao.total_mudancas)
+        if divergencia:
+            return _pagina_corrigir(
+                session,
+                usuario,
+                request,
+                empresa=alvo,
+                simulacao=simulacao,
+                erro=divergencia,
+                **dados,
+            )
+
+        try:
+            lote = confirmar(
+                session,
+                simulacao,
+                motivo=dados["motivo"] or None,
+                usuario_id=usuario.id,
+                forcar=bool(formulario.get("forcar")),
+            )
+        except AlteracaoInvalida as erro:
+            return _pagina_corrigir(
+                session,
+                usuario,
+                request,
+                empresa=alvo,
+                simulacao=simulacao,
+                erro=str(erro),
+                **dados,
+            )
+        session.commit()
+        return _pagina_corrigir(
+            session,
+            usuario,
+            request,
+            empresa=alvo,
+            lote=lote,
+            gravadas=simulacao.total_mudancas,
+            **dados,
+        )
+    finally:
+        session.close()
+
+
+@app.post("/fiscal/desfazer", response_class=HTMLResponse)
+async def corrigir_desfazer(request: Request):
+    """Desfaz um lote inteiro — se ele for todo do escritório de quem pede.
+
+    `desfazer_lote` não conhece escritório, e do jeito que a linha de comando o
+    usa isso está certo: lá quem roda o comando já tem o banco na mão. Aqui
+    não. O lote é uma string opaca, mas "opaca" não é controle de acesso.
+
+    A recusa é para o lote **inteiro**, e não "apago só a parte que é minha":
+    desfazer metade de um lote deixaria a escrituração num estado que ninguém
+    escolheu, e que nem quem pediu nem o dono do resto saberiam explicar.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    formulario = await request.form()
+    lote = (formulario.get("lote") or "").strip()
+
+    session = get_session(_get_engine())
+    try:
+        if not lote:
+            return _pagina_corrigir(session, usuario, request, erro="Informe o lote.")
+
+        do_lote = set(
+            session.execute(select(AjusteFiscal.documento_id).where(AjusteFiscal.lote == lote))
+            .scalars()
+            .all()
+        )
+        if not do_lote:
+            return _pagina_corrigir(session, usuario, request, erro=f"Lote {lote} não encontrado.")
+
+        alcancaveis = set(
+            session.execute(
+                aplicar_escopo_empresas(
+                    select(DocumentoFiscal.id).join(
+                        Empresa, DocumentoFiscal.empresa_id == Empresa.id
+                    ),
+                    usuario,
+                ).where(DocumentoFiscal.id.in_(do_lote))
+            )
+            .scalars()
+            .all()
+        )
+        if do_lote - alcancaveis:
+            # A mesma frase de lote inexistente: dizer "esse lote é de outro
+            # escritório" já confirmaria que ele existe.
+            return _pagina_corrigir(session, usuario, request, erro=f"Lote {lote} não encontrado.")
+
+        quantos = desfazer_lote(session, lote)
+        session.commit()
+        return _pagina_corrigir(session, usuario, request, desfeitos=quantos, lote=lote)
     finally:
         session.close()
 

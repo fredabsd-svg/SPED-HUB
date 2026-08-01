@@ -34,6 +34,7 @@ from src.db.models import AjusteFiscal, DocumentoFiscal, ItemDocumentoFiscal
 from src.documentos.ajustes import (
     ORIGEM_USUARIO,
     aplicar_ajuste,
+    desserializar,
     novo_lote,
     valor_efetivo,
 )
@@ -359,6 +360,28 @@ def _verificar(
         problemas.append(f"CST do IBS/CBS {texto!r} não tem três dígitos")
 
     return problemas
+
+
+def valor_tipado(campo: str, bruto: str):
+    """Texto vindo de fora, no tipo que a coluna espera.
+
+    Terminal e formulário HTML entregam `str` sempre. Sem converter, alterar
+    `base_icms` para `1000` mostraria **impacto R$ 0,00** na simulação —
+    porque a diferença entre `0.0` e `"1000"` não é numérica —, e a simulação
+    existe exatamente para mostrar o impacto financeiro antes de confirmar.
+
+    A conversão é a mesma que a camada efetiva usa para ler ajustes
+    (`desserializar`): duas conversões diferentes para o mesmo campo acabariam
+    divergindo, e a que divergisse seria a menos usada.
+    """
+    for modelo in (ItemDocumentoFiscal, DocumentoFiscal):
+        colunas = modelo.__table__.columns
+        if campo in colunas:
+            return desserializar(bruto, colunas[campo])
+    raise ValueError(
+        f"campo {campo!r} não existe em documento nem em item — "
+        "alteração em massa com nome errado não alcançaria nada"
+    )
 
 
 def simular(

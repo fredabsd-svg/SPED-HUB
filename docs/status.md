@@ -78,6 +78,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 60 | Telas da Central: a lista e as três camadas de um documento | concluída | `tests/test_tela_documentos.py` | a tela do documento mostra as camadas **separadas** — o XML guardado (baixável, byte a byte, nunca remontado), normalizado × efetivo lado a lado com o histórico de cada correção, e em que escriturações a nota entrou com qual foi a transmitida. Campo corrigido fora da lista de revisão aparece assim mesmo: correção invisível é o que a tela existe para impedir |
 
+| 61 | Telas de classificar e corrigir, com o total conferido antes de gravar | concluída | `tests/test_telas_classificar_corrigir.py` | as duas **mostram primeiro** e só gravam no segundo passo; o total que a tela mostrou viaja no formulário e é reconferido — se o banco mudou no meio, nada é gravado. Desfazer é escopado por escritório (o domínio não conhece escritório, e na CLI isso está certo); lote alheio responde igual a inexistente, e a recusa vale para o lote **inteiro**. `valor_tipado` sai da CLI para o domínio |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é
