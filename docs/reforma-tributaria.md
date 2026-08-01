@@ -100,6 +100,36 @@ que se recolhe (art. 178 da LC 214/2025); o segundo é o que já foi cobrado
 antes. Daí `valor_*_mono_reten` e `valor_*_mono_retido` serem colunas
 distintas — trocar uma pela outra erra o sinal do monofásico inteiro.
 
+E a diferença entre as duas decide o que a apuração mede. A regra UB105a-10 da
+NT dá a conta do total do item:
+
+    vTotIBSMonoItem = vIBSMono + vIBSMonoReten - vIBSMonoDif
+
+ou seja, **o sujeito à retenção já está dentro do total**, e o retido
+anteriormente não está. Por isso o `reten` é guardado mas **não** entra na
+lista de valores que a apuração não consome: quem lê essa lista soma o que vê,
+e o item de R$ 12,00 apareceria como R$ 14,00. O `retido` entra, porque é a
+única parcela que o total realmente deixa de fora.
+
+## Transferência, ajuste e estorno
+
+Três grupos que não são tributo do item, mas valor destacado nele:
+
+| Grupo | Campos | O que é |
+|---|---|---|
+| `gTransfCred` (UB106) | `vIBS`, `vCBS` | crédito transferido |
+| `gAjusteCompet` (UB112) | `competApur`, `vIBS`, `vCBS` | ajuste que pertence a outra apuração, possivelmente retroativa |
+| `gEstornoCred` (UB116) | `vIBSEstCred`, `vCBSEstCred` | crédito a estornar |
+
+Os dois primeiros são **alternativas a `gIBSCBS`** na mesma escolha do schema
+(UB14k): um item que transfere crédito não traz grupo de tributo nenhum. O
+terceiro é filho opcional de `IBSCBS`, fora da escolha, e acompanha um item
+tributado normalmente.
+
+Todos são lidos, guardados e **medidos** pela apuração — que não os consome,
+porque consumi-los exigiria decidir a que competência cada um pertence, e isso
+é decisão de quem escritura.
+
 ## Classificação: CST e cClassTrib
 
 O enquadramento de cada item vem de dois códigos que andam juntos:

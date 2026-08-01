@@ -98,6 +98,7 @@ class ItemNormalizado:
     valor_diferido_cbs: float = 0.0
     valor_devolucao_cbs: float = 0.0
     codigo_credito_presumido: str | None = None
+    base_credito_presumido: float = 0.0
     percentual_credito_presumido_ibs: float = 0.0
     valor_credito_presumido_ibs: float = 0.0
     valor_credito_presumido_ibs_susp: float = 0.0
@@ -112,6 +113,16 @@ class ItemNormalizado:
     valor_cbs_mono_reten: float = 0.0
     valor_ibs_mono_retido: float = 0.0
     valor_cbs_mono_retido: float = 0.0
+    quantidade_bio_diferenca: float = 0.0
+    valor_ibs_bio_diferenca: float = 0.0
+    valor_cbs_bio_diferenca: float = 0.0
+    valor_transf_credito_ibs: float = 0.0
+    valor_transf_credito_cbs: float = 0.0
+    competencia_ajuste: str | None = None
+    valor_ajuste_compet_ibs: float = 0.0
+    valor_ajuste_compet_cbs: float = 0.0
+    valor_estorno_credito_ibs: float = 0.0
+    valor_estorno_credito_cbs: float = 0.0
     cst_is: str | None = None
     class_trib_is: str | None = None
     base_is: float = 0.0
@@ -502,6 +513,7 @@ class AdaptadorNFe:
         cred = _achar(ibscbs, "gCredPresOper")
         if cred is not None:
             item.codigo_credito_presumido = _texto(cred, "cCredPres")
+            item.base_credito_presumido = _numero(cred, "vBCCredPres")
             for grupo_cred, sufixo in (("gIBSCredPres", "ibs"), ("gCBSCredPres", "cbs")):
                 no = _achar(cred, grupo_cred)
                 if no is None:
@@ -515,6 +527,7 @@ class AdaptadorNFe:
                 )
 
         AdaptadorNFe._monofasico(_achar(ibscbs, "gIBSCBSMono"), item)
+        AdaptadorNFe._creditos_e_ajustes(ibscbs, item)
 
         seletivo = _achar(imposto, "IS")
         if seletivo is not None:
@@ -560,9 +573,12 @@ class AdaptadorNFe:
         própria NT já fecha: `vTotIBSMonoItem` e `vTotCBSMonoItem` são filhos
         diretos do grupo e valem qualquer que tenha sido a variante.
 
-        Da variante só se lê o que o total não carrega: a base (quantidade no
-        ad rem, valor no ad valorem) e as duas retenções, que são grandezas à
-        parte e não estão embutidas no total do item.
+        **A retenção já está dentro do total**, e a regra UB105a-10 da própria
+        NT diz a conta: ``vTotIBSMonoItem = vIBSMono + vIBSMonoReten -
+        vIBSMonoDif``. Guardá-la à parte é para saber *de que* o total é feito
+        — nunca para somar ao total, que seria contar a retenção duas vezes.
+        O que **não** está no total é `gMonoRet`, o cobrado anteriormente: a
+        fórmula não o inclui, e por isso ele é grandeza separada de verdade.
         """
         if mono is None:
             return
@@ -590,6 +606,42 @@ class AdaptadorNFe:
         setattr(item, f"valor_{tributo}_mono_reten", _numero(reten, f"v{sigla}MonoReten"))
         retido = _achar(variante, "gMonoRet")
         setattr(item, f"valor_{tributo}_mono_retido", _numero(retido, f"v{sigla}MonoRet"))
+
+        # Mistura de etanol anidro em percentual diferente do obrigatório: o
+        # mesmo campo é valor A RECOLHER com cClassTrib 620004 e A RESSARCIR
+        # com 620005.  Guardamos o número; o sinal está no código, e o sistema
+        # não interpreta a tabela cClassTrib.
+        bio = _achar(variante, "gpBioDiferenca")
+        if bio is not None:
+            item.quantidade_bio_diferenca = _numero(bio, "qBCBioComb")
+            setattr(item, f"valor_{tributo}_bio_diferenca", _numero(bio, f"v{sigla}Diferenca"))
+
+    @staticmethod
+    def _creditos_e_ajustes(ibscbs: ET.Element, item: ItemNormalizado) -> None:
+        """Transferência de crédito, ajuste de competência e estorno.
+
+        `gTransfCred` e `gAjusteCompet` são alternativas a `gIBSCBS` na mesma
+        escolha do schema (UB14k): um item que transfere crédito **não traz**
+        grupo de tributo nenhum. Por isso não valem como complemento do que já
+        foi lido — são o conteúdo inteiro do item.
+        """
+        transf = _achar(ibscbs, "gTransfCred")
+        if transf is not None:
+            item.valor_transf_credito_ibs = _numero(transf, "vIBS")
+            item.valor_transf_credito_cbs = _numero(transf, "vCBS")
+
+        ajuste = _achar(ibscbs, "gAjusteCompet")
+        if ajuste is not None:
+            # `competApur` é AAAA-MM e pode ser retroativo: é o que diz a que
+            # apuração o ajuste pertence, e sem ele o valor não tem destino.
+            item.competencia_ajuste = _texto(ajuste, "competApur")
+            item.valor_ajuste_compet_ibs = _numero(ajuste, "vIBS")
+            item.valor_ajuste_compet_cbs = _numero(ajuste, "vCBS")
+
+        estorno = _achar(ibscbs, "gEstornoCred")
+        if estorno is not None:
+            item.valor_estorno_credito_ibs = _numero(estorno, "vIBSEstCred")
+            item.valor_estorno_credito_cbs = _numero(estorno, "vCBSEstCred")
 
 
 # cStat do protocolo de autorização.  Só os desfechos que mudam a escrituração.

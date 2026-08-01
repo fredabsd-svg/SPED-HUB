@@ -28,6 +28,7 @@ from __future__ import annotations
 import pytest
 
 from src.documentos.adaptadores import AdaptadorNFe
+from src.escrituracoes.reforma import NAO_CONSUMIDOS
 from tests.fixtures_nfe import nfe_xml
 
 CABECALHO = """<?xml version="1.0" encoding="UTF-8"?>
@@ -299,6 +300,163 @@ class TestMonofasicoDaVersao150:
 
         assert item.valor_ibs_mono != 10.00
         assert item.valor_ibs_mono == 12.00
+
+
+class TestOTotalDoMonofasicoJaContemARetencao:
+    """A regra UB105a-10: `vTotIBSMonoItem = vIBSMono + vIBSMonoReten - vIBSMonoDif`."""
+
+    def test_o_total_bate_com_a_formula_da_nt(self):
+        """10,00 de padrão + 2,00 de retenção = 12,00 de total."""
+        item = _item(MONO_AD_REM)
+
+        assert item.valor_ibs_mono == item.valor_ibs_mono_reten + 10.00
+
+    def test_a_retencao_nao_e_medida_a_parte(self):
+        """Somá-la à lista contaria a mesma exposição duas vezes.
+
+        Quem lê uma lista de "valores que a apuração não consumiu" soma o que
+        vê; com a retenção listada junto do total, o item de 12,00 apareceria
+        como 14,00.
+        """
+        assert "valor_ibs_mono_reten" not in NAO_CONSUMIDOS
+        assert "valor_cbs_mono_reten" not in NAO_CONSUMIDOS
+
+    def test_o_retido_anteriormente_continua_medido(self):
+        """A fórmula não o inclui — é a parcela que o total deixa de fora."""
+        assert "valor_ibs_mono_retido" in NAO_CONSUMIDOS
+        assert "valor_cbs_mono_retido" in NAO_CONSUMIDOS
+
+    def test_a_retencao_segue_gravada_mesmo_sem_ser_medida(self):
+        """Não medir não é não guardar: é dela que o total é feito."""
+        item = _item(MONO_AD_REM)
+
+        assert item.valor_ibs_mono_reten == 2.00
+
+
+class TestTransferenciaAjusteEEstorno:
+    """`gTransfCred`, `gAjusteCompet` e `gEstornoCred`."""
+
+    def test_transferencia_de_credito(self):
+        """É ALTERNATIVA a `gIBSCBS`: o item não traz grupo de tributo."""
+        item = _item("""
+          <gTransfCred><vIBS>120.00</vIBS><vCBS>340.00</vCBS></gTransfCred>""")
+
+        assert item.valor_transf_credito_ibs == 120.00
+        assert item.valor_transf_credito_cbs == 340.00
+        assert item.valor_ibs_uf == 0.0, "não há gIBSCBS nesse item"
+
+    def test_ajuste_de_competencia_leva_a_competencia(self):
+        """Sem `competApur` o valor não tem a que apuração pertencer."""
+        item = _item("""
+          <gAjusteCompet><competApur>2026-05</competApur>
+            <vIBS>10.00</vIBS><vCBS>90.00</vCBS></gAjusteCompet>""")
+
+        assert item.competencia_ajuste == "2026-05"
+        assert item.valor_ajuste_compet_ibs == 10.00
+        assert item.valor_ajuste_compet_cbs == 90.00
+
+    def test_estorno_de_credito(self):
+        item = _item("""
+          <gEstornoCred><vIBSEstCred>5.00</vIBSEstCred>
+            <vCBSEstCred>45.00</vCBSEstCred></gEstornoCred>""")
+
+        assert item.valor_estorno_credito_ibs == 5.00
+        assert item.valor_estorno_credito_cbs == 45.00
+
+    def test_o_estorno_convive_com_o_grupo_de_tributo(self):
+        """`gEstornoCred` é filho opcional de `IBSCBS`, fora da escolha —
+        diferente da transferência, ele acompanha um item tributado."""
+        item = _item("""
+          <gIBSCBS><vBC>1000.00</vBC>
+            <gIBSUF><pIBSUF>0.1000</pIBSUF><vIBSUF>1.00</vIBSUF></gIBSUF>
+            <gIBSMun><pIBSMun>0.0300</pIBSMun><vIBSMun>0.30</vIBSMun></gIBSMun>
+            <gCBS><pCBS>0.9000</pCBS><vCBS>9.00</vCBS></gCBS>
+          </gIBSCBS>
+          <gEstornoCred><vIBSEstCred>0.50</vIBSEstCred>
+            <vCBSEstCred>4.50</vCBSEstCred></gEstornoCred>""")
+
+        assert item.valor_ibs_uf == 1.00
+        assert item.valor_estorno_credito_ibs == 0.50
+
+    def test_nota_comum_nao_tem_nenhum_dos_tres(self):
+        item = AdaptadorNFe().normalizar(nfe_xml()).itens[0]
+
+        assert item.valor_transf_credito_ibs == 0.0
+        assert item.competencia_ajuste is None
+        assert item.valor_estorno_credito_cbs == 0.0
+
+    def test_os_tres_sao_medidos_pela_apuracao(self):
+        for campo in (
+            "valor_transf_credito_ibs",
+            "valor_ajuste_compet_cbs",
+            "valor_estorno_credito_ibs",
+        ):
+            assert campo in NAO_CONSUMIDOS
+
+
+class TestDiferencaNaMisturaDeBiocombustivel:
+    """`gpBioDiferenca`, dentro da variante do monofásico."""
+
+    BIO = """
+      <gIBSCBSMono>
+        <gIBSMonoAdRem>
+          <gMonoPadrao><qBCMono>100.0000</qBCMono><adRemIBS>0.1000</adRemIBS>
+            <vIBSMono>10.00</vIBSMono></gMonoPadrao>
+          <gpBioDiferenca><qBCBioComb>7.0000</qBCBioComb>
+            <vIBSDiferenca>0.70</vIBSDiferenca></gpBioDiferenca>
+        </gIBSMonoAdRem>
+        <gCBSMonoAdRem>
+          <gMonoPadrao><qBCMono>100.0000</qBCMono><adRemCBS>0.9000</adRemCBS>
+            <vCBSMono>90.00</vCBSMono></gMonoPadrao>
+          <gpBioDiferenca><qBCBioComb>7.0000</qBCBioComb>
+            <vCBSDiferenca>6.30</vCBSDiferenca></gpBioDiferenca>
+        </gCBSMonoAdRem>
+        <vTotIBSMonoItem>10.00</vTotIBSMonoItem>
+        <vTotCBSMonoItem>90.00</vTotCBSMonoItem>
+      </gIBSCBSMono>"""
+
+    def test_a_diferenca_de_cada_tributo_e_lida(self):
+        item = _item(self.BIO)
+
+        assert item.valor_ibs_bio_diferenca == 0.70
+        assert item.valor_cbs_bio_diferenca == 6.30
+        assert item.quantidade_bio_diferenca == 7.0
+
+    def test_o_sinal_fica_no_codigo_e_nao_no_numero(self):
+        """620004 é a recolher e 620005 é a ressarcir, no mesmo campo.
+
+        Guardar negativo para um dos casos exigiria interpretar a tabela
+        `cClassTrib`, que o sistema não embute.
+        """
+        item = _item(self.BIO)
+
+        assert item.valor_ibs_bio_diferenca > 0
+
+    def test_monofasico_sem_diferenca_fica_zerado(self):
+        item = _item(MONO_AD_REM)
+
+        assert item.valor_ibs_bio_diferenca == 0.0
+        assert item.quantidade_bio_diferenca == 0.0
+
+
+class TestBaseDoCreditoPresumido:
+    def test_vbccredpres_e_lido(self):
+        item = _item("""
+          <gCredPresOper><vBCCredPres>800.00</vBCCredPres><cCredPres>01</cCredPres>
+            <gIBSCredPres><pCredPres>1.0000</pCredPres><vCredPres>8.00</vCredPres>
+              <vCredPresCondSus>0.00</vCredPresCondSus></gIBSCredPres>
+          </gCredPresOper>""")
+
+        assert item.base_credito_presumido == 800.00
+
+    def test_a_base_nao_e_o_valor_do_credito(self):
+        item = _item("""
+          <gCredPresOper><vBCCredPres>800.00</vBCCredPres><cCredPres>01</cCredPres>
+            <gIBSCredPres><pCredPres>1.0000</pCredPres><vCredPres>8.00</vCredPres>
+              <vCredPresCondSus>0.00</vCredPresCondSus></gIBSCredPres>
+          </gCredPresOper>""")
+
+        assert item.base_credito_presumido != item.valor_credito_presumido_ibs
 
 
 class TestMunicipioDoFatoGeradorDoIBS:

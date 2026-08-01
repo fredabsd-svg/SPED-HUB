@@ -75,12 +75,26 @@ NAO_CONSUMIDOS = {
     "valor_credito_presumido_ibs_susp": "crédito presumido do IBS suspenso",
     "valor_credito_presumido_cbs": "crédito presumido da CBS",
     "valor_credito_presumido_cbs_susp": "crédito presumido da CBS suspenso",
+    # O monofásico entra pelo TOTAL DO ITEM, e só por ele.  A regra UB105a-10
+    # da NT dá a conta: `vTotIBSMonoItem = vIBSMono + vIBSMonoReten -
+    # vIBSMonoDif`, ou seja, o sujeito à retenção já está dentro.  Medi-lo à
+    # parte faria a lista somar 14,00 onde a exposição é 12,00 — e quem lê uma
+    # lista de valores não consumidos soma o que vê.
+    #
+    # O retido ANTERIORMENTE fica, porque a fórmula não o inclui: é a única
+    # parcela do monofásico que o total do item realmente deixa de fora.
     "valor_ibs_mono": "IBS monofásico",
     "valor_cbs_mono": "CBS monofásica",
-    "valor_ibs_mono_reten": "IBS monofásico sujeito à retenção",
-    "valor_cbs_mono_reten": "CBS monofásica sujeita à retenção",
     "valor_ibs_mono_retido": "IBS monofásico retido anteriormente",
     "valor_cbs_mono_retido": "CBS monofásica retida anteriormente",
+    "valor_transf_credito_ibs": "transferência de crédito de IBS",
+    "valor_transf_credito_cbs": "transferência de crédito de CBS",
+    "valor_ajuste_compet_ibs": "ajuste de competência de IBS",
+    "valor_ajuste_compet_cbs": "ajuste de competência de CBS",
+    "valor_estorno_credito_ibs": "estorno de crédito de IBS",
+    "valor_estorno_credito_cbs": "estorno de crédito de CBS",
+    "valor_ibs_bio_diferenca": "diferença de mistura de biocombustível (IBS)",
+    "valor_cbs_bio_diferenca": "diferença de mistura de biocombustível (CBS)",
 }
 
 # O CST que dispensa tratamento específico.  É o único código da tabela do

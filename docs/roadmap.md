@@ -63,7 +63,6 @@ O que falta:
 | Tela de cadastro fiscal da empresa | O cadastro é preenchido por `sped-hub fiscal cadastro`, que valida contra as tabelas oficiais; falta a tela | `src.routes.empresas:cadastro_fiscal` |
 | Registro 0035 (identificação da SCP) na EFD-Contribuições | Exigido quando `IND_NAT_PJ` é 03, 04 ou 05; o gerador avisa e não escreve | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.registro_0035` |
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
-| Grupos `gTransfCred`, `gAjusteCompet`, `gEstornoCred` e `gpBioDiferenca` da NF-e | O leitor cobre os grupos de tributo, benefício, crédito presumido e monofásico da NT 2025.002 v1.50; estes quatro seguem sem leitura | `src.documentos.adaptadores:AdaptadorNFe.creditos_e_ajustes` |
 | Monofásico, diferimento, crédito presumido e split payment na Reforma | A apuração **mede e relata** esses valores, fora do total; o que falta é consumi-los, e para isso é preciso a tabela de CST do IBS/CBS estabilizada | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
 
 ## Dívida técnica conhecida
