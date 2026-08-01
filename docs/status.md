@@ -72,6 +72,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 57 | Os grupos da reforma lidos onde a NT 2025.002 v1.50 os põe | concluída | `tests/test_leitura_reforma_nt.py`, `tests/test_documentos_fiscais.py` | redução, diferimento e devolução existem **uma por destinação** (`gIBSUF`, `gIBSMun`, `gCBS`); o crédito presumido está em `gCredPresOper`, irmão de `gIBSCBS`; o monofásico foi reformulado em quatro variantes e fecha em `vTotIBSMonoItem`/`vTotCBSMonoItem`; `cMunFGIBS` é campo do `ide`, do documento. Procurados como filhos diretos de `gIBSCBS`, todos liam **zero** sem levantar erro — a fixture reproduzia o mesmo engano |
 
+| 58 | Os grupos que faltavam da NT, e a retenção que era contada duas vezes | concluída | `tests/test_leitura_reforma_nt.py`, `tests/test_apuracao_reforma.py` | transferência de crédito, ajuste de competência (com a competência, que pode ser retroativa), estorno, diferença de mistura de biocombustível e a base do crédito presumido passam a ser lidos e medidos. A regra UB105a-10 diz que `vTotIBSMonoItem` **já contém** o sujeito à retenção: medi-lo à parte fazia a lista somar 14,00 onde a exposição é 12,00 |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

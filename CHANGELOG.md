@@ -9,6 +9,17 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **Transferência de crédito, ajuste de competência e estorno passaram a ser
+  lidos.** São valores que a NF-e destaca e que o sistema descartava. O ajuste
+  de competência vem com o mês a que pertence, que pode ser retroativo — sem
+  ele o valor não tem destino. Junto com eles entraram a base do crédito
+  presumido e a diferença na mistura de biocombustível.
+- **A retenção do monofásico deixou de ser contada duas vezes.** A própria
+  Nota Técnica diz que o total do item já inclui o imposto sujeito à retenção
+  (`total = padrão + retenção − diferimento`); ele aparecia também na lista de
+  valores que a apuração não consome, e quem lê essa lista soma o que vê — um
+  item de R$ 12,00 aparecia como R$ 14,00. O retido *anteriormente* continua
+  na lista, porque esse o total de fato deixa de fora.
 - **Os grupos da Reforma passaram a ser lidos de onde a Nota Técnica os põe.**
   Três dias antes de a NF-e começar a rejeitar documentos sem IBS e CBS
   (03/08/2026), a NT 2025.002 v1.50 foi baixada do portal da SVRS e conferida

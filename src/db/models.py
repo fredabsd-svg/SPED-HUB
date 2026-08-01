@@ -942,6 +942,7 @@ class ItemDocumentoFiscal(Base):
     # Crédito presumido da operação (`gCredPresOper`, UB120).  O código é um
     # só; o percentual e o valor vêm separados para IBS (UB123) e CBS (UB127).
     codigo_credito_presumido: Mapped[str | None] = mapped_column(String(10))
+    base_credito_presumido: Mapped[float] = mapped_column(default=0.0)
     percentual_credito_presumido_ibs: Mapped[float] = mapped_column(default=0.0)
     valor_credito_presumido_ibs: Mapped[float] = mapped_column(default=0.0)
     valor_credito_presumido_ibs_susp: Mapped[float] = mapped_column(default=0.0)
@@ -969,6 +970,26 @@ class ItemDocumentoFiscal(Base):
     valor_cbs_mono_reten: Mapped[float] = mapped_column(default=0.0)
     valor_ibs_mono_retido: Mapped[float] = mapped_column(default=0.0)
     valor_cbs_mono_retido: Mapped[float] = mapped_column(default=0.0)
+    # Mistura de etanol anidro fora do percentual obrigatório (art. 179, II da
+    # LC 214/2025).  O mesmo campo é valor a recolher ou a ressarcir conforme o
+    # `cClassTrib` — o sinal está no código, e o sistema não o interpreta.
+    quantidade_bio_diferenca: Mapped[float] = mapped_column(default=0.0)
+    valor_ibs_bio_diferenca: Mapped[float] = mapped_column(default=0.0)
+    valor_cbs_bio_diferenca: Mapped[float] = mapped_column(default=0.0)
+
+    # Transferência de crédito, ajuste de competência e estorno.  Os dois
+    # primeiros são ALTERNATIVAS a `gIBSCBS` na mesma escolha do schema: um
+    # item que transfere crédito não traz grupo de tributo nenhum, e por isso
+    # os valores não podem ser lidos como complemento dos outros.
+    valor_transf_credito_ibs: Mapped[float] = mapped_column(default=0.0)
+    valor_transf_credito_cbs: Mapped[float] = mapped_column(default=0.0)
+    # `competApur` (AAAA-MM) pode ser retroativo: é o que diz a que apuração o
+    # ajuste pertence.  Sem ele o valor não tem destino.
+    competencia_ajuste: Mapped[str | None] = mapped_column(String(7))
+    valor_ajuste_compet_ibs: Mapped[float] = mapped_column(default=0.0)
+    valor_ajuste_compet_cbs: Mapped[float] = mapped_column(default=0.0)
+    valor_estorno_credito_ibs: Mapped[float] = mapped_column(default=0.0)
+    valor_estorno_credito_cbs: Mapped[float] = mapped_column(default=0.0)
 
     # Imposto Seletivo.  Tem alíquota ad valorem E específica (por unidade
     # tributável) — bebidas e cigarros usam a segunda —, por isso a unidade e

@@ -476,8 +476,10 @@ class TestOQueNaoEConsumidoEMedido:
             ("valor_credito_presumido_ibs", "crédito presumido do IBS"),
             ("valor_devolucao_ibs_mun", "devolução do IBS municipal"),
             ("valor_ibs_mono", "IBS monofásico"),
-            ("valor_cbs_mono_reten", "CBS monofásica sujeita à retenção"),
             ("valor_cbs_mono_retido", "CBS monofásica retida anteriormente"),
+            ("valor_transf_credito_ibs", "transferência de crédito de IBS"),
+            ("valor_ajuste_compet_cbs", "ajuste de competência de CBS"),
+            ("valor_estorno_credito_ibs", "estorno de crédito de IBS"),
             # As três destinações do diferimento têm rótulos distintos: um
             # rótulo comum esconderia que o benefício é só de uma delas.
             ("valor_diferido_ibs_uf", "diferimento do IBS estadual"),
