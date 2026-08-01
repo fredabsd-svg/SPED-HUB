@@ -60,11 +60,7 @@ from src.documentos.ajustes import desserializar
 from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.classificacao import criar_regra
 from src.escrituracoes import (
-    ATIVIDADES_CONTRIBUICOES,
-    ATIVIDADES_ICMS,
-    NATUREZAS_PJ,
-    PERFIS,
-    REGIMES,
+    CADASTRO_FISCAL,
     TIPOS,
     AjusteInvalido,
     ApuracaoIBSCBS,
@@ -75,10 +71,13 @@ from src.escrituracoes import (
     ajustes_do_periodo,
     arquivar,
     avisos_de,
+    campos,
     comparar,
     criar_ajuste,
     espelho,
     marcar_transmitida,
+    pendencias,
+    preencher,
     transmitidas_do_periodo,
     utilizacao,
 )
@@ -98,31 +97,6 @@ GERADORES = {
 EXTENSOES = {".xml"}
 
 DIVERGENTE = 2
-
-# O cadastro fiscal: os campos que decidem o enquadramento declarado no
-# arquivo, e que o validador do Fisco **não** confere — ele não tem como saber
-# qual é o certo.  Errar aqui produz arquivo aceito e intimação meses depois.
-#
-# A ordem é a de quem preenche: primeiro o que a EFD ICMS/IPI exige, depois o
-# que a EFD-Contribuições exige.  Cada linha traz a tabela de valores, para
-# que a recusa possa mostrá-la em vez de mandar procurar no Guia Prático.
-CADASTRO_FISCAL = {
-    "ind_perfil": ("IND_PERFIL do 0000 da EFD ICMS/IPI", PERFIS),
-    "ind_ativ": ("IND_ATIV do 0000 da EFD ICMS/IPI", ATIVIDADES_ICMS),
-    "ind_ativ_contribuicoes": (
-        "IND_ATIV do 0000 da EFD-Contribuições — tabela DIFERENTE da de cima",
-        ATIVIDADES_CONTRIBUICOES,
-    ),
-    "cod_inc_trib": ("COD_INC_TRIB do 0110 — decide se há crédito", REGIMES),
-    "ind_nat_pj": ("IND_NAT_PJ do 0000 — natureza jurídica", NATUREZAS_PJ),
-}
-
-# O que cada obrigação exige antes de gerar.  `ind_nat_pj` fica fora: tem
-# default, e por isso não impede a geração.
-EXIGIDOS = {
-    "efd_icms": ("ind_perfil", "ind_ativ"),
-    "efd_contribuicoes": ("cod_inc_trib", "ind_ativ_contribuicoes"),
-}
 
 
 def _empresa(sessao: Session, empresa_id: int) -> Empresa:
@@ -222,34 +196,17 @@ def _cadastro(sessao: Session, args) -> int:
     informados = {
         campo: getattr(args, campo) for campo in CADASTRO_FISCAL if getattr(args, campo, None)
     }
-
-    # Confere TUDO antes de atribuir QUALQUER coisa.  Hoje a sessão seria
-    # descartada de qualquer jeito ao levantar, mas depender disso é depender
-    # de quem chama não commitar — e este módulo não é o único que pode chamar.
-    for campo, valor in informados.items():
-        rotulo, tabela = CADASTRO_FISCAL[campo]
-        if valor not in tabela:
-            opcoes = "; ".join(f"{c} = {d}" for c, d in sorted(tabela.items()))
-            raise ValueError(
-                f"{valor!r} não é um valor válido de {campo} ({rotulo}). "
-                f"Os válidos são: {opcoes}"
-            )
-
-    for campo, valor in informados.items():
-        setattr(empresa, campo, valor)
-    if informados:
+    mudados = preencher(empresa, informados)
+    if mudados:
         sessao.commit()
 
     print(f"\nCadastro fiscal — {empresa.nome} ({empresa.cnpj})")
-    for campo, (_, tabela) in CADASTRO_FISCAL.items():
-        valor = getattr(empresa, campo)
-        descricao = tabela.get(valor, "—" if valor is None else "VALOR FORA DA TABELA")
-        marca = "*" if campo in informados else " "
-        print(f" {marca} {campo:24} {(valor or '—'):4} {descricao}")
+    for campo in campos(empresa):
+        marca = "*" if campo.nome in mudados else " "
+        print(f" {marca} {campo.nome:24} {(campo.valor or '—'):4} {campo.descricao}")
 
     print()
-    for tipo, campos in EXIGIDOS.items():
-        faltando = [c for c in campos if getattr(empresa, c) not in CADASTRO_FISCAL[c][1]]
+    for tipo, faltando in pendencias(empresa).items():
         estado = f"FALTA {', '.join(faltando)}" if faltando else "pronta para gerar"
         print(f"  {TIPOS[tipo]:20} {estado}")
     print()

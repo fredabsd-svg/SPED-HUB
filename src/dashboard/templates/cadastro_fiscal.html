@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Cadastro fiscal — SPED-HUB{% endblock %}
+
+{% block content %}
+<div style="max-width:860px;margin:0 auto;">
+    <h2 style="font-size:1.25rem;margin-bottom:8px;">🏛️ Cadastro fiscal da empresa</h2>
+    <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
+        Os cinco códigos que declaram o enquadramento da empresa no arquivo. O validador
+        do Fisco <strong>não</strong> confere nenhum deles — não tem como saber qual é o
+        certo —, então o arquivo é aceito e o problema aparece depois. Sem eles, a EFD não
+        é gerada.
+    </p>
+
+    <form method="get" action="/fiscal/cadastro" style="margin-bottom:24px;">
+        <label for="empresa" style="font-size:.875rem;font-weight:600;">Empresa</label>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+            <select name="empresa" id="empresa" class="form-select" style="flex:1;">
+                <option value="">— escolha —</option>
+                {% for e in empresas %}
+                <option value="{{ e.id }}" {% if empresa and e.id == empresa.id %}selected{% endif %}>
+                    {{ e.nome }} ({{ e.cnpj }})
+                </option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-primary">Abrir</button>
+        </div>
+        {% if not empresas %}
+        <p style="color:var(--gray-500);font-size:.875rem;margin-top:8px;">
+            Nenhuma empresa no seu escritório.
+        </p>
+        {% endif %}
+    </form>
+
+    {% if erro %}
+    <div role="alert" style="background:#FEF2F2;border:1px solid var(--danger,#EF4444);
+        border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:.875rem;">
+        <strong>Não gravado.</strong> {{ erro }}
+    </div>
+    {% endif %}
+
+    {% if salvo %}
+    <div role="status" style="background:#F0FDF4;border:1px solid var(--success,#10B981);
+        border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:.875rem;">
+        Cadastro gravado.
+    </div>
+    {% endif %}
+
+    {% if empresa %}
+    <div class="card" style="padding:20px;margin-bottom:20px;">
+        <h3 style="font-size:1rem;margin-bottom:4px;">{{ empresa.nome }}</h3>
+        <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:20px;">
+            CNPJ {{ empresa.cnpj }}{% if empresa.uf %} — {{ empresa.uf }}{% endif %}
+        </p>
+
+        <form method="post" action="/fiscal/cadastro">
+            <input type="hidden" name="empresa" value="{{ empresa.id }}">
+            {% for campo in campos %}
+            <div style="margin-bottom:18px;">
+                <label for="c-{{ campo.nome }}" style="font-size:.875rem;font-weight:600;">
+                    {{ campo.nome }}
+                </label>
+                <p style="color:var(--gray-500);font-size:.75rem;margin:2px 0 6px;">
+                    {{ campo.rotulo }}
+                </p>
+                <select name="{{ campo.nome }}" id="c-{{ campo.nome }}" class="form-select">
+                    {# Vazio é "não mexer", nunca "apagar": quem vem corrigir um campo
+                       não deve zerar os outros quatro por tabela. #}
+                    <option value="">— não alterar —</option>
+                    {% for codigo, descricao in campo.opcoes %}
+                    <option value="{{ codigo }}" {% if campo.valor == codigo %}selected{% endif %}>
+                        {{ codigo }} — {{ descricao }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if campo.fora_da_tabela %}
+                <p style="color:var(--danger,#EF4444);font-size:.75rem;margin-top:6px;">
+                    Gravado como <strong>{{ campo.valor }}</strong>, que não está na tabela
+                    oficial. Escolha o valor certo para corrigir.
+                </p>
+                {% elif campo.valor %}
+                <p style="color:var(--gray-500);font-size:.75rem;margin-top:6px;">
+                    Hoje: {{ campo.valor }} — {{ campo.descricao }}
+                </p>
+                {% else %}
+                <p style="color:var(--gray-500);font-size:.75rem;margin-top:6px;">
+                    Ainda não preenchido.
+                </p>
+                {% endif %}
+            </div>
+            {% endfor %}
+            <button type="submit" class="btn btn-primary">Gravar</button>
+        </form>
+    </div>
+
+    <div class="card" style="padding:20px;">
+        <h3 style="font-size:1rem;margin-bottom:12px;">O que falta para gerar</h3>
+        {# Obrigação sem pendência aparece também: quem lê precisa VER que a EFD
+           ICMS está pronta, não deduzir isso de ela não estar na lista. #}
+        {% for tipo, faltando in pendencias.items() %}
+        <p style="font-size:.875rem;margin-bottom:8px;">
+            <strong>{{ nomes_das_obrigacoes.get(tipo, tipo) }}</strong> —
+            {% if faltando %}
+            <span style="color:var(--danger,#EF4444);">falta {{ faltando|join(', ') }}</span>
+            {% else %}
+            <span style="color:var(--success,#10B981);">pronta para gerar</span>
+            {% endif %}
+        </p>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -9,6 +9,16 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **O cadastro fiscal da empresa ganhou tela.** Os cinco códigos que declaram
+  o enquadramento no arquivo — perfil, as duas atividades (que têm tabelas
+  diferentes em cada obrigação), regime de apuração e natureza jurídica — só
+  podiam ser preenchidos pela linha de comando, o que deixava a geração de EFD
+  fora do alcance de quem escritura. Agora estão em **Cadastro fiscal**, com a
+  tabela de valores em cada campo, o que falta para cada obrigação e o aviso
+  de código gravado fora da tabela. A validação é a mesma do comando: uma
+  segunda cópia da tabela na tela divergiria da primeira no primeiro ato
+  normativo. Campo deixado em branco é "não alterar", nunca "apagar", e um
+  valor recusado não grava nem os campos válidos que vieram junto.
 - **Transferência de crédito, ajuste de competência e estorno passaram a ser
   lidos.** São valores que a NF-e destaca e que o sistema descartava. O ajuste
   de competência vem com o mês a que pertence, que pode ser retroativo — sem
