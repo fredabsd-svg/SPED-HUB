@@ -73,6 +73,7 @@ from src.db.models import (
     AjusteFiscal,
     DocumentoFiscal,
     Empresa,
+    Escrituracao,
     criar_engine,
     get_session,
     init_db,
@@ -102,8 +103,16 @@ from src.escrituracoes import (
     CADASTRO_FISCAL,
     TIPOS,
     CadastroInvalido,
+    CampoObrigatorioAusente,
+    GeradorEFDContribuicoes,
+    GeradorEFDICMS,
+    TipoSemLeiaute,
+    TransmissaoInvalida,
+    arquivar,
     campos,
     escrituracoes_do_documento,
+    espelho,
+    marcar_transmitida,
     pendencias,
     preencher,
 )
@@ -2737,6 +2746,327 @@ async def _ler_uploads(arquivos: list[UploadFile]) -> list[tuple[str, bytes]]:
             raise HTTPException(status_code=400, detail=f"{nome} está vazio.")
         lote.append((nome, conteudo))
     return lote
+
+
+# ── Rotas: gerar, conferir e marcar a transmissão ──────────────────────────
+#
+# **Gerar sempre arquiva**, e a tela diz isso antes de o botão existir. Não há
+# prévia que grave em disco: a prévia é o espelho, que é prosa e não arquivo
+# transmissível — ninguém o entrega por engano. Um arquivo que sai do sistema
+# sem deixar registro é exatamente o buraco que a terceira camada fecha.
+
+GERADORES_WEB = {
+    "efd_icms": GeradorEFDICMS,
+    "efd_contribuicoes": GeradorEFDContribuicoes,
+}
+
+
+def _escrituracoes_do_periodo(session, empresa, inicio, fim, tipo):
+    consulta = (
+        select(Escrituracao)
+        .where(
+            Escrituracao.empresa_id == empresa.id,
+            Escrituracao.tipo == tipo,
+            Escrituracao.data_inicio == inicio,
+            Escrituracao.data_fim == fim,
+        )
+        .order_by(Escrituracao.gerada_em.desc(), Escrituracao.id.desc())
+    )
+    return list(session.execute(consulta).scalars().all())
+
+
+def _pagina_gerar(session, usuario, request, **contexto):
+    empresas = (
+        session.execute(aplicar_escopo_empresas(select(Empresa), usuario).order_by(Empresa.nome))
+        .scalars()
+        .all()
+    )
+    dados = {
+        "request": request,
+        "usuario": usuario,
+        "current_page": "gerar",
+        "empresas": empresas,
+        "empresa": None,
+        "espelho": None,
+        "escrituracoes": [],
+        "erro": None,
+        "gerada": None,
+        "transmitida": None,
+        "de": "",
+        "ate": "",
+        "tipo": "efd_icms",
+        "tipos": TIPOS,
+        "fmt_moeda": fmt_moeda,
+        "fmt_data": fmt_data,
+    }
+    dados.update(contexto)
+    return HTMLResponse(
+        jinja_env.get_template("gerar.html").render(dados),
+        status_code=400 if dados["erro"] else 200,
+    )
+
+
+def _periodo_pedido(de: str, ate: str):
+    inicio, fim = _data_opcional(de), _data_opcional(ate)
+    if inicio is None or fim is None:
+        return None, "Informe o período inteiro — começo e fim."
+    if fim < inicio:
+        return None, "O fim do período é anterior ao começo."
+    return (inicio, fim), None
+
+
+@app.get("/fiscal/gerar", response_class=HTMLResponse)
+async def gerar_page(
+    request: Request,
+    empresa: int | None = Query(default=None),
+    de: str | None = Query(default=None),
+    ate: str | None = Query(default=None),
+    tipo: str = Query(default="efd_icms"),
+):
+    """O espelho do que sairia — **sem gerar e sem arquivar**.
+
+    O espelho é o arquivo em forma de leitura, com as conferências que o
+    validador do Fisco faria. Existe para que a resposta a "está certo?" venha
+    antes de o arquivo existir, e não depois de ele ter sido entregue.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    dados = {"de": de or "", "ate": ate or "", "tipo": tipo}
+    session = get_session(_get_engine())
+    try:
+        if tipo not in GERADORES_WEB:
+            return _pagina_gerar(
+                session, usuario, request, erro=f"Obrigação {tipo!r} desconhecida."
+            )
+        alvo = _empresa_do_usuario(session, usuario, empresa) if empresa else None
+        if empresa and alvo is None:
+            return _pagina_gerar(
+                session, usuario, request, erro=f"Empresa #{empresa} não encontrada.", **dados
+            )
+        if alvo is None or not (de and ate):
+            return _pagina_gerar(session, usuario, request, empresa=alvo, **dados)
+
+        periodo, problema = _periodo_pedido(de, ate)
+        if problema:
+            return _pagina_gerar(session, usuario, request, empresa=alvo, erro=problema, **dados)
+        inicio, fim = periodo
+
+        try:
+            resultado = GERADORES_WEB[tipo](
+                session, empresa=alvo, data_inicio=inicio, data_fim=fim
+            ).gerar()
+            visao = espelho(resultado, tipo=tipo)
+        except (CampoObrigatorioAusente, TipoSemLeiaute, ValueError) as erro:
+            return _pagina_gerar(
+                session,
+                usuario,
+                request,
+                empresa=alvo,
+                erro=str(erro),
+                escrituracoes=_escrituracoes_do_periodo(session, alvo, inicio, fim, tipo),
+                **dados,
+            )
+
+        return _pagina_gerar(
+            session,
+            usuario,
+            request,
+            empresa=alvo,
+            espelho=visao,
+            escrituracoes=_escrituracoes_do_periodo(session, alvo, inicio, fim, tipo),
+            **dados,
+        )
+    finally:
+        session.close()
+
+
+@app.post("/fiscal/gerar", response_class=HTMLResponse)
+async def gerar_arquivo(request: Request):
+    """Gera a EFD **e arquiva**. Não há como fazer uma sem a outra."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    formulario = await request.form()
+    dados = {
+        "de": (formulario.get("de") or "").strip(),
+        "ate": (formulario.get("ate") or "").strip(),
+        "tipo": (formulario.get("tipo") or "").strip(),
+    }
+
+    session = get_session(_get_engine())
+    try:
+        if dados["tipo"] not in GERADORES_WEB:
+            return _pagina_gerar(
+                session, usuario, request, erro=f"Obrigação {dados['tipo']!r} desconhecida."
+            )
+        try:
+            empresa_id = int(formulario.get("empresa") or "")
+        except ValueError:
+            return _pagina_gerar(session, usuario, request, erro="Empresa não informada.", **dados)
+        alvo = _empresa_do_usuario(session, usuario, empresa_id)
+        if alvo is None:
+            return _pagina_gerar(
+                session, usuario, request, erro=f"Empresa #{empresa_id} não encontrada.", **dados
+            )
+
+        periodo, problema = _periodo_pedido(dados["de"], dados["ate"])
+        if problema:
+            return _pagina_gerar(session, usuario, request, empresa=alvo, erro=problema, **dados)
+        inicio, fim = periodo
+
+        try:
+            resultado = GERADORES_WEB[dados["tipo"]](
+                session, empresa=alvo, data_inicio=inicio, data_fim=fim
+            ).gerar()
+        except (CampoObrigatorioAusente, ValueError) as erro:
+            return _pagina_gerar(session, usuario, request, empresa=alvo, erro=str(erro), **dados)
+
+        escrituracao = arquivar(
+            session,
+            resultado=resultado,
+            empresa=alvo,
+            tipo=dados["tipo"],
+            data_inicio=inicio,
+            data_fim=fim,
+            usuario_id=usuario.id,
+        )
+        session.commit()
+        return _pagina_gerar(
+            session,
+            usuario,
+            request,
+            empresa=alvo,
+            gerada=escrituracao,
+            escrituracoes=_escrituracoes_do_periodo(session, alvo, inicio, fim, dados["tipo"]),
+            **dados,
+        )
+    finally:
+        session.close()
+
+
+def _escrituracao_do_usuario(session, usuario, escrituracao_id: int) -> Escrituracao | None:
+    consulta = aplicar_escopo_empresas(
+        select(Escrituracao)
+        .join(Empresa, Escrituracao.empresa_id == Empresa.id)
+        .where(Escrituracao.id == escrituracao_id),
+        usuario,
+    )
+    return session.execute(consulta).scalar_one_or_none()
+
+
+@app.get("/fiscal/escrituracoes/{escrituracao_id}/arquivo")
+async def escrituracao_arquivo(request: Request, escrituracao_id: int):
+    """O arquivo que saiu — o guardado, não um recém-gerado.
+
+    Gerar de novo produziria um arquivo parecido e possivelmente diferente: a
+    camada efetiva pode ter mudado desde então. A terceira camada existe para
+    responder "o que você entregou", e responder isso com uma reconstrução
+    seria responder outra pergunta.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    session = get_session(_get_engine())
+    try:
+        escrituracao = _escrituracao_do_usuario(session, usuario, escrituracao_id)
+        if escrituracao is None:
+            return HTMLResponse("Escrituração não encontrada", status_code=404)
+        nome = f"{escrituracao.tipo}_{escrituracao.data_inicio:%Y%m}_{escrituracao.id}.txt"
+        # O conteúdo já vem com CRLF do gerador, e vai como bytes justamente
+        # para ninguém no caminho "consertar" a quebra de linha — o validador
+        # recusa o arquivo inteiro se ela mudar.
+        return Response(
+            content=escrituracao.conteudo.encode("utf-8"),
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+        )
+    finally:
+        session.close()
+
+
+@app.post("/fiscal/transmitida", response_class=HTMLResponse)
+async def marcar_como_transmitida(request: Request):
+    """Registra qual geração foi a entregue.
+
+    **Não se desfaz.** Marcar a errada e "corrigir depois" apagaria o registro
+    de que a primeira foi dada como entregue, que é justamente o que se quer
+    provar. Por isso a tela pede o recibo e avisa antes.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    formulario = await request.form()
+    session = get_session(_get_engine())
+    try:
+        try:
+            escrituracao_id = int(formulario.get("escrituracao") or "")
+        except ValueError:
+            return _pagina_gerar(session, usuario, request, erro="Escrituração não informada.")
+
+        escrituracao = _escrituracao_do_usuario(session, usuario, escrituracao_id)
+        if escrituracao is None:
+            return _pagina_gerar(
+                session,
+                usuario,
+                request,
+                erro=f"Escrituração #{escrituracao_id} não encontrada.",
+            )
+
+        dados = {
+            "de": escrituracao.data_inicio.isoformat(),
+            "ate": escrituracao.data_fim.isoformat(),
+            "tipo": escrituracao.tipo,
+        }
+        # A empresa vem por id: `Escrituracao` guarda a chave, não o objeto —
+        # e o escopo já foi conferido ao achar a escrituração.
+        empresa = session.get(Empresa, escrituracao.empresa_id)
+        try:
+            marcar_transmitida(
+                session,
+                escrituracao,
+                recibo=(formulario.get("recibo") or "").strip() or None,
+                usuario_id=usuario.id,
+                forcar=bool(formulario.get("forcar")),
+            )
+        except TransmissaoInvalida as erro:
+            return _pagina_gerar(
+                session,
+                usuario,
+                request,
+                empresa=empresa,
+                erro=str(erro),
+                escrituracoes=_escrituracoes_do_periodo(
+                    session,
+                    empresa,
+                    escrituracao.data_inicio,
+                    escrituracao.data_fim,
+                    escrituracao.tipo,
+                ),
+                **dados,
+            )
+        session.commit()
+        return _pagina_gerar(
+            session,
+            usuario,
+            request,
+            empresa=empresa,
+            transmitida=escrituracao,
+            escrituracoes=_escrituracoes_do_periodo(
+                session,
+                empresa,
+                escrituracao.data_inicio,
+                escrituracao.data_fim,
+                escrituracao.tipo,
+            ),
+            **dados,
+        )
+    finally:
+        session.close()
 
 
 # ── Rotas: Fase 16 — Monitoramento Operacional ─────────────────────────────

@@ -17,7 +17,7 @@ vem de `reports/`.
 | Grupo | Rotas |
 |---|---|
 | Autenticação | `/login`, `/register`, `POST /api/login`, `POST /api/register`, `/logout` |
-| Páginas | `/`, `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/corrigir`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
+| Páginas | `/`, `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
 | Upload | `POST /api/upload` (ECD, importa), `/api/upload-efd`, `/api/upload-ecf` (só resumo), `/api/upload-async` + `/api/jobs/*` |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
 | Exportação | `/api/export/pdf`, `/xlsx`, `/multi-formato` (ZIP), `/lote` |
@@ -52,6 +52,12 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   proteção até alguém acrescentar um caminho que esquece o `if`. Empresa de
   outro escritório responde igual a empresa inexistente — a mesma frase, para
   a tela não virar oráculo de quais ids existem no banco.
+- **O espelho não gera; gerar sempre arquiva.** Não existe prévia que escreva
+  arquivo: a prévia é o espelho, que é prosa e não arquivo transmissível —
+  ninguém o entrega por engano. E o download de uma escrituração serve o
+  conteúdo **guardado**, nunca um recém-gerado: gerar de novo produziria um
+  arquivo parecido e possivelmente diferente, porque a camada efetiva pode ter
+  mudado, e isso responderia outra pergunta.
 - **Na importação, o escritório vem do usuário logado — nunca do formulário.**
   É a única tela fiscal em que não existe "empresa escolhida": o documento traz
   a empresa dentro dele, pelo CNPJ. Nas outras, um id alheio é recusado porque

@@ -82,6 +82,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 62 | Tela de importar XML, e o lote que a política `ERRO` derrubava | concluída | `tests/test_tela_importar.py`, `tests/test_documentos_fiscais.py` | o escritório vem do **usuário logado**, nunca do formulário — aqui não haveria nada a recusar, o documento nasceria no acervo alheio. `importar_lote` passa a converter a exceção da política `ERRO` em rejeição: ela existe para a duplicata não entrar em silêncio, não para levar junto os arquivos seguintes. `importar` de um documento só segue levantando |
 
+| 63 | Tela de gerar, com o espelho antes e a marca de entrega depois | concluída | `tests/test_tela_gerar.py` | o espelho **não gera nem arquiva**; gerar **sempre arquiva**, e não há prévia que grave em disco. O arquivo baixado é o **guardado**, não um recém-gerado — a camada efetiva pode ter mudado, e "o que você entregou" é outra pergunta. Marcar a transmissão não se desfaz, e segunda original do mesmo período é recusada. Com isso o fluxo inteiro existe na tela |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é
