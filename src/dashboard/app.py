@@ -51,6 +51,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -66,7 +67,18 @@ from src.auth import (
 )
 from src.cache.redis_cache import RedisCacheService
 from src.dashboard.services import DashboardService
-from src.db.models import ECD, Empresa, criar_engine, get_session, init_db, obter_engine
+from src.db.models import (
+    ECD,
+    AjusteFiscal,
+    DocumentoFiscal,
+    Empresa,
+    criar_engine,
+    get_session,
+    init_db,
+    obter_engine,
+)
+from src.documentos import efetivo, historico
+from src.documentos.planilha import EDITAVEIS
 from src.ecd_importer import ECDImportError, ECDImportService
 from src.email_service import get_email_service
 from src.escrituracoes import (
@@ -74,6 +86,7 @@ from src.escrituracoes import (
     TIPOS,
     CadastroInvalido,
     campos,
+    escrituracoes_do_documento,
     pendencias,
     preencher,
 )
@@ -1898,6 +1911,243 @@ async def cadastro_fiscal_salvar(request: Request):
 
         session.commit()
         return _pagina_cadastro(session, usuario, request, empresa=alvo, salvo=bool(informados))
+    finally:
+        session.close()
+
+
+# ── Rotas: Central de Documentos ───────────────────────────────────────────
+
+
+def _documento_do_usuario(session, usuario, documento_id: int) -> DocumentoFiscal | None:
+    """O documento, **se** a empresa dele for do escritório do usuário.
+
+    Como no cadastro, o escopo entra na consulta e não numa conferência
+    posterior. Documento de outro escritório devolve `None` — igual a
+    inexistente, para não contar a quem tentou que ele existe.
+    """
+    consulta = aplicar_escopo_empresas(
+        select(DocumentoFiscal)
+        .join(Empresa, DocumentoFiscal.empresa_id == Empresa.id)
+        .options(selectinload(DocumentoFiscal.itens))
+        .where(DocumentoFiscal.id == documento_id),
+        usuario,
+    )
+    return session.execute(consulta).scalar_one_or_none()
+
+
+def _data_opcional(bruto: str | None):
+    """`AAAA-MM-DD` vindo do formulário, ou `None`.
+
+    Data ilegível vira `None` — o filtro simplesmente não se aplica. Recusar a
+    página inteira por causa de um campo de data meio digitado seria trocar um
+    filtro que não pegou por uma tela que não abre.
+    """
+    if not bruto:
+        return None
+    try:
+        return datetime.date.fromisoformat(bruto)
+    except ValueError:
+        return None
+
+
+@app.get("/fiscal/documentos", response_class=HTMLResponse)
+async def documentos_page(
+    request: Request,
+    empresa: int | None = Query(default=None),
+    de: str | None = Query(default=None),
+    ate: str | None = Query(default=None),
+):
+    """A Central de Documentos: o que foi importado, no recorte pedido."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    session = get_session(_get_engine())
+    try:
+        empresas = (
+            session.execute(
+                aplicar_escopo_empresas(select(Empresa), usuario).order_by(Empresa.nome)
+            )
+            .scalars()
+            .all()
+        )
+        alvo = _empresa_do_usuario(session, usuario, empresa) if empresa else None
+        documentos: list[DocumentoFiscal] = []
+        com_ajuste: set[int] = set()
+        if alvo is not None:
+            consulta = select(DocumentoFiscal).where(DocumentoFiscal.empresa_id == alvo.id)
+            inicio, fim = _data_opcional(de), _data_opcional(ate)
+            if inicio:
+                consulta = consulta.where(DocumentoFiscal.data_emissao >= inicio)
+            if fim:
+                consulta = consulta.where(DocumentoFiscal.data_emissao <= fim)
+            documentos = list(
+                session.execute(consulta.order_by(DocumentoFiscal.data_emissao, DocumentoFiscal.id))
+                .scalars()
+                .all()
+            )
+            # Quais foram corrigidos — numa consulta só, e não uma por linha:
+            # mil notas dariam mil consultas para pintar uma coluna.
+            if documentos:
+                com_ajuste = set(
+                    session.execute(
+                        select(AjusteFiscal.documento_id).where(
+                            AjusteFiscal.documento_id.in_([d.id for d in documentos])
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+
+        return HTMLResponse(
+            jinja_env.get_template("documentos.html").render(
+                {
+                    "request": request,
+                    "usuario": usuario,
+                    "current_page": "documentos",
+                    "empresas": empresas,
+                    "empresa": alvo,
+                    "empresa_pedida": empresa,
+                    "de": de or "",
+                    "ate": ate or "",
+                    "documentos": documentos,
+                    "com_ajuste": com_ajuste,
+                    "total": sum(d.valor_total for d in documentos),
+                    "fmt_moeda": fmt_moeda,
+                    "fmt_data": fmt_data,
+                }
+            )
+        )
+    finally:
+        session.close()
+
+
+@app.get("/fiscal/documentos/{documento_id}", response_class=HTMLResponse)
+async def documento_page(request: Request, documento_id: int):
+    """As três camadas de um documento, lado a lado.
+
+    É a tela que responde "por que este registro saiu assim?": o que chegou, o
+    que o sistema fez, e em que arquivo isso foi parar. Separá-las é o ponto
+    de toda a Central — mostrar só o valor final faria a tela desmentir o
+    modelo de dados.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    session = get_session(_get_engine())
+    try:
+        documento = _documento_do_usuario(session, usuario, documento_id)
+        if documento is None:
+            return HTMLResponse("Documento não encontrado", status_code=404)
+
+        visao = efetivo(session, documento)
+        return HTMLResponse(
+            jinja_env.get_template("documento.html").render(
+                {
+                    "request": request,
+                    "usuario": usuario,
+                    "current_page": "documentos",
+                    "documento": documento,
+                    "visao": visao,
+                    "cabecalho": _linhas_de_revisao(
+                        documento, visao.valores, visao.campos_alterados
+                    ),
+                    "itens": [
+                        {
+                            "item": item,
+                            "numero": valores.get("numero_item"),
+                            "linhas": _linhas_de_revisao(
+                                item, valores, visao.itens_alterados.get(item.id, set())
+                            ),
+                            "alterados": visao.itens_alterados.get(item.id, set()),
+                        }
+                        for item, valores in zip(documento.itens, visao.itens, strict=False)
+                    ],
+                    "ajustes": historico(session, documento),
+                    "escrituracoes": escrituracoes_do_documento(session, documento),
+                    "fmt_moeda": fmt_moeda,
+                    "fmt_data": fmt_data,
+                }
+            )
+        )
+    finally:
+        session.close()
+
+
+# Os campos que alguém revisa numa nota.  São os mesmos que a planilha leva e
+# traz — uma segunda lista divergiria da primeira, e as duas dizem a mesma
+# coisa: "isto é o que se confere numa nota".
+CABECALHO_REVISADO = (
+    "chave",
+    "modelo",
+    "serie",
+    "numero",
+    "data_emissao",
+    "data_entrada_saida",
+    "sentido",
+    "situacao",
+    "natureza_operacao",
+    "modalidade_frete",
+    "valor_produtos",
+    "valor_desconto",
+    "valor_frete",
+    "base_icms",
+    "valor_icms",
+    "valor_ipi",
+    "valor_pis",
+    "valor_cofins",
+    "valor_total",
+)
+
+
+def _linhas_de_revisao(alvo, valores: dict, alterados: set[str]) -> list[dict]:
+    """Campo a campo: o que foi normalizado e o que vale hoje.
+
+    Os campos alterados entram **sempre**, mesmo fora da lista de revisão. Um
+    ajuste que a tela não mostrasse seria uma correção invisível — e a tela
+    existe justamente para que nenhuma o seja.
+    """
+    base = CABECALHO_REVISADO if isinstance(alvo, DocumentoFiscal) else EDITAVEIS
+    nomes = list(base) + [c for c in sorted(alterados) if c not in base]
+    linhas = []
+    for nome in nomes:
+        if nome not in type(alvo).__table__.columns:
+            continue
+        linhas.append(
+            {
+                "campo": nome,
+                "normalizado": getattr(alvo, nome),
+                "efetivo": valores.get(nome),
+                "alterado": nome in alterados,
+            }
+        )
+    return linhas
+
+
+@app.get("/fiscal/documentos/{documento_id}/xml")
+async def documento_xml(request: Request, documento_id: int):
+    """O XML como ele chegou — a primeira camada, byte a byte.
+
+    Devolvido do que foi guardado, nunca remontado a partir das colunas: a
+    camada original só vale enquanto for o que o emitente assinou.
+    """
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    session = get_session(_get_engine())
+    try:
+        documento = _documento_do_usuario(session, usuario, documento_id)
+        if documento is None or not documento.xml_original:
+            return HTMLResponse("Documento não encontrado", status_code=404)
+        return Response(
+            content=documento.xml_original,
+            media_type="application/xml",
+            headers={
+                "Content-Disposition": f'attachment; filename="{documento.chave or documento.id}.xml"'
+            },
+        )
     finally:
         session.close()
 
