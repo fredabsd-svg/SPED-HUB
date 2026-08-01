@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Gerar EFD — SPED-HUB{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px;margin:0 auto;">
+    <h2 style="font-size:1.25rem;margin-bottom:8px;">📦 Gerar a escrituração</h2>
+    <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
+        Primeiro o <strong>espelho</strong> — o arquivo em forma de leitura, com as
+        conferências que o validador do Fisco faria. Ele não gera nem arquiva nada.
+        Depois, se estiver certo, o arquivo: e <strong>gerar sempre arquiva</strong>, porque
+        um arquivo que sai do sistema sem deixar registro é exatamente o que a terceira
+        camada existe para impedir.
+    </p>
+
+    <form method="get" action="/fiscal/gerar"
+          style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:24px;">
+        <div style="flex:1;min-width:200px;">
+            <label for="empresa" style="font-size:.875rem;font-weight:600;">Empresa</label>
+            <select name="empresa" id="empresa" class="form-select" style="width:100%;margin-top:6px;">
+                <option value="">— escolha —</option>
+                {% for e in empresas %}
+                <option value="{{ e.id }}" {% if empresa and e.id == empresa.id %}selected{% endif %}>
+                    {{ e.nome }} ({{ e.cnpj }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="tipo" style="font-size:.875rem;font-weight:600;">Obrigação</label>
+            <select name="tipo" id="tipo" class="form-select" style="margin-top:6px;">
+                {% for chave, nome in tipos.items() %}
+                <option value="{{ chave }}" {% if tipo == chave %}selected{% endif %}>{{ nome }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="de" style="font-size:.875rem;font-weight:600;">De</label>
+            <input type="date" name="de" id="de" value="{{ de }}" class="form-select" style="margin-top:6px;">
+        </div>
+        <div>
+            <label for="ate" style="font-size:.875rem;font-weight:600;">Até</label>
+            <input type="date" name="ate" id="ate" value="{{ ate }}" class="form-select" style="margin-top:6px;">
+        </div>
+        <button type="submit" class="btn btn-primary">Ver o espelho</button>
+    </form>
+
+    {% if erro %}
+    <div role="alert" data-secao="erro" style="background:#FEF2F2;border:1px solid var(--danger,#EF4444);
+        border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:.875rem;">
+        <strong>Nada foi gerado.</strong> {{ erro }}
+    </div>
+    {% endif %}
+
+    {% if gerada %}
+    <div role="status" data-secao="gerada" style="background:#F0FDF4;border:1px solid var(--success,#10B981);
+        border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:.875rem;">
+        Escrituração <strong>#{{ gerada.id }}</strong> gerada e arquivada —
+        {{ gerada.total_linhas }} linha(s), hash <code>{{ gerada.hash_conteudo[:16] }}…</code>.
+        <a href="/fiscal/escrituracoes/{{ gerada.id }}/arquivo">Baixar o arquivo</a>
+    </div>
+    {% endif %}
+
+    {% if transmitida %}
+    <div role="status" data-secao="transmitida" style="background:#F0FDF4;border:1px solid var(--success,#10B981);
+        border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:.875rem;">
+        Escrituração <strong>#{{ transmitida.id }}</strong> marcada como transmitida.
+    </div>
+    {% endif %}
+
+    {% if espelho %}
+    <div class="card" data-secao="espelho" style="padding:20px;margin-bottom:20px;">
+        <h3 style="font-size:1rem;margin-bottom:4px;">Espelho</h3>
+        <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:16px;">
+            Lido dos registros que seriam escritos, e não do banco — é o arquivo que se
+            está conferindo, não os dados de onde ele sai. Nada foi gerado nem arquivado.
+        </p>
+
+        <div style="display:flex;gap:32px;flex-wrap:wrap;font-size:.875rem;margin-bottom:16px;">
+            <div><strong>{{ espelho.documentos|length }}</strong> documento(s)</div>
+            <div>entradas <strong>{{ fmt_moeda(espelho.total_entradas) }}</strong></div>
+            <div>saídas <strong>{{ fmt_moeda(espelho.total_saidas) }}</strong></div>
+        </div>
+
+        <h4 style="font-size:.875rem;margin-bottom:6px;">Conferências</h4>
+        {# Estas são as perguntas que o validador faria. Respondê-las aqui é o que
+           evita descobrir a divergência depois de transmitir. #}
+        <ul style="font-size:.8125rem;padding-left:20px;margin-bottom:16px;">
+            {% for c in espelho.conferencias %}
+            <li style="{% if not c.ok %}color:var(--danger,#EF4444);font-weight:600;{% endif %}">
+                {{ '✓' if c.ok else '✗' }} {{ c.nome }}{% if c.detalhe %} — {{ c.detalhe }}{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+
+        {% if espelho.avisos %}
+        <h4 style="font-size:.875rem;margin-bottom:6px;">Leia antes de transmitir</h4>
+        <ul style="font-size:.8125rem;padding-left:20px;margin-bottom:16px;">
+            {% for aviso in espelho.avisos %}<li>{{ aviso }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+
+        <details>
+            <summary style="cursor:pointer;font-size:.875rem;font-weight:600;">
+                O espelho inteiro, em texto
+            </summary>
+            <pre style="font-size:.75rem;overflow-x:auto;margin-top:12px;
+                background:var(--gray-50,#F8F9FB);padding:12px;border-radius:6px;">{{ espelho.texto() }}</pre>
+        </details>
+    </div>
+
+    <form method="post" action="/fiscal/gerar" data-secao="confirmar" class="card"
+          style="padding:20px;margin-bottom:20px;">
+        <input type="hidden" name="empresa" value="{{ empresa.id }}">
+        <input type="hidden" name="de" value="{{ de }}">
+        <input type="hidden" name="ate" value="{{ ate }}">
+        <input type="hidden" name="tipo" value="{{ tipo }}">
+        {% if espelho.divergencias() %}
+        <p style="color:var(--danger,#EF4444);font-size:.875rem;margin-bottom:12px;">
+            <strong>{{ espelho.divergencias()|length }} conferência(s) falharam.</strong>
+            Gerar assim mesmo é possível — o sistema não decide por você —, mas o arquivo
+            provavelmente será recusado.
+        </p>
+        {% endif %}
+        <button type="submit" class="btn btn-primary">Gerar e arquivar</button>
+        <span style="color:var(--gray-500);font-size:.8125rem;margin-left:8px;">
+            gerar de novo cria outra escrituração; o histórico de tentativas é informação
+        </span>
+    </form>
+    {% endif %}
+
+    {% if escrituracoes %}
+    <div class="card" data-secao="escrituracoes" style="padding:20px;">
+        <h3 style="font-size:1rem;margin-bottom:4px;">Escriturações deste período</h3>
+        <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:16px;">
+            Só uma é a entregue. Marcar qual foi <strong>não se desfaz</strong>: apagar esse
+            registro depois apagaria justamente a prova que se quer ter.
+        </p>
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:.8125rem;">
+            <thead>
+                <tr style="background:var(--gray-50,#F8F9FB);text-align:left;">
+                    <th style="padding:8px 12px;">#</th>
+                    <th style="padding:8px 12px;">Gerada em</th>
+                    <th style="padding:8px 12px;">Linhas</th>
+                    <th style="padding:8px 12px;">Hash</th>
+                    <th style="padding:8px 12px;">Transmitida</th>
+                    <th style="padding:8px 12px;">Recibo</th>
+                    <th style="padding:8px 12px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in escrituracoes %}
+                <tr style="border-top:1px solid var(--gray-200,#E2E2EC);
+                           {% if e.transmitida_em %}background:#F0FDF4;{% endif %}">
+                    <td style="padding:8px 12px;">{{ e.id }}</td>
+                    <td style="padding:8px 12px;">{{ e.gerada_em }}</td>
+                    <td style="padding:8px 12px;">{{ e.total_linhas }}</td>
+                    <td style="padding:8px 12px;"><code>{{ e.hash_conteudo[:12] }}…</code></td>
+                    <td style="padding:8px 12px;">
+                        {% if e.transmitida_em %}
+                        <strong style="color:var(--success,#10B981);">sim</strong>
+                        {% else %}não{% endif %}
+                    </td>
+                    <td style="padding:8px 12px;">{{ e.recibo or '—' }}</td>
+                    <td style="padding:8px 12px;white-space:nowrap;">
+                        <a href="/fiscal/escrituracoes/{{ e.id }}/arquivo">baixar</a>
+                        {% if not e.transmitida_em %}
+                        <form method="post" action="/fiscal/transmitida"
+                              style="display:inline-flex;gap:4px;margin-left:8px;">
+                            <input type="hidden" name="escrituracao" value="{{ e.id }}">
+                            <input type="text" name="recibo" placeholder="recibo"
+                                   class="form-select" style="padding:2px 6px;font-size:.75rem;width:120px;">
+                            <button type="submit" class="btn btn-outline btn-sm">foi esta</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

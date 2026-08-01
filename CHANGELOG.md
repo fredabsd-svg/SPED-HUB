@@ -9,6 +9,17 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **Gerar a EFD ganhou tela, e com ela o fluxo inteiro passa a existir na
+  interface.** Primeiro o **espelho** — o arquivo em forma de leitura, com as
+  conferências que o validador do Fisco faria —, que não gera nem arquiva
+  nada. Depois o arquivo: e gerar **sempre arquiva**, porque um arquivo que sai
+  do sistema sem deixar registro é exatamente o que a terceira camada existe
+  para impedir. O que se baixa é o que ficou guardado, não um arquivo gerado de
+  novo na hora — a camada efetiva pode ter mudado desde então, e "o que você
+  entregou" é outra pergunta.
+- **Marcar qual geração foi a entregue agora é feito na tela**, com o recibo, e
+  com o aviso de que isso não se desfaz. Segunda entrega original do mesmo
+  período continua recusada.
 - **Importar XML ganhou tela.** Vários arquivos de uma vez, com o resultado
   contado — importados, duplicados, substituídos, rejeitados — e o motivo de
   cada um que não entrou. A escolha do que fazer com chave repetida fica à
