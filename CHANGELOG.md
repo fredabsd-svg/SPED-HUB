@@ -9,6 +9,16 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **A Central de Documentos ganhou tela, e ela mostra as três camadas
+  separadas.** A lista traz o que foi importado no recorte, marcando as notas
+  que têm correção; clicar numa delas abre a tela que responde "por que este
+  registro saiu assim?": o **documento original** (com o XML baixável, do que
+  foi guardado — nunca remontado a partir das colunas), o **tratamento
+  fiscal** (o normalizado e o efetivo lado a lado, com o histórico de quem
+  mudou o quê, quando e por quê) e **em que escriturações a nota entrou**, com
+  qual delas foi a transmitida. Um campo corrigido aparece na tabela mesmo que
+  não esteja entre os que se revisa por padrão: correção invisível é
+  exatamente o que essa tela existe para impedir.
 - **O cadastro fiscal da empresa ganhou tela.** Os cinco códigos que declaram
   o enquadramento no arquivo — perfil, as duas atividades (que têm tabelas
   diferentes em cada obrigação), regime de apuração e natureza jurídica — só

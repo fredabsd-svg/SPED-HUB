@@ -17,7 +17,7 @@ vem de `reports/`.
 | Grupo | Rotas |
 |---|---|
 | Autenticação | `/login`, `/register`, `POST /api/login`, `POST /api/register`, `/logout` |
-| Páginas | `/`, `/upload`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
+| Páginas | `/`, `/upload`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
 | Upload | `POST /api/upload` (ECD, importa), `/api/upload-efd`, `/api/upload-ecf` (só resumo), `/api/upload-async` + `/api/jobs/*` |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
 | Exportação | `/api/export/pdf`, `/xlsx`, `/multi-formato` (ZIP), `/lote` |
@@ -52,6 +52,22 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   proteção até alguém acrescentar um caminho que esquece o `if`. Empresa de
   outro escritório responde igual a empresa inexistente — a mesma frase, para
   a tela não virar oráculo de quais ids existem no banco.
+- **A tela do documento mostra as três camadas separadas, e não só o valor
+  final.** Mostrar só o efetivo faria a tela desmentir o modelo de dados: o
+  sistema guarda as três porque a resposta a uma intimação depende de saber
+  qual é qual. O XML é servido do que foi guardado (`xml_original`), nunca
+  remontado das colunas — a camada original só vale enquanto for o que o
+  emitente assinou.
+- **Campo corrigido entra na tabela mesmo fora da lista de revisão.** Revisar
+  os 68 campos de cada item seria ilegível, mas um ajuste que a tela não
+  mostrasse seria correção invisível — e é isso que a tela existe para
+  impedir. Os campos revisados por padrão são os mesmos que a planilha leva e
+  traz (`documentos.planilha:EDITAVEIS`): uma segunda lista divergiria da
+  primeira dizendo a mesma coisa.
+- **As seções da tela têm `data-secao`.** É o que deixa o teste dizer *onde*
+  espera encontrar cada coisa. Sem isso, o histórico — que mostra campo, valor
+  anterior e valor novo — dá falso positivo em quase toda asserção sobre a
+  tabela de camadas, e ela poderia sumir inteira sem nenhum teste reclamar.
 - **A tela do cadastro não tem tabela própria.** `CADASTRO_FISCAL` e a
   validação vêm de `escrituracoes.cadastro`, o mesmo módulo que a linha de
   comando usa. Uma segunda cópia divergiria da primeira no primeiro ato

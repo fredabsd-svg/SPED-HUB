@@ -76,6 +76,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 59 | Tela do cadastro fiscal, e a regra num lugar só | concluída | `tests/test_tela_cadastro_fiscal.py`, `tests/test_cli_fiscal.py` | `CADASTRO_FISCAL`, `EXIGIDOS` e a validação saem da CLI para `escrituracoes.cadastro`; a tela e o comando usam a mesma. Escopo por escritório aplicado **na consulta**, não conferido depois de carregar; empresa alheia responde igual a inexistente. Campo em branco é "não alterar", e recusa não grava nem os campos válidos que vieram junto |
 
+| 60 | Telas da Central: a lista e as três camadas de um documento | concluída | `tests/test_tela_documentos.py` | a tela do documento mostra as camadas **separadas** — o XML guardado (baixável, byte a byte, nunca remontado), normalizado × efetivo lado a lado com o histórico de cada correção, e em que escriturações a nota entrou com qual foi a transmitida. Campo corrigido fora da lista de revisão aparece assim mesmo: correção invisível é o que a tela existe para impedir |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

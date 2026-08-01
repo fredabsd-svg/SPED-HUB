@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Documento {{ documento.numero }} — SPED-HUB{% endblock %}
+
+{% macro tabela(linhas) %}
+<table style="width:100%;border-collapse:collapse;font-size:.8125rem;">
+    <thead>
+        <tr style="background:var(--gray-50,#F8F9FB);text-align:left;">
+            <th style="padding:8px 12px;">Campo</th>
+            <th style="padding:8px 12px;">Normalizado</th>
+            <th style="padding:8px 12px;">Efetivo</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for linha in linhas %}
+        <tr style="border-top:1px solid var(--gray-200,#E2E2EC);
+                   {% if linha.alterado %}background:#FFFBEB;{% endif %}">
+            <td style="padding:8px 12px;">{{ linha.campo }}</td>
+            <td style="padding:8px 12px;color:var(--gray-500);">
+                {{ linha.normalizado if linha.normalizado is not none else '—' }}
+            </td>
+            <td style="padding:8px 12px;{% if linha.alterado %}font-weight:600;{% endif %}">
+                {{ linha.efetivo if linha.efetivo is not none else '—' }}
+                {% if linha.alterado %}
+                <span style="color:var(--warning,#F59E0B);font-weight:400;"> corrigido</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endmacro %}
+
+{% block content %}
+<div style="max-width:1100px;margin:0 auto;">
+    <p style="font-size:.875rem;margin-bottom:8px;">
+        <a href="/fiscal/documentos?empresa={{ documento.empresa_id }}">← Documentos</a>
+    </p>
+    <h2 style="font-size:1.25rem;margin-bottom:4px;">
+        📄 {{ documento.especie|upper }} nº {{ documento.numero }}
+    </h2>
+    <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:24px;">
+        {{ documento.chave or 'sem chave' }}
+    </p>
+
+    <!-- ── Camada 1: o documento original ── -->
+    <div class="card" data-secao="original" style="padding:20px;margin-bottom:20px;">
+        <h3 style="font-size:1rem;margin-bottom:4px;">1. Documento original</h3>
+        <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:12px;">
+            Como chegou, byte a byte. Nunca é alterado, e o que se baixa aqui é o que foi
+            guardado — não uma remontagem a partir das colunas.
+        </p>
+        <p style="font-size:.8125rem;margin-bottom:12px;">
+            <strong>Hash</strong> <code>{{ documento.hash_original }}</code>
+        </p>
+        {% if documento.xml_original %}
+        <a href="/fiscal/documentos/{{ documento.id }}/xml" class="btn btn-outline">Baixar o XML</a>
+        {% else %}
+        <p style="color:var(--gray-500);font-size:.8125rem;">
+            Importado antes de o XML passar a ser guardado.
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- ── Camada 2: o tratamento do sistema ── -->
+    <div class="card" data-secao="tratamento" style="padding:20px;margin-bottom:20px;">
+        <h3 style="font-size:1rem;margin-bottom:4px;">2. Tratamento fiscal</h3>
+        <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:16px;">
+            O que foi normalizado do original e o que vale hoje. Onde as duas colunas
+            diferem, houve correção — e ela está no histórico, ao final.
+        </p>
+        {{ tabela(cabecalho) }}
+    </div>
+
+    {% for bloco in itens %}
+    <div class="card" data-secao="item-{{ loop.index }}" style="padding:20px;margin-bottom:20px;">
+        <h3 style="font-size:1rem;margin-bottom:4px;">
+            Item {{ bloco.numero }} — {{ bloco.item.descricao or bloco.item.codigo or '' }}
+            {% if bloco.alterados %}
+            <span style="color:var(--warning,#F59E0B);font-size:.8125rem;font-weight:400;">
+                ({{ bloco.alterados|length }} campo(s) corrigido(s))
+            </span>
+            {% endif %}
+        </h3>
+        <div style="overflow-x:auto;margin-top:12px;">{{ tabela(bloco.linhas) }}</div>
+    </div>
+    {% endfor %}
+
+    <!-- ── O histórico: por que saiu assim ── -->
+    <div class="card" data-secao="historico" style="padding:20px;margin-bottom:20px;">
+        <h3 style="font-size:1rem;margin-bottom:4px;">Histórico das correções</h3>
+        {% if ajustes %}
+        <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:16px;">
+            Na ordem em que aconteceram. Cada lote pode ser desfeito inteiro com
+            <code>sped-hub fiscal desfazer --lote</code>.
+        </p>
+        <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:.8125rem;">
+            <thead>
+                <tr style="background:var(--gray-50,#F8F9FB);text-align:left;">
+                    <th style="padding:8px 12px;">Quando</th>
+                    <th style="padding:8px 12px;">Item</th>
+                    <th style="padding:8px 12px;">Campo</th>
+                    <th style="padding:8px 12px;">De</th>
+                    <th style="padding:8px 12px;">Para</th>
+                    <th style="padding:8px 12px;">Origem</th>
+                    <th style="padding:8px 12px;">Motivo</th>
+                    <th style="padding:8px 12px;">Lote</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in ajustes %}
+                <tr style="border-top:1px solid var(--gray-200,#E2E2EC);">
+                    <td style="padding:8px 12px;">{{ a.criado_em }}</td>
+                    <td style="padding:8px 12px;">{{ a.item_id or 'cabeçalho' }}</td>
+                    <td style="padding:8px 12px;">{{ a.campo }}</td>
+                    <td style="padding:8px 12px;color:var(--gray-500);">{{ a.valor_anterior if a.valor_anterior is not none else '—' }}</td>
+                    <td style="padding:8px 12px;">{{ a.valor_novo if a.valor_novo is not none else '—' }}</td>
+                    <td style="padding:8px 12px;">{{ a.origem }}</td>
+                    <td style="padding:8px 12px;">{{ a.motivo or '—' }}</td>
+                    <td style="padding:8px 12px;"><code>{{ a.lote or '—' }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <p style="color:var(--gray-500);font-size:.8125rem;">
+            Nenhuma correção — o efetivo é o normalizado.
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- ── Camada 3: o que foi efetivamente enviado ── -->
+    <div class="card" data-secao="escrituracoes" style="padding:20px;">
+        <h3 style="font-size:1rem;margin-bottom:4px;">3. Escriturações que levaram esta nota</h3>
+        {% if escrituracoes %}
+        <p style="color:var(--gray-500);font-size:.8125rem;margin-bottom:16px;">
+            Cada linha é um arquivo que saiu do sistema. Só uma por período é a entregue —
+            as outras são gerações anteriores, e a diferença entre elas é informação, não
+            sujeira.
+        </p>
+        <table style="width:100%;border-collapse:collapse;font-size:.8125rem;">
+            <thead>
+                <tr style="background:var(--gray-50,#F8F9FB);text-align:left;">
+                    <th style="padding:8px 12px;">#</th>
+                    <th style="padding:8px 12px;">Tipo</th>
+                    <th style="padding:8px 12px;">Período</th>
+                    <th style="padding:8px 12px;">Gerada em</th>
+                    <th style="padding:8px 12px;">Transmitida</th>
+                    <th style="padding:8px 12px;">Recibo</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in escrituracoes %}
+                <tr style="border-top:1px solid var(--gray-200,#E2E2EC);
+                           {% if e.transmitida_em %}background:#F0FDF4;{% endif %}">
+                    <td style="padding:8px 12px;">{{ e.id }}</td>
+                    <td style="padding:8px 12px;">{{ e.tipo }}</td>
+                    <td style="padding:8px 12px;">
+                        {{ fmt_data(e.data_inicio) }} a {{ fmt_data(e.data_fim) }}
+                    </td>
+                    <td style="padding:8px 12px;">{{ e.gerada_em }}</td>
+                    <td style="padding:8px 12px;">
+                        {% if e.transmitida_em %}
+                        <strong style="color:var(--success,#10B981);">sim</strong>
+                        {% else %}
+                        não
+                        {% endif %}
+                    </td>
+                    <td style="padding:8px 12px;">{{ e.recibo or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:var(--gray-500);font-size:.8125rem;">
+            Esta nota ainda não entrou em nenhuma escrituração gerada.
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

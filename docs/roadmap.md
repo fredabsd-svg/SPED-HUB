@@ -44,8 +44,9 @@ alterações em massa com simulação, os geradores da EFD ICMS/IPI e da
 EFD-Contribuições, a escrituração arquivada — a terceira camada, o arquivo
 que efetivamente saiu —, a apuração de CBS, IBS e IS, o espelho legível antes
 de gerar, a marca de qual escrituração foi transmitida, os ajustes de apuração
-(E111), a planilha de mão dupla para corrigir item a item fora da tela, a tela
-do cadastro fiscal, e o comando `sped-hub fiscal` que alcança tudo isso; ver [`status.md`](status.md). Sobre a Reforma
+(E111), a planilha de mão dupla para corrigir item a item fora da tela, as
+telas do cadastro fiscal e da Central de Documentos, e o comando
+`sped-hub fiscal` que alcança tudo isso; ver [`status.md`](status.md). Sobre a Reforma
 Tributária, ver [`reforma-tributaria.md`](reforma-tributaria.md).
 
 O que falta:
@@ -60,7 +61,7 @@ O que falta:
 | Blocos A, D, F e I da EFD-Contribuições | O gerador cobre 0, C, M e 9. O bloco A depende da importação de NFS-e, acima | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.bloco_f` |
 | Créditos extemporâneos e ajustes da EFD-Contribuições | Os blocos M são soma direta das saídas menos as entradas | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.ajustes_de_apuracao` |
 | Bases próprias do monofásico e da alíquota por unidade no PIS/Cofins | O CST já decide se o valor destacado entra na apuração; o que falta é **calcular** base e alíquota próprias em vez de usar o destacado | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |
-| Telas da Central de Documentos | O cadastro fiscal tem tela; importar, classificar, revisar, corrigir e gerar seguem só na linha de comando | `src.dashboard.app:documentos_page` |
+| Telas da Central de Documentos | Cadastro fiscal, lista de documentos e as três camadas de um documento têm tela; importar, classificar, corrigir e gerar seguem só na linha de comando | `src.dashboard.app:classificar_page` |
 | Registro 0035 (identificação da SCP) na EFD-Contribuições | Exigido quando `IND_NAT_PJ` é 03, 04 ou 05; o gerador avisa e não escreve | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.registro_0035` |
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
 | Monofásico, diferimento, crédito presumido e split payment na Reforma | A apuração **mede e relata** esses valores, fora do total; o que falta é consumi-los, e para isso é preciso a tabela de CST do IBS/CBS estabilizada | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Documentos — SPED-HUB{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px;margin:0 auto;">
+    <h2 style="font-size:1.25rem;margin-bottom:8px;">📄 Central de Documentos</h2>
+    <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
+        O que foi importado, como chegou. Clique numa nota para ver as três camadas:
+        o documento original, o tratamento que o sistema fez e em que arquivo isso foi
+        parar.
+    </p>
+
+    <form method="get" action="/fiscal/documentos"
+          style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:24px;">
+        <div style="flex:1;min-width:220px;">
+            <label for="empresa" style="font-size:.875rem;font-weight:600;">Empresa</label>
+            <select name="empresa" id="empresa" class="form-select" style="width:100%;margin-top:6px;">
+                <option value="">— escolha —</option>
+                {% for e in empresas %}
+                <option value="{{ e.id }}" {% if empresa and e.id == empresa.id %}selected{% endif %}>
+                    {{ e.nome }} ({{ e.cnpj }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="de" style="font-size:.875rem;font-weight:600;">De</label>
+            <input type="date" name="de" id="de" value="{{ de }}" class="form-select"
+                   style="margin-top:6px;">
+        </div>
+        <div>
+            <label for="ate" style="font-size:.875rem;font-weight:600;">Até</label>
+            <input type="date" name="ate" id="ate" value="{{ ate }}" class="form-select"
+                   style="margin-top:6px;">
+        </div>
+        <button type="submit" class="btn btn-primary">Listar</button>
+    </form>
+
+    {% if empresa_pedida and not empresa %}
+    <div role="alert" style="background:#FEF2F2;border:1px solid var(--danger,#EF4444);
+        border-radius:8px;padding:12px 16px;font-size:.875rem;">
+        Empresa não encontrada.
+    </div>
+    {% elif empresa and not documentos %}
+    <p style="color:var(--gray-500);font-size:.875rem;">
+        Nenhum documento no recorte. Importe com
+        <code>sped-hub fiscal importar</code>.
+    </p>
+    {% elif documentos %}
+    <div class="card" style="padding:0;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:.8125rem;">
+            <thead>
+                <tr style="background:var(--gray-50,#F8F9FB);text-align:left;">
+                    <th style="padding:10px 12px;">Emissão</th>
+                    <th style="padding:10px 12px;">Mod.</th>
+                    <th style="padding:10px 12px;">Série</th>
+                    <th style="padding:10px 12px;">Número</th>
+                    <th style="padding:10px 12px;">Sentido</th>
+                    <th style="padding:10px 12px;">Situação</th>
+                    <th style="padding:10px 12px;text-align:right;">Valor</th>
+                    <th style="padding:10px 12px;">Itens</th>
+                    <th style="padding:10px 12px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in documentos %}
+                <tr style="border-top:1px solid var(--gray-200,#E2E2EC);">
+                    <td style="padding:10px 12px;">{{ fmt_data(d.data_emissao) if d.data_emissao else '—' }}</td>
+                    <td style="padding:10px 12px;">{{ d.modelo }}</td>
+                    <td style="padding:10px 12px;">{{ d.serie or '—' }}</td>
+                    <td style="padding:10px 12px;">
+                        <a href="/fiscal/documentos/{{ d.id }}">{{ d.numero }}</a>
+                    </td>
+                    <td style="padding:10px 12px;">{{ d.sentido }}</td>
+                    <td style="padding:10px 12px;">
+                        {# Cancelada e denegada continuam na lista de propósito: sumir com
+                           elas esconderia justamente o que precisa ser conferido antes de
+                           gerar. #}
+                        {% if d.situacao and d.situacao != 'autorizado' %}
+                        <span style="color:var(--danger,#EF4444);">{{ d.situacao }}</span>
+                        {% else %}
+                        {{ d.situacao or '—' }}
+                        {% endif %}
+                    </td>
+                    <td style="padding:10px 12px;text-align:right;">{{ fmt_moeda(d.valor_total) }}</td>
+                    <td style="padding:10px 12px;">{{ d.itens|length }}</td>
+                    <td style="padding:10px 12px;">
+                        {% if d.id in com_ajuste %}
+                        <span title="tem correção aplicada"
+                              style="color:var(--warning,#F59E0B);">corrigida</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p style="margin-top:12px;font-size:.875rem;">
+        <strong>{{ documentos|length }}</strong> documento(s), {{ fmt_moeda(total) }}.
+    </p>
+    {% endif %}
+</div>
+{% endblock %}
