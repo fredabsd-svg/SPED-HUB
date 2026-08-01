@@ -9,6 +9,23 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **Classificar e corrigir ganharam tela, e nenhuma delas grava sozinha.** A
+  de classificação mostra o que as regras propõem — com a regra, o valor
+  anterior, o sugerido, a justificativa e o impacto — e os conflitos que o
+  motor **não** resolve. A de correção em massa simula primeiro: quantos
+  documentos e itens mudariam, com o impacto em reais, antes de qualquer
+  gravação. As duas gravam num lote que se desfaz inteiro.
+- **O total que a tela mostrou é reconferido antes de gravar.** Entre ver e
+  confirmar cabe uma importação, outra pessoa corrigindo, uma regra nova — e
+  sem essa conferência alguém aprovaria trinta mudanças e gravaria trezentas.
+  Divergiu, nada é gravado e a tela pede que se confira de novo.
+- **Desfazer um lote agora respeita o escritório.** Pela linha de comando isso
+  não fazia diferença: quem roda o comando já tem o banco na mão. Pela tela
+  faz, e o identificador do lote ser difícil de adivinhar não é controle de
+  acesso. A recusa vale para o lote inteiro — desfazer metade deixaria a
+  escrituração num estado que ninguém escolheu.
+- **A tela registra quem gravou.** O histórico de cada ajuste passa a trazer o
+  usuário, que a linha de comando não tem como saber.
 - **A Central de Documentos ganhou tela, e ela mostra as três camadas
   separadas.** A lista traz o que foi importado no recorte, marcando as notas
   que têm correção; clicar numa delas abre a tela que responde "por que este

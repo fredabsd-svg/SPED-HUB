@@ -89,6 +89,7 @@ from src.documentos.massa import (
     confirmar,
     recalcular,
     simular,
+    valor_tipado,
 )
 from src.documentos.planilha import (
     COLUNAS,
@@ -154,6 +155,7 @@ __all__ = [
     "regras_aplicaveis",
     "reimportar",
     "simular",
+    "valor_tipado",
     "validar_regra",
     "valor_efetivo",
 ]

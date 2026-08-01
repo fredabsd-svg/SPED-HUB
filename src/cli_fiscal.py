@@ -34,7 +34,6 @@ from src.db.models import (
     DocumentoFiscal,
     Empresa,
     Escrituracao,
-    ItemDocumentoFiscal,
     RegraFiscal,
     criar_engine,
 )
@@ -55,8 +54,8 @@ from src.documentos import (
     novo_lote,
     reimportar,
     simular,
+    valor_tipado,
 )
-from src.documentos.ajustes import desserializar
 from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.classificacao import criar_regra
 from src.escrituracoes import (
@@ -750,28 +749,6 @@ def _regras_remover(sessao: Session, args) -> int:
     return 0
 
 
-def _valor_tipado(campo: str, bruto: str):
-    """O texto da linha de comando, no tipo que a coluna espera.
-
-    Argumento de terminal é sempre `str`. Sem converter, alterar `base_icms`
-    para `1000` mostraria **impacto R$ 0,00** na simulação — porque a
-    diferença entre `0.0` e `"1000"` não é numérica —, e a simulação existe
-    exatamente para mostrar o impacto financeiro antes de confirmar.
-
-    A conversão é a mesma que a camada efetiva já usa para ler ajustes
-    (`desserializar`): duas conversões diferentes para o mesmo campo acabariam
-    divergindo.
-    """
-    for modelo in (ItemDocumentoFiscal, DocumentoFiscal):
-        colunas = modelo.__table__.columns
-        if campo in colunas:
-            return desserializar(bruto, colunas[campo])
-    raise ValueError(
-        f"campo {campo!r} não existe em documento nem em item — "
-        "alteração em massa com nome errado não alcançaria nada"
-    )
-
-
 def _alterar(sessao: Session, args) -> int:
     """Simula por padrão; gravar exige `--confirmar`.
 
@@ -789,7 +766,7 @@ def _alterar(sessao: Session, args) -> int:
     )
     alteracao = Alteracao(
         campo=args.campo,
-        valor=_valor_tipado(args.campo, args.valor),
+        valor=valor_tipado(args.campo, args.valor),
         apenas_vazios=args.apenas_vazios,
     )
 
