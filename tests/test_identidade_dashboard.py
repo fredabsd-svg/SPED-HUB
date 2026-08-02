@@ -135,6 +135,13 @@ class TestNavbarAnonima:
         # suíte o serviço de auth já foi inicializado por outro teste e não
         # vai criar as tabelas deste banco novo.
         init_db(criar_engine(caminho))
+        # E o serviço precisa ser reapontado para ESTE banco. Sem isto o
+        # cadastro cai no banco do teste anterior, onde já há administrador —
+        # e o usuário criado aqui deixa de ser promovido, mudando em silêncio
+        # o que a navegação mostra.
+        from src.auth import init_auth
+
+        init_auth(caminho)
         cliente = self._cliente()
         cliente.post(
             "/api/register",
@@ -142,5 +149,7 @@ class TestNavbarAnonima:
         )
         cliente.post("/api/login", data={"email": "nav@teste.com", "senha": "senha123"})
         html = cliente.get("/").text
-        for rotulo in ("Dashboard", "Upload", "Auditoria", "Sair"):
+        # Links que todo usuário logado vê, mais um de administrador — este
+        # usuário é o primeiro do banco, e o sistema o promove.
+        for rotulo in ("Dashboard", "Upload", "Documentos", "Auditoria", "Sair"):
             assert rotulo in html, f"logado e sem o link '{rotulo}' na navegação"

@@ -52,6 +52,14 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   proteção até alguém acrescentar um caminho que esquece o `if`. Empresa de
   outro escritório responde igual a empresa inexistente — a mesma frase, para
   a tela não virar oráculo de quais ids existem no banco.
+- **Os formulários são testados como o navegador os enviaria.** Teste de rota
+  monta o `POST` à mão; teste de página confere o HTML. Entre os dois cabe um
+  `name=` divergindo do que a rota lê — e aí os dois passam com a página
+  quebrada. `tests/test_formularios_batem_com_as_rotas.py` lê o formulário da
+  página e envia o que ele declara.
+- **O menu só mostra o que o usuário pode abrir.** Link que devolve 403 é pior
+  que link ausente: a mensagem fala de permissão, e quem clicou não pediu
+  permissão nenhuma.
 - **O espelho não gera; gerar sempre arquiva.** Não existe prévia que escreva
   arquivo: a prévia é o espelho, que é prosa e não arquivo transmissível —
   ninguém o entrega por engano. E o download de uma escrituração serve o

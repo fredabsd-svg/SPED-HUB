@@ -86,6 +86,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 64 | O total do documento (vNF) recomposto pela regra W16-10 do MOC | concluída | `tests/test_recomposicao_do_vnf.py`, `tests/test_alteracoes_em_massa.py` | os cinco termos que faltavam entram no modelo (ICMS desonerado, FCP-ST, imposto de importação, IPI devolvido, serviços). As três exceções da regra são tratadas: veículo novo em faturamento direto não soma ST/FCP-ST/IPI devolvido; importação (CFOP 3xxx **efetivo**) não é recomposta, e avisa; e a convenção do ICMS desonerado é **lida do documento original**, porque o Fisco aceita as duas |
 
+| 65 | Os formulários das telas enviam o que as rotas leem | concluída | `tests/test_formularios_batem_com_as_rotas.py` | fecha a costura entre teste de rota (que monta o POST à mão) e teste de página (que confere o HTML): um `name=` divergente fazia os dois passarem com a página quebrada. O envio parte do formulário **da página**. O menu deixou de oferecer as quatro telas de administrador a quem não é — davam 403 |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é
