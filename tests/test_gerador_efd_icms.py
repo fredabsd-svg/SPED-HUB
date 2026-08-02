@@ -261,7 +261,7 @@ class TestBlocoC:
         assert campos[0] == "0", "IND_OPER: entrada"
         assert campos[1] == "1", "IND_EMIT: terceiros"
         assert campos[7] == com_documento.chave
-        assert campos[10] == "2000,00", "valor total"
+        assert campos[10] == "2100,00", "valor total"
 
     def test_documento_cancelado_muda_o_cod_sit(self, sessao, empresa, com_documento):
         com_documento.situacao = "cancelado"

@@ -530,30 +530,90 @@ class TestRecalculoDeTotais:
         )
         assert do_a.valor_novo == pytest.approx(1000.0)
 
-    def test_o_vnf_nao_e_recalculado_e_o_aviso_diz_por_que(self, sessao, cenario):
-        """Calcular o vNF com metade dos termos daria um total errado
-        apresentado como certo — pior que um desatualizado, que ao menos é o
-        número que o emitente declarou."""
+    def test_o_vnf_acompanha_pela_formula_do_moc(self, sessao, cenario):
+        """W16-10: vProd − vDesc + frete + seguro + outras + ST + IPI + …
+
+        A nota tem 2 itens de 1.000,00 e 50,00 de IPI por item; levar cada item
+        a 500,00 leva o vNF a 1.000,00 + 100,00.
+        """
         simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
 
-        do_cabecalho = [m for m in simulacao.mudancas if m.item_id is None]
-
-        assert not any(m.campo == "valor_total" for m in do_cabecalho)
-        assert any(
-            "vNF" in a.problema and "NÃO foi recalculado" in a.problema for a in simulacao.avisos
+        do_a = next(
+            m
+            for m in simulacao.mudancas
+            if m.documento_id == cenario["a"].id and m.campo == "valor_total" and m.item_id is None
         )
 
-    def test_o_aviso_sai_uma_vez_so(self, sessao, cenario):
-        """Um por documento faria ninguém ler nenhum num fechamento."""
+        assert do_a.valor_anterior == pytest.approx(2100.0)
+        assert do_a.valor_novo == pytest.approx(1100.0)
+        assert do_a.recalculada, "o vNF é recomposto, não uma alteração que alguém pediu"
+
+    def test_o_vnf_parte_dos_totais_ja_recompostos(self, sessao, cenario):
+        """Ele depende deles: usar o `valor_produtos` antigo daria o vNF antigo."""
         simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+
+        produtos = next(
+            m
+            for m in simulacao.mudancas
+            if m.documento_id == cenario["a"].id and m.campo == "valor_produtos"
+        )
+        vnf = next(
+            m
+            for m in simulacao.mudancas
+            if m.documento_id == cenario["a"].id and m.campo == "valor_total" and m.item_id is None
+        )
+
+        assert vnf.valor_novo == pytest.approx(produtos.valor_novo + 100.0)
+
+    def test_o_vnf_recomposto_nao_conta_no_impacto(self, sessao, cenario):
+        """Somá-lo junto das parcelas contaria a mesma quantia duas vezes."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+
+        vnf = next(m for m in simulacao.mudancas if m.campo == "valor_total" and m.item_id is None)
+
+        assert vnf.impacto == 0.0
+
+    def _por_empresa(self, cenario):
+        """Recorte que não depende do CFOP — os testes abaixo o alteram."""
+        return Selecao(escritorio_id=cenario["escritorio"].id, empresa_id=cenario["empresa"].id)
+
+    def test_importacao_nao_e_recomposta_e_o_aviso_diz_por_que(self, sessao, cenario):
+        """Exceção 2 da regra: em CFOP 3xxx ela não vale.
+
+        Sem ter com o que substituí-la, recompor produziria um total errado
+        apresentado como certo — pior que um desatualizado, que ao menos é o
+        número que o emitente declarou.
+        """
+        cenario["a"].itens[0].cfop = "3102"
+        sessao.commit()
+
+        simulacao = simular(sessao, self._por_empresa(cenario), [Alteracao("valor_total", 500.0)])
+
+        do_a = [
+            m for m in simulacao.mudancas if m.documento_id == cenario["a"].id and m.item_id is None
+        ]
+        assert not any(m.campo == "valor_total" for m in do_a)
+        assert any("importação" in a.problema for a in simulacao.avisos)
+
+    def test_o_aviso_sai_uma_vez_por_motivo(self, sessao, cenario):
+        """Um por documento faria ninguém ler nenhum num fechamento."""
+        for documento in (cenario["a"], cenario["b"]):
+            documento.itens[0].cfop = "3102"
+        sessao.commit()
+
+        simulacao = simular(sessao, self._por_empresa(cenario), [Alteracao("valor_total", 500.0)])
 
         assert len({m.documento_id for m in simulacao.mudancas}) == 2
         assert sum(1 for a in simulacao.avisos if "vNF" in a.problema) == 1
 
     def test_o_aviso_do_vnf_nao_e_impeditivo(self, sessao, cenario):
         """Ele informa; travar a correção por causa dele seria pior."""
-        simulacao = simular(sessao, cenario["selecao"], [Alteracao("valor_total", 500.0)])
+        cenario["a"].itens[0].cfop = "3102"
+        sessao.commit()
 
+        simulacao = simular(sessao, self._por_empresa(cenario), [Alteracao("valor_total", 500.0)])
+
+        assert any("vNF" in a.problema for a in simulacao.avisos)
         assert not simulacao.impedida
 
     def test_alteracao_so_de_cabecalho_nao_dispara_recalculo(self, sessao, cenario):
@@ -608,7 +668,10 @@ class TestRecalculoDeTotais:
         produtos = next(m for m in recalculadas if m.campo == "valor_produtos")
         assert produtos.valor_anterior == pytest.approx(2000.0)
         assert produtos.valor_novo == pytest.approx(1400.0), "400 + 1000"
-        assert avisos
+        # E o vNF vai junto, pela fórmula: 1.400,00 de produtos + 100,00 de IPI.
+        vnf = next(m for m in recalculadas if m.campo == "valor_total")
+        assert vnf.valor_novo == pytest.approx(1500.0)
+        assert not avisos, "a regra se aplica a esta nota; não há por que avisar"
 
     def test_alteracao_sem_reflexo_em_total_nao_recalcula(self, sessao, cenario):
         """O CFOP é do item e não compõe total nenhum."""

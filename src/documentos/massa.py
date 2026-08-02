@@ -503,13 +503,10 @@ def _simular_alvo(
 # aqui: cada uma destas é, por definição do leiaute, a soma da parcela
 # correspondente dos itens.
 #
-# `valor_total` do documento fica **de fora de propósito**.  Ele não é soma de
-# nada: é o vNF, que sai de produtos menos desconto mais frete, seguro,
-# despesas, ST e IPI — e ainda de componentes que este modelo não carrega
-# (ICMS desonerado, imposto de importação, valor de serviços).  Calculá-lo com
-# a metade dos termos produziria um total errado apresentado como certo, que é
-# pior que um total desatualizado: o desatualizado ao menos é o número que o
-# emitente declarou.  O recálculo avisa quando o deixa para trás.
+# `valor_total` fica de fora daqui porque **não é soma de parcela**: é o vNF,
+# que tem fórmula própria (regra W16-10 do MOC) e é recomposto em
+# `_recompor_vnf`, depois que estes totais já foram refeitos — ele depende
+# deles.
 SOMAS = {
     "valor_produtos": "valor_total",
     "valor_desconto": "valor_desconto",
@@ -592,24 +589,172 @@ def recalcular(
                 )
             )
 
-    # Um aviso só, e não um por documento: a mensagem é a mesma, e repeti-la
-    # quinhentas vezes num fechamento faria ninguém ler nenhuma.
-    if recalculadas:
-        avisos.append(
-            Aviso(
-                documento_id=recalculadas[0].documento_id,
-                numero_item=None,
-                campo="valor_total",
-                problema=(
-                    "o total do documento (vNF) NÃO foi recalculado: ele não é soma de "
-                    "parcela, e este modelo não carrega todos os termos da fórmula "
-                    "(ICMS desonerado, imposto de importação, serviços). Confira antes "
-                    "de gerar"
-                ),
-            )
-        )
+        _recompor_vnf(documento, recalculadas, avisos, do_cabecalho, dos_ajustes)
 
     return recalculadas, avisos
+
+
+# A fórmula do vNF, na ordem e com os sinais da regra W16-10 do MOC 7.0
+# (Anexo I, Leiaute e Regras de Validação da NF-e).  Cada termo é um campo do
+# grupo `ICMSTot`, menos `valor_servicos`, que vem de `ISSQNtot`.
+TERMOS_DO_VNF = (
+    ("valor_produtos", 1),
+    ("valor_desconto", -1),
+    ("valor_icms_desonerado", -1),
+    ("valor_icms_st", 1),
+    ("valor_fcp_st", 1),
+    ("valor_frete", 1),
+    ("valor_seguro", 1),
+    ("valor_outras", 1),
+    ("valor_imposto_importacao", 1),
+    ("valor_ipi", 1),
+    ("valor_ipi_devolvido", 1),
+    ("valor_servicos", 1),
+)
+
+# Exceção 1 da regra: faturamento direto de veículo novo não soma ST, FCP-ST
+# nem IPI devolvido.
+SEM_ST_NEM_IPI_DEVOLVIDO = {"valor_icms_st", "valor_fcp_st", "valor_ipi_devolvido"}
+FATURAMENTO_DIRETO = "2"
+
+
+def _vnf(valores: dict[str, float], *, veiculo_novo: bool, subtrair_desonerado: bool) -> float:
+    total = 0.0
+    for campo, sinal in TERMOS_DO_VNF:
+        if veiculo_novo and campo in SEM_ST_NEM_IPI_DEVOLVIDO:
+            continue
+        if campo == "valor_icms_desonerado" and not subtrair_desonerado:
+            continue
+        total += sinal * valores.get(campo, 0.0)
+    return round(total, 2)
+
+
+def _recompor_vnf(
+    documento: DocumentoFiscal,
+    recalculadas: list[Mudanca],
+    avisos: list[Aviso],
+    do_cabecalho: Sequence[Any],
+    dos_ajustes: Sequence[Any] = (),
+) -> None:
+    """O vNF pela regra W16-10, quando ela se aplica — e um aviso quando não.
+
+    O total do documento **não é soma de parcela**: é a fórmula do MOC, com
+    doze termos e três exceções. Calculá-lo com metade dos termos produziria um
+    total errado apresentado como certo, que é pior que um total desatualizado
+    — o desatualizado ao menos é o número que o emitente declarou. Por isso,
+    onde a regra não se aplica, aqui não se recompõe nada: avisa-se.
+
+    A exceção 3 da regra é a mais escorregadia: o Fisco **não rejeita** quando
+    o emitente deixou de subtrair o ICMS desonerado, de modo que dois totais
+    diferentes são igualmente válidos para a mesma nota. Não há como escolher
+    um por fora — mas há como descobrir qual o emitente usou, porque a primeira
+    camada guardou o documento como ele veio. É o que se faz aqui: a convenção
+    é lida do original, e depois aplicada aos valores novos.
+    """
+    novos = {
+        campo: _valor_recomposto(documento, campo, recalculadas, do_cabecalho)
+        for campo, _ in TERMOS_DO_VNF
+    }
+    declarado = _numero(valor_efetivo(documento, "valor_total", do_cabecalho))
+
+    # Exceção 2: em importação a regra não vale, e o modelo não tem com o que
+    # substituí-la.
+    # O CFOP conferido é o **efetivo**: uma classificação que corrigiu o CFOP
+    # para 3xxx muda a operação para importação, e ler o normalizado deixaria
+    # a exceção passar despercebida justamente onde alguém acabou de dizer que
+    # a operação é outra.
+    if any(_cfop_efetivo(item, dos_ajustes).startswith("3") for item in documento.itens):
+        _avisar_sem_recompor(
+            documento,
+            avisos,
+            "a operação é de importação (CFOP 3xxx), e a regra W16-10 não se aplica",
+        )
+        return
+
+    veiculo_novo = any(item.tipo_operacao_veiculo == FATURAMENTO_DIRETO for item in documento.itens)
+    originais = {campo: _numero(getattr(documento, campo, 0.0)) for campo, _ in TERMOS_DO_VNF}
+
+    subtrair = _convencao_do_original(originais, documento.valor_total, veiculo_novo=veiculo_novo)
+    if subtrair is None:
+        _avisar_sem_recompor(
+            documento,
+            avisos,
+            "o total declarado não fecha com a fórmula nem com a exceção do ICMS "
+            "desonerado, então não há convenção a seguir",
+        )
+        return
+
+    total = _vnf(novos, veiculo_novo=veiculo_novo, subtrair_desonerado=subtrair)
+    if abs(total - declarado) < TOLERANCIA:
+        return
+
+    recalculadas.append(
+        Mudanca(
+            documento_id=documento.id,
+            chave=documento.chave,
+            item_id=None,
+            numero_item=None,
+            campo="valor_total",
+            valor_anterior=declarado,
+            valor_novo=total,
+            recalculada=True,
+        )
+    )
+
+
+def _cfop_efetivo(item: ItemDocumentoFiscal, dos_ajustes: Sequence[Any]) -> str:
+    do_item = [a for a in dos_ajustes if a.item_id == item.id]
+    return str(valor_efetivo(item, "cfop", do_item) or "")
+
+
+def _valor_recomposto(
+    documento: DocumentoFiscal,
+    campo: str,
+    recalculadas: Sequence[Mudanca],
+    do_cabecalho: Sequence[Any],
+) -> float:
+    """O termo como ele vai ficar: recomposto, se foi; efetivo, se não."""
+    for mudanca in recalculadas:
+        if mudanca.documento_id == documento.id and mudanca.campo == campo:
+            return _numero(mudanca.valor_novo)
+    return _numero(valor_efetivo(documento, campo, do_cabecalho))
+
+
+def _convencao_do_original(
+    originais: dict[str, float], declarado: float | None, *, veiculo_novo: bool
+) -> bool | None:
+    """Se o emitente subtraiu o ICMS desonerado do total — ou `None` se nem uma
+    coisa nem outra fecha com o que ele declarou.
+
+    Sem desoneração as duas contas dão o mesmo número, e a resposta é a mesma
+    dos dois jeitos: subtrair zero não muda nada.
+    """
+    alvo = _numero(declarado)
+    for subtrair in (True, False):
+        if (
+            abs(_vnf(originais, veiculo_novo=veiculo_novo, subtrair_desonerado=subtrair) - alvo)
+            < TOLERANCIA
+        ):
+            return subtrair
+    return None
+
+
+def _avisar_sem_recompor(documento: DocumentoFiscal, avisos: list[Aviso], porque: str) -> None:
+    """Um aviso por MOTIVO, e não um por documento.
+
+    A mensagem é a mesma para todos os documentos que caem no mesmo caso, e
+    repeti-la quinhentas vezes num fechamento faria ninguém ler nenhuma. Os
+    motivos, sim, são diferentes entre si e cada um precisa aparecer.
+    """
+    problema = (
+        f"o total do documento (vNF) não foi recalculado porque {porque}. "
+        "O valor continua o que o emitente declarou; confira antes de gerar"
+    )
+    if any(a.campo == "valor_total" and a.problema == problema for a in avisos):
+        return
+    avisos.append(
+        Aviso(documento_id=documento.id, numero_item=None, campo="valor_total", problema=problema)
+    )
 
 
 def confirmar(

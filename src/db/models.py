@@ -804,6 +804,16 @@ class DocumentoFiscal(Base):
     valor_ipi: Mapped[float] = mapped_column(default=0.0)
     valor_pis: Mapped[float] = mapped_column(default=0.0)
     valor_cofins: Mapped[float] = mapped_column(default=0.0)
+    # Os termos que faltavam para fechar o vNF pela regra W16-10 do MOC 7.0.
+    # Nenhum deles é soma de parcela que este sistema saiba alterar — vêm do
+    # documento e ficam como vieram; existem para que o total possa ser
+    # recomposto com a fórmula inteira, e não com metade dela.
+    valor_icms_desonerado: Mapped[float] = mapped_column(default=0.0)
+    valor_fcp_st: Mapped[float] = mapped_column(default=0.0)
+    valor_imposto_importacao: Mapped[float] = mapped_column(default=0.0)
+    valor_ipi_devolvido: Mapped[float] = mapped_column(default=0.0)
+    # `vServ` mora em `ISSQNtot`, e não em `ICMSTot` como os outros.
+    valor_servicos: Mapped[float] = mapped_column(default=0.0)
     # Reforma: totais do documento.  Convivem com os de cima durante toda a
     # transição (2026–2032).
     valor_ibs: Mapped[float] = mapped_column(default=0.0)
@@ -885,6 +895,10 @@ class ItemDocumentoFiscal(Base):
     valor_cofins: Mapped[float] = mapped_column(default=0.0)
     valor_iss: Mapped[float] = mapped_column(default=0.0)
     codigo_beneficio: Mapped[str | None] = mapped_column(String(10))
+    # `veicProd/tpOp` — só existe em item de veículo novo.  Está aqui por uma
+    # razão só: `tpOp = 2` (faturamento direto) muda a fórmula do vNF, e sem
+    # conseguir reconhecer o caso o recálculo o trataria como comum.
+    tipo_operacao_veiculo: Mapped[str | None] = mapped_column(String(1))
 
     # ── Reforma Tributária do Consumo (EC 132/2023, LC 214/2025) ──────────
     #

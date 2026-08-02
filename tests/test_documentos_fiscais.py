@@ -84,7 +84,8 @@ class TestAdaptadorNFe:
 
     def test_totais_do_documento(self):
         d = AdaptadorNFe().normalizar(nfe_xml())
-        assert d.valor_total == 1000.00
+        # vProd 1.000,00 + IPI 50,00, como manda a regra W16-10.
+        assert d.valor_total == 1050.00
         assert d.valor_icms == 180.00
         assert d.valor_ipi == 50.00
         assert d.valor_pis == 16.50

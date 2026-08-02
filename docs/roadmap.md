@@ -54,7 +54,6 @@ O que falta:
 | Item | Situação | Marcador de ausência |
 |---|---|---|
 | Importação de NFS-e por provedor | Exige um adaptador por provedor municipal | `src.documentos.adaptadores:AdaptadorNFSe` |
-| Recálculo do vNF (total do documento) | Os totais que são soma de parcela são recompostos; o `valor_total` não, porque a fórmula usa termos que o modelo não carrega (ICMS desonerado, imposto de importação, serviços) | `src.documentos.massa:recompor_vnf` |
 | Blocos G, H e 1 da EFD ICMS/IPI | O gerador cobre 0, C, E e 9 | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_h` |
 | Documentos de serviço, energia e transporte na EFD (C500, D100) | Só o C100 de mercadorias é gerado | `src.escrituracoes.efd_icms:GeradorEFDICMS.bloco_d` |
 | Ajustes que nascem de um documento (C197/D197) | Os do período já entram pelo E111; os de documento compõem os campos `VL_TOT_AJ_*` do E110 e seguem fora. O impedimento é a **tabela 5.3**: o código tem 10 dígitos com significado posicional (`AABCDEFGGG`), e a quebra das posições não é publicada nem na página oficial da SEFAZ — sem ela o validador recusaria o que escrevêssemos | `src.escrituracoes.efd_icms:GeradorEFDICMS.ajustes_de_documento` |
