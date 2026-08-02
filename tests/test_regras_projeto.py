@@ -62,6 +62,7 @@ REGISTRO_CI = {
     "7.2": "tests/test_regras_projeto.py::TestDefinicaoDePronto::test_todo_modulo_e_alcancavel",
 }
 
+
 def _portas_de_entrada() -> tuple[str, ...]:
     """As portas por onde o produto é iniciado, lidas do `pyproject.toml`.
 
@@ -214,7 +215,9 @@ def _alcanca_porta_de_entrada(teste: Path) -> bool:
         elif isinstance(no, ast.ImportFrom) and no.module == "src":
             por_modulo |= {a.asname or a.name for a in no.names if a.name == "cli"}
         elif isinstance(no, ast.Import):
-            por_modulo |= {a.asname or a.name.rsplit(".", 1)[0] for a in no.names if a.name == "src.cli"}
+            por_modulo |= {
+                a.asname or a.name.rsplit(".", 1)[0] for a in no.names if a.name == "src.cli"
+            }
 
     for no in ast.walk(arvore):
         if not isinstance(no, ast.Call):
@@ -225,7 +228,11 @@ def _alcanca_porta_de_entrada(teste: Path) -> bool:
         if isinstance(alvo, ast.Attribute):
             # `cli.main(...)` — a CLI pelo módulo; `page.goto(...)` — o
             # navegador de verdade, que atravessa a casca inteira.
-            if alvo.attr == "main" and isinstance(alvo.value, ast.Name) and alvo.value.id in por_modulo:
+            if (
+                alvo.attr == "main"
+                and isinstance(alvo.value, ast.Name)
+                and alvo.value.id in por_modulo
+            ):
                 return True
             if alvo.attr == "goto":
                 return True

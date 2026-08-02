@@ -500,8 +500,13 @@ class TestSaldoCredorPelaCLI:
 
         julho = tmp_path / "julho.txt"
         assert self._gerar(banco_fiscal, julho, "2026-07-01", "2026-07-31") == 0
-        assert main(["fiscal", "transmitida", "--escrituracao", "1", "--recibo", "R-JUL"]
-                    + ["--db", banco_fiscal]) == 0
+        assert (
+            main(
+                ["fiscal", "transmitida", "--escrituracao", "1", "--recibo", "R-JUL"]
+                + ["--db", banco_fiscal]
+            )
+            == 0
+        )
         return banco_fiscal, julho
 
     def test_o_saldo_de_julho_chega_ao_e110_de_agosto(self, com_julho_transmitido, tmp_path):
@@ -541,13 +546,14 @@ class TestCstDescartaPelaCLI:
             + ["--tipo", "efd_contribuicoes", "--saida", str(saida), "--db", banco]
         )
 
-    def test_o_cst_trocado_faz_o_valor_ser_descartado_com_aviso(
-        self, importado, tmp_path, capsys
-    ):
-        assert main(
-            ["fiscal", "alterar", "--empresa", "1", "--campo", "cst_pis", "--valor", "70"]
-            + ["--confirmar", "--db", importado]
-        ) == 0
+    def test_o_cst_trocado_faz_o_valor_ser_descartado_com_aviso(self, importado, tmp_path, capsys):
+        assert (
+            main(
+                ["fiscal", "alterar", "--empresa", "1", "--campo", "cst_pis", "--valor", "70"]
+                + ["--confirmar", "--db", importado]
+            )
+            == 0
+        )
         capsys.readouterr()
 
         assert self._gerar_contribuicoes(importado, tmp_path / "contrib.txt") == 0
