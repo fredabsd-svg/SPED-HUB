@@ -58,6 +58,7 @@ from src.documentos import (
 )
 from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.classificacao import criar_regra
+from src.documentos.tabelas_ibscbs import tabelas as tabelas_oficiais
 from src.escrituracoes import (
     CADASTRO_FISCAL,
     TIPOS,
@@ -178,6 +179,70 @@ def _empresas(sessao: Session) -> int:
         )
     print()
     return 0
+
+
+def _tabelas(sessao: Session, args) -> int:
+    """Mostra a procedência das tabelas oficiais, ou consulta um código.
+
+    Sem argumento é resposta a uma pergunta que ninguém faz até precisar:
+    *de quando é a tabela que este sistema está usando?* Tabela velha
+    respondendo como se fosse a atual erra em silêncio — e o erro só aparece
+    na rejeição da SEFAZ, um mês depois.
+    """
+    tab = tabelas_oficiais()
+    print(f"\n  {tab.documento}")
+    print(f"  publicada em {tab.publicada_em}   fonte: {tab.origem}")
+    print(
+        f"  {len(tab.cst)} CST · {len(tab.class_trib)} cClassTrib · "
+        f"{len(tab.cred_pres)} cCredPres\n"
+    )
+
+    procurado = (args.codigo or "").strip()
+    if not procurado:
+        print(f"  {'CST':5} {'Descrição':44} classificações")
+        contagem: dict[str, int] = {}
+        for registro in tab.class_trib.values():
+            contagem[registro["cst"]] = contagem.get(registro["cst"], 0) + 1
+        for cst, registro in sorted(tab.cst.items()):
+            print(f"  {cst:5} {registro['descricao'][:44]:44} {contagem.get(cst, 0):>3}")
+        print("\n  Um código: `sped-hub fiscal tabelas --codigo 200049`\n")
+        return 0
+
+    if registro := tab.cst.get(procurado):
+        print(f"  CST {procurado} — {registro['descricao']}")
+        exigidos = [grupo for grupo, exige in sorted(registro["exige"].items()) if exige]
+        print(f"  exige: {', '.join(exigidos) if exigidos else '—'}")
+        codigos = [c for c, r in sorted(tab.class_trib.items()) if r["cst"] == procurado]
+        print(f"  classificações: {', '.join(codigos) if codigos else '—'}\n")
+        return 0
+
+    if registro := tab.class_trib.get(procurado):
+        print(f"  cClassTrib {procurado} — {registro['nome']}")
+        print(f"  CST {registro['cst']} · alíquota {registro['tipo_aliquota']}")
+        print(f"  redução IBS {registro['reducao_ibs']}% · CBS {registro['reducao_cbs']}%")
+        print(
+            f"  vigência de {registro['inicio_vigencia'] or 'sempre'} "
+            f"a {registro['fim_vigencia'] or 'hoje'}"
+        )
+        modelos = [
+            nome
+            for chave, nome in (("na_nfe", "NF-e"), ("na_nfce", "NFC-e"), ("na_nfse", "NFS-e"))
+            if registro[chave]
+        ]
+        print(f"  permitido em: {', '.join(modelos) if modelos else 'nenhum destes'}\n")
+        return 0
+
+    if registro := tab.cred_pres.get(procurado.zfill(2)):
+        print(f"  cCredPres {procurado.zfill(2)} — {registro['descricao']}")
+        print(f"  {registro['dispositivo']}")
+        print(
+            f"  apropria via documento: {'sim' if registro['via_documento'] else 'não'} · "
+            f"via evento: {'sim' if registro['via_evento'] else 'não'}\n"
+        )
+        return 0
+
+    print(f"  {procurado} não está em nenhuma das três tabelas.\n")
+    return 1
 
 
 def _cadastro(sessao: Session, args) -> int:
@@ -433,6 +498,14 @@ def _apurar(sessao: Session, args) -> int:
             f"{cst} ({itens})" for cst, itens in sorted(resultado.cst_encontrados.items())
         )
         print(f"\n  CST de IBS/CBS fora da tributação integral: {codigos}")
+
+    # Separado dos avisos: os avisos explicam o número, isto aponta documento
+    # com defeito.  Misturar as duas coisas faria a divergência de
+    # classificação passar como mais uma ressalva de leitura.
+    if resultado.classificacao:
+        print("\n  CLASSIFICAÇÃO DIVERGENTE DA TABELA OFICIAL:")
+        for problema, itens in sorted(resultado.classificacao.items()):
+            print(f"    · {problema} — {itens} item(ns)")
 
     print("\n  LEIA ANTES DE USAR ESTE NÚMERO:")
     for aviso in resultado.avisos:
@@ -909,6 +982,7 @@ ACOES = {
     "historico": _historico,
     "transmitida": _transmitida,
     "conferir": _conferir,
+    "tabelas": lambda sessao, args: _tabelas(sessao, args),
 }
 
 

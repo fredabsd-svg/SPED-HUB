@@ -56,6 +56,10 @@ As três camadas que a suíte separa:
 | `Divergencia` | Linha que não virou alteração, com o número da linha e o motivo. |
 | `COLUNAS` / `EDITAVEIS` | As colunas da planilha, e quais delas a volta aceita. |
 | `PlanilhaInvalida` | Arquivo que não abre, ou sem as colunas que ligam a linha ao banco. |
+| `tabelas_ibscbs.tabelas()` | As tabelas oficiais de CST, `cClassTrib` e `cCredPres`, com a data de publicação. |
+| `tabelas_ibscbs.conferir(item, data_emissao=, modelo=, valor=)` | Os problemas de classificação do item, em português. Lista vazia é "sem problema". |
+| `tabelas_ibscbs.aliquotas_padrao(ano)` | As alíquotas do ano, ou `None` quando a legislação ainda não as fixou. |
+| `tabelas_ibscbs.TabelaAusente` | O JSON gerado não está no lugar — instalação incompleta. |
 
 ## O que não faz
 
@@ -65,18 +69,39 @@ motor **não escolhe** entre regras empatadas e `simular` **não grava**. O
 recálculo de totais (§12.5) refaz o que é soma de parcela e **não** refaz o
 `valor_total` (vNF) — ver as armadilhas abaixo. Não lê NFS-e: cada provedor
 municipal precisa do seu adaptador. A planilha **não grava**: reimportar
-devolve uma `Simulacao`, e quem grava é `confirmar`. Não valida códigos fiscais contra as
-tabelas oficiais, e **não calcula tributo nenhum**: os valores de CBS, IBS e IS
-são lidos do XML, nunca presumidos.
+devolve uma `Simulacao`, e quem grava é `confirmar`. **Não calcula tributo
+nenhum**: os valores de CBS, IBS e IS são lidos do XML, nunca presumidos — e a
+conferência contra a tabela oficial diz que a classificação está errada, nunca
+qual seria a certa.
 
 ## Depende de / quem depende
 
-Depende de `db.models`, da stdlib (`xml.etree.ElementTree`, `hashlib`) e, só
-na planilha, de `openpyxl` — que o projeto já usava para os relatórios. Quem depende: `escrituracoes` (lê o efetivo para gerar) e
+Depende de `db.models`, da stdlib (`xml.etree.ElementTree`, `hashlib`, `json`)
+e, só na planilha, de `openpyxl` — que o projeto já usava para os relatórios. Quem depende: `escrituracoes` (lê o efetivo para gerar) e
 `cli_fiscal` (a única porta de entrada humana hoje).
 
 ## Decisões não óbvias e armadilhas
 
+- **A tabela oficial é derivada da planilha da SVRS, nunca digitada.** As
+  planilhas ficam em `dados/oficiais/` e `scripts/gerar_tabelas_ibscbs.py`
+  produz o JSON que o programa lê (§1.9). São 164 classificações; digitá-las
+  seria errar sem que ninguém conferisse, e a tabela **muda** — a versão 1.10
+  do IT incluiu seis códigos, dividiu o 620004 em dois e renumerou o antigo
+  620005. A geração é lida por **nome de coluna**: a planilha tem 82 colunas,
+  dezenas vazias, e uma coluna inserida no meio deslocaria tudo em silêncio.
+- **A conferência aponta o erro, não a correção.** A tabela diz que a
+  classificação está inválida; qual seria a válida depende do enquadramento
+  legal do item, que é decisão de quem escritura. Sugerir um código seria
+  dar palpite com cara de resposta.
+- **A data de publicação viaja com a tabela.** `sped-hub fiscal tabelas` a
+  mostra, e ela entra no texto de cada apontamento. Tabela velha responde
+  exatamente como tabela nova, e o erro só aparece na rejeição da SEFAZ, um
+  mês depois — a data é o que torna a defasagem visível antes disso.
+- **`conferir` recebe como ler o campo (`valor=`), por causa das camadas.**
+  Sem isso ela olharia o original — que a SEFAZ já autorizou, e onde uma
+  classificação inválida não teria virado documento. Quem confere a
+  escrituração passa o leitor da camada efetiva, que é o que vai sair no
+  arquivo.
 - **O vNF não é soma de parcela: tem fórmula, e três exceções.** A regra
   W16-10 do MOC 7.0 soma doze termos, e o sistema só passou a recompô-lo
   depois de carregar todos — calcular com metade produziria um total errado
@@ -225,4 +250,11 @@ pytest tests/test_camada_efetiva.py -q      # ajustes, tipos, reversão por lote
 pytest tests/test_classificacao_fiscal.py -q  # regras, prioridade, conflito, vigência
 pytest tests/test_alteracoes_em_massa.py -q   # seleção, simulação, proteções, reversão
 pytest tests/test_migrations.py -q          # o schema da migração bate com os modelos
+pytest tests/test_tabelas_ibscbs.py -q      # geração, conteúdo oficial e conferência
 ```
+
+Para atualizar a tabela quando a SVRS publicar uma versão nova: baixe a
+planilha do [portal DF-e](https://dfe-portal.svrs.rs.gov.br/Nfe/Documentos)
+(aba Documentos → Diversos), ponha em `dados/oficiais/` com a data no nome,
+aponte o script para ela e rode `python scripts/gerar_tabelas_ibscbs.py`. O
+teste de geração recusa planilha trocada sem regerar.

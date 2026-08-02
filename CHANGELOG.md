@@ -9,6 +9,14 @@ interno da implementação.
 ## [Não publicado]
 
 ### Alterado
+- **A leitura da NF-e foi conferida contra a versão 1.51 da Nota Técnica**
+  (julho de 2026), publicada dois dias antes de os novos tributos passarem a
+  ser exigidos. Ela altera regras de validação e antecipa o cronograma da que
+  exige IBS e CBS para **03/08/2026**; nenhum campo do leiaute mudou.
+- **Duas leituras de código estavam erradas e foram corrigidas.** O CST 200 é
+  "Alíquota reduzida" — não existe código de alíquota zero — e o 810 é "Ajuste
+  de IBS na ZFM", no singular. Vinham do que se lia por aí; agora vêm da tabela
+  oficial.
 - **"Fase concluída" passou a significar que o caminho do usuário foi
   percorrido.** Até aqui bastava que os testes citados existissem e
   passassem — e um módulo pode ter cobertura completa sem que nenhum caminho
@@ -18,6 +26,24 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **As tabelas oficiais do IBS e da CBS passaram a viver dentro do programa.**
+  Até aqui o sistema listava o código de situação tributária que fugisse da
+  tributação integral e dizia, com todas as letras, que não sabia interpretá-lo
+  — a tabela não estava verificada, e uma cópia adivinhada seria pior que a
+  ausência. As planilhas da SVRS foram obtidas do portal oficial e entram no
+  repositório como fonte: **18 CST, 164 classificações tributárias e 13 códigos
+  de crédito presumido**, publicados em 22/06/2026. `sped-hub fiscal tabelas`
+  mostra a tabela, a data dela e consulta um código.
+- **A apuração agora aponta a classificação que a SEFAZ recusaria.** Código que
+  não existe, CST que não casa com a classificação declarada, código fora da
+  vigência na data de emissão, código proibido no modelo do documento e grupo
+  que aquele CST exige e o documento não traz — cada um sai com a contagem de
+  itens, antes de o mês ser transmitido em vez de depois. O sistema **não** diz
+  qual seria o código certo: isso depende do enquadramento legal do item, e
+  sugerir um seria dar palpite com cara de resposta.
+- **O nome de cada código aparece junto do número.** Um "620" solto obriga quem
+  lê a ir procurar o que ele quer dizer, e quem faz isso todo mês para de
+  procurar.
 - **O total do documento passou a acompanhar a correção dos itens.** Até aqui,
   alterar o valor de um item deixava o total da nota para trás, e o sistema
   avisava em vez de recalcular — porque a fórmula do total não é uma soma, e

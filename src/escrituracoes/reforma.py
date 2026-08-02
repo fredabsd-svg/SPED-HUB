@@ -32,9 +32,16 @@ como "a recolher" seria enganoso, e o resultado avisa.
   * regimes específicos e diferenciados;
   * o mecanismo de compensação e dispensa de 2026.
 
+**A classificação é conferida contra a tabela oficial.** CST e `cClassTrib`
+passam pela tabela da SVRS (`src/documentos/tabelas_ibscbs.py`): código que
+não existe, par CST × classificação que não casa, vigência fora da data de
+emissão, código proibido no modelo do documento e grupo exigido que não veio
+saem no resultado com a contagem de itens. Cada um deles é uma rejeição na
+autorização — e chegar até aqui significa que já foi autorizado com outra
+classificação, ou que o XML foi alterado depois.
+
 Ver `docs/reforma-tributaria.md` para o cronograma e a procedência de cada
-informação — o portal oficial respondeu HTTP 503 nas consultas, e os valores
-de alíquota e códigos de classificação são dado de entrada, lidos do XML.
+informação.
 """
 
 from __future__ import annotations
@@ -47,6 +54,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from src.db.models import AjusteFiscal, DocumentoFiscal, Empresa
 from src.documentos.ajustes import valor_efetivo
+from src.documentos.tabelas_ibscbs import TabelaAusente, conferir, tabelas
 
 # O ano em que CBS e IBS são destacados em alíquota de teste, com compensação
 # e dispensa que este módulo não modela.
@@ -97,11 +105,27 @@ NAO_CONSUMIDOS = {
     "valor_cbs_bio_diferenca": "diferença de mistura de biocombustível (CBS)",
 }
 
-# O CST que dispensa tratamento específico.  É o único código da tabela do
-# IBS/CBS cuja leitura é consensual entre as fontes consultadas; os demais são
-# LISTADOS, nunca interpretados — a IT 002/2025 ainda está em revisão e as
-# fontes secundárias divergem entre si.  Ver `docs/reforma-tributaria.md`.
+# O CST que dispensa tratamento específico.  Os demais continuam LISTADOS e
+# não interpretados: a tabela oficial diz o que cada código **significa** e
+# que grupos ele exige, o que basta para conferir; não diz como apurar cada
+# regime, e inventar essa parte produziria número plausível e errado.
+#
+# Desde a IT 2025.002 v1.50 os nomes vêm da tabela oficial (`tabelas_ibscbs`),
+# não de fonte secundária.
 CST_TRIBUTACAO_INTEGRAL = "000"
+
+
+def _nome_do_cst(cst: str) -> str:
+    """O nome oficial do CST, entre parênteses, ou vazio se ele não existir.
+
+    Um código solto na tela obriga quem lê a ir procurar o que ele significa
+    — e quem faz isso todo mês para de procurar.
+    """
+    try:
+        registro = tabelas().cst.get(cst)
+    except TabelaAusente:
+        return ""
+    return f"({registro['descricao']})" if registro else ""
 
 
 @dataclass
@@ -139,9 +163,12 @@ class ResultadoApuracao:
     # Rótulo → (valor somado, quantidade de itens).  O que o documento trouxe e
     # esta apuração não consumiu.
     nao_cobertos: dict[str, tuple[float, int]] = field(default_factory=dict)
-    # CST de IBS/CBS diferentes de `000`, com quantos itens em cada.  São
-    # listados, não interpretados.
+    # CST de IBS/CBS diferentes de `000`, com quantos itens em cada.
     cst_encontrados: dict[str, int] = field(default_factory=dict)
+    # Problema de classificação → quantos itens o têm.  Conferido contra a
+    # tabela oficial da SVRS; a chave é a frase que se lê, porque agrupar por
+    # código exigiria um catálogo de códigos nossos, que ninguém consulta.
+    classificacao: dict[str, int] = field(default_factory=dict)
     avisos: list[str] = field(default_factory=list)
 
     @property
@@ -173,6 +200,7 @@ class ResultadoApuracao:
                 for rotulo, (valor, itens) in sorted(self.nao_cobertos.items())
             },
             "cst_encontrados": dict(sorted(self.cst_encontrados.items())),
+            "classificacao": dict(sorted(self.classificacao.items())),
             "total_devido": round(self.total_devido, 2),
             "avisos": list(self.avisos),
         }
@@ -255,6 +283,31 @@ class ApuracaoIBSCBS:
                 resultado.seletivo += efetivo("valor_is")
 
             self._medir_o_que_nao_cobre(item, do_item, resultado)
+            self._conferir_classificacao(documento, item, do_item, resultado)
+
+    def _conferir_classificacao(
+        self, documento, item, ajustes: list, resultado: ResultadoApuracao
+    ) -> None:
+        """Confere CST e `cClassTrib` contra a tabela oficial da SVRS.
+
+        A conferência é da camada **efetiva**, como todo o resto desta
+        apuração.  Conferir o original diria pouco: ele já passou pela
+        autorização da SEFAZ, e uma classificação inválida não teria virado
+        documento.  O que pode estar errado — e o que vai sair no arquivo — é
+        a correção que alguém fez aqui dentro.
+        """
+        try:
+            problemas = conferir(
+                item,
+                data_emissao=documento.data_emissao,
+                modelo=documento.modelo or "55",
+                valor=lambda campo: valor_efetivo(item, campo, ajustes),
+            )
+        except TabelaAusente as erro:
+            resultado.avisos.append(f"classificação não conferida: {erro}")
+            return
+        for problema in problemas:
+            resultado.classificacao[problema] = resultado.classificacao.get(problema, 0) + 1
 
     def _medir_o_que_nao_cobre(self, item, ajustes: list, resultado: ResultadoApuracao) -> None:
         """Registra o que o documento trouxe e a apuração não consumiu.
@@ -319,11 +372,22 @@ class ApuracaoIBSCBS:
 
         if resultado.cst_encontrados:
             detalhe = ", ".join(
-                f"{cst} ({itens} item(ns))"
+                f"{cst} {_nome_do_cst(cst)} ({itens} item(ns))"
                 for cst, itens in sorted(resultado.cst_encontrados.items())
             )
             resultado.avisos.append(
                 f"há itens com CST de IBS/CBS diferente de {CST_TRIBUTACAO_INTEGRAL} "
                 f"(tributação integral): {detalhe}. O valor destacado foi somado sem "
                 "tratamento específico — confira o enquadramento de cada um"
+            )
+
+        if resultado.classificacao:
+            detalhe = "; ".join(
+                f"{problema} ({itens} item(ns))"
+                for problema, itens in sorted(resultado.classificacao.items())
+            )
+            resultado.avisos.append(
+                f"classificação divergente da tabela oficial: {detalhe}. "
+                "Documento com essa divergência é recusado na autorização — "
+                "confira antes de escriturar"
             )

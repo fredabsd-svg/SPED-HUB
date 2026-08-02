@@ -1,22 +1,26 @@
 # Reforma Tributária do Consumo no SPED-HUB
 
-**Legislação consultada em:** 2026-07-31
-**Grau de segurança das informações desta página:** **alto para o leiaute** —
-a NT 2025.002 v1.50 foi obtida do portal DF-e da SVRS e conferida campo a
-campo; **médio para a tabela de classificação tributária** — ver "Procedência"
-ao final.
+**Legislação consultada em:** 2026-08-02
+**Grau de segurança das informações desta página:** **alto** — a NT 2025.002
+**v1.51**, o IT 2025.002 v1.50 e as planilhas de `cClassTrib` e `cCredPres`
+foram obtidos do portal DF-e da SVRS e conferidos campo a campo. As planilhas
+estão versionadas em `dados/oficiais/`; ver "Procedência" ao final.
 
 Como o sistema representa CBS, IBS e Imposto Seletivo, e por quê.
 
 ## O prazo que importa
 
-A partir de **03/08/2026**, pela Nota Técnica 2025.002 (versão **1.50**, de
-02/06/2026), a NF-e e a NFC-e passam a **rejeitar** documentos sem os grupos de
-IBS e CBS. Não é advertência: é rejeição na autorização. Para Simples Nacional
-e MEI o prazo é **04/01/2027**; em homologação a exigência vale desde
+A partir de **03/08/2026**, pela Nota Técnica 2025.002 (versão **1.51**, de
+julho de 2026), a NF-e e a NFC-e passam a **rejeitar** documentos sem os grupos
+de IBS e CBS. Não é advertência: é rejeição na autorização. Para Simples
+Nacional e MEI o prazo é **04/01/2027**; em homologação a exigência vale desde
 01/07/2026.
 
-A v1.50 **reformulou o leiaute da tributação monofásica de combustíveis**,
+A **v1.51 não mexeu no leiaute**: alterou regras de validação (UB13, UB18,
+UB22, UB26, UB37, UB40, UB45, UB56, UB59, UB64, UB112, UB116, UB131, VC02,
+entre outras) e antecipou o cronograma da regra UB12-10 — a que exige os
+novos tributos — para 03/08/2026. Os campos e o aninhamento continuam os da
+v1.50, que **reformulou o leiaute da tributação monofásica de combustíveis**,
 separando ad rem de ad valorem em quatro grupos. Quem tenha lido a v1.40 e
 parado ali está lendo um leiaute que a NT substituiu.
 
@@ -137,36 +141,76 @@ O enquadramento de cada item vem de dois códigos que andam juntos:
 - **CST do IBS/CBS** — três dígitos, campo `cst_ibscbs`;
 - **cClassTrib** — código de classificação tributária, campo
   `class_trib_ibscbs`. Os três primeiros dígitos repetem o CST; os seguintes
-  detalham o enquadramento legal.
+  detalham o enquadramento legal, e cada código corresponde a um dispositivo
+  específico da LC 214/2025.
 
-Os CST identificados na consulta:
+**A tabela está no programa, derivada da planilha oficial.** As planilhas da
+SVRS ficam versionadas em `dados/oficiais/` e
+`scripts/gerar_tabelas_ibscbs.py` produz o JSON que `documentos.tabelas_ibscbs`
+lê (§1.9). Hoje: **18 CST, 164 classificações, 13 códigos de crédito
+presumido**, publicados em **2026-06-22**.
 
-| CST | Situação |
-|---|---|
-| 000 | Tributação integral |
-| 010 | Tributação com alíquotas uniformes (setor financeiro) |
-| 011 | Tributação com alíquotas uniformes reduzidas |
-| 200 | Alíquota zero ou reduzida |
-| 220 | Alíquota fixa |
-| 221 | Alíquota fixa proporcional |
-| 222 | Redução de base de cálculo |
-| 400 | Isenção |
-| 410 | Imunidade e não incidência |
-| 510 | Diferimento |
-| 515 | Diferimento com redução de alíquota |
-| 550 | Suspensão |
-| 620 | Tributação monofásica |
-| 800 | Transferência de crédito |
-| 810 | Ajustes de IBS na ZFM |
-| 811 | Ajustes |
-| 820 | Tributação em documento específico |
-| 830 | Exclusão de base de cálculo |
+`sped-hub fiscal tabelas` mostra a tabela e a data dela; `--codigo` consulta um
+código nas três.
 
-**O sistema não embute esta tabela como regra de validação.** Ela é publicada e
-atualizada pela SVRS, em tabela interativa própria, e uma cópia congelada no
-código viraria fonte de erro no primeiro ato normativo. Os campos
-`class_trib_ibscbs` e `class_trib_is` têm largura folgada (10) justamente
-porque a tabela cresce.
+Os dezoito CST, com o que cada um **exige** no documento:
+
+| CST | Situação | Exige |
+|---|---|---|
+| 000 | Tributação integral | `gIBSCBS` |
+| 010 | Tributação com alíquotas uniformes | `gIBSCBS` |
+| 011 | Tributação com alíquotas uniformes reduzidas | `gIBSCBS`, `gRed` |
+| 200 | Alíquota reduzida | `gIBSCBS`, `gRed` |
+| 220 | Alíquota fixa | `gIBSCBS` |
+| 221 | Alíquota fixa proporcional | `gIBSCBS` |
+| 222 | Redução de base de cálculo | `gIBSCBS`, redutor de BC |
+| 400 | Isenção | — |
+| 410 | Imunidade e não incidência | — |
+| 510 | Diferimento | `gIBSCBS`, `gDif` |
+| 515 | Diferimento com redução de alíquota | `gIBSCBS`, `gRed`, `gDif` |
+| 550 | Suspensão | `gIBSCBS` |
+| 620 | Tributação monofásica | `gIBSCBSMono` |
+| 800 | Transferência de crédito | `gTransfCred` |
+| 810 | Ajuste de IBS na ZFM | `gCredPresIBSZFM` |
+| 811 | Ajustes | `gAjusteCompet` |
+| 820 | Tributação em documento específico | — |
+| 830 | Exclusão de base de cálculo | `gIBSCBS` |
+
+Note que **620 não exige `gIBSCBS`**: o grupo do monofásico é alternativa, não
+complemento. Somar os dois contaria o imposto duas vezes.
+
+**O que o sistema faz com a tabela é conferir, não calcular.** `fiscal apurar`
+aponta o código que não existe, o par CST × `cClassTrib` que não casa, a
+vigência fora da data de emissão, o código proibido no modelo do documento e o
+grupo exigido que não veio. Cada um deles é uma rejeição na autorização. O que
+ele **não** faz é dizer qual seria o código certo: isso depende do
+enquadramento legal do item, e é decisão de quem escritura.
+
+Também não recalcula tributo a partir da redução da tabela. `pRedIBS` e
+`pRedCBS` estão no JSON e ficam disponíveis para comparação com o que o
+emitente declarou em `pRedAliq`/`pAliqEfet`, mas o sistema **não faz essa
+comparação hoje**: decidir o que significa uma divergência exigiria separar
+redução legal de benefício estadual, e a resposta não é a mesma. O valor que a
+apuração soma continua sendo o destacado no documento.
+
+## Alíquotas padrão
+
+Do item 05 do IT 2025.002 v1.50:
+
+| Ano | IBS estadual | IBS municipal | CBS |
+|---|---|---|---|
+| 2026 | 0,1% | **0%** | 0,9% |
+| 2027 | 0,05% | 0,05% | aguarda legislação |
+| 2028 | 0,05% | 0,05% | aguarda legislação |
+| 2029 em diante | aguarda legislação | aguarda legislação | aguarda legislação |
+
+**Em 2026 a parcela municipal é zero:** os 0,1% do IBS são todos estaduais.
+Repartir "meio a meio" pareceria razoável e mandaria dinheiro para o ente
+errado; a repartição igual só começa em 2027. Por isso `aliquotas_padrao(2027)`
+devolve `None` para a CBS em vez de zero — zero seria uma alíquota, e o que
+existe é uma alíquota ainda não fixada. Cada ente define a sua por lei própria
+(art. 14 da LC 214/2025); sem lei, vale a alíquota de referência do Senado
+(art. 18).
 
 ## Imposto Seletivo: duas formas de alíquota
 
@@ -190,7 +234,14 @@ e a quantidade tributável viajam junto com os valores:
 **O leiaute está conferido contra o documento oficial.** Em 2026-07-31 o
 portal DF-e da SVRS voltou a responder e a NT 2025.002 v1.50 foi baixada e
 lida: o aninhamento de cada grupo desta página vem dela, com o identificador
-do campo (UB…) anotado no código onde a decisão dependeu dele.
+do campo (UB…) anotado no código onde a decisão dependeu dele. Em 2026-08-02 a
+v1.51 foi baixada e conferida — ela altera regras de validação e o cronograma
+da UB12-10, e não mexe em campo nenhum.
+
+**As tabelas também.** No mesmo dia o portal entregou o IT 2025.002 v1.50 e as
+planilhas `cClassTrib 2026-06-22.xlsx` e `cCredPres_2026-06-22.xlsx`, que estão
+versionadas em `dados/oficiais/`. É delas que o programa deriva a tabela — não
+de transcrição.
 
 `nfe.fazenda.gov.br` seguiu fora do ar; o mirror que respondeu foi:
 
@@ -201,16 +252,22 @@ do campo (UB…) anotado no código onde a decisão dependeu dele.
 - Tabela de Crédito Presumido (SVRS):
   <https://dfe-portal.svrs.rs.gov.br/DFE/TabelaCreditoPresumido>
 
-**O que segue vindo de fonte secundária é a semântica dos códigos** — o que
-cada CST do IBS/CBS e cada `cClassTrib` significa. A IT 2025.002 v1.50 existe
-no portal, mas o sistema não a embute: ela é atualizada por ato normativo, e
-uma cópia congelada no código viraria fonte de erro na primeira revisão.
+**A semântica dos códigos deixou de ser fonte secundária.** Ela vinha do que
+se lia por aí, e por isso os códigos eram listados e nunca interpretados. Agora
+vem da planilha oficial. Duas leituras anteriores estavam erradas: o CST 200 é
+**"Alíquota reduzida"**, não "alíquota zero ou reduzida" — não existe CST de
+alíquota zero —, e o 810 é "Ajuste de IBS na ZFM", no singular, com um único
+código de classificação.
 
-O que está **verificado no código** é a *estrutura*: quais campos existem, em
-que grupo cada um vive, que o IBS tem duas parcelas, que o IS aceita alíquota
-específica, e que os dois regimes convivem. Os **valores** de alíquota e os
-**códigos** de classificação são dado de entrada, lido do XML — o sistema não
-os calcula nem os presume.
+**Isso não torna a tabela permanente.** Ela muda por ato normativo, e é por isso
+que a versão vem embutida com ela: a defasagem tem de ser visível
+(`sped-hub fiscal tabelas`), porque tabela velha responde exatamente como
+tabela nova. Atualizar é trocar a planilha em `dados/oficiais/` e rodar
+`scripts/gerar_tabelas_ibscbs.py`; o CI recusa planilha trocada sem regerar.
+
+Os **valores** de alíquota continuam sendo dado de entrada, lido do XML — o
+sistema não os calcula nem os presume. O que a tabela acrescentou foi
+conferência, não cálculo.
 
 ### O que a conferência encontrou
 
@@ -269,9 +326,11 @@ Esta página descreve o que o modelo de dados representa. Não existe ainda:
 - monofásico, retenção, diferimento, crédito presumido e devolução de tributo
   na apuração — os campos são lidos e **medidos**, e a soma direta não os
   consome;
-- os grupos `gTransfCred` (UB106), `gAjusteCompet` (UB112), `gEstornoCred`
-  (UB116) e `gpBioDiferenca`, que o leitor ainda não lê;
-- validação de CST contra a tabela oficial;
+- consumo de `gTransfCred` (UB106), `gAjusteCompet` (UB112), `gEstornoCred`
+  (UB116) e `gpBioDiferenca` — eles são lidos e medidos, mas cada um exige
+  decidir a que competência pertence, e isso é de quem escritura;
+- **correção** da classificação inválida: a conferência aponta o erro e não
+  diz qual seria o código certo;
 - tratamento do split payment;
 - regimes específicos e diferenciados.
 
