@@ -411,6 +411,60 @@ backend suportado.
 
 ---
 
+## REGRA 7 — DEFINIÇÃO DE PRONTO
+
+### 7.1 Fase concluída é fase alcançável pela porta de entrada **[CI]**
+
+Uma fase só pode ser marcada como `concluída` em `docs/status.md` quando pelo
+menos um dos testes citados como evidência **alcançar a capacidade pela porta
+de entrada real** — a linha de comando (`src.cli`), a tela (`TestClient`) ou o
+navegador (`page.goto`).
+
+Alcançar é **chamar**: o teste executa `main([...])` ou faz a requisição pela
+aplicação montada. Importar o módulo da porta não conta, e chamar a função da
+rota direto — `asyncio.run` na corrotina do handler — conta menos ainda: pula
+o roteamento, a sessão e o escopo multi-tenant, que é justamente onde mora o
+defeito que só aparece em produção.
+
+Suíte de módulo verde é condição necessária, nunca suficiente. O defeito que
+esta regra evita não é teórico: um módulo pode ter cem testes, cobertura
+completa e nenhum caminho do produto que o alcance. Os testes passam, a fase
+é dada por pronta, e o que o usuário instala não faz aquilo. A §1.8 já exigia
+que o teste citado existisse; existir não é alcançar.
+
+**Exceção declarada.** Nem toda fase entrega capacidade ao usuário: há fases
+que entregam garantia interna — uma regra verificada, uma migração, uma trava
+de configuração. Para essas, a evidência traz a marca `[interno: motivo]` na
+mesma célula:
+
+```text
+| 30 | Roadmap com marcador | concluída | `tests/x.py` [interno: a garantia é do repositório, não do produto] | … |
+```
+
+O motivo é obrigatório e o CI cobra que ele exista. Uma marca vazia seria um
+carimbo, e carimbo é o que se aplica sem pensar; escrever por que aquela fase
+não tem porta obriga a olhar se ela realmente não tem. Fase sem teste de porta
+e sem a marca derruba o pipeline — que é o que impede a exceção de virar o
+caminho fácil para todas.
+
+### 7.2 Todo módulo é alcançável a partir de uma porta de entrada **[CI]**
+
+Nenhum módulo de `src/` fica órfão: cada um é alcançado, por importação
+transitiva, a partir de uma porta de entrada.
+
+A lista de portas é **derivada**, não mantida à mão (§1.9): são os
+`[project.scripts]` do `pyproject.toml` — o que o `pip install` põe no `PATH`
+— mais os módulos com `if __name__ == "__main__"`, que é como o Dockerfile
+sobe o worker e o watchdog. Mantida à mão, a lista viraria o lugar onde se
+acrescenta o módulo órfão para calar o teste.
+
+Módulo que só os testes alcançam é código que o produto não executa —
+mantido, revisado e documentado como se fosse parte do sistema, sem ser. Para
+um módulo novo virar porta, ele ganha um `[project.scripts]` ou um
+`__main__`: a declaração é uma forma de rodá-lo, não uma linha numa lista.
+
+---
+
 ## Exceções
 
 Exceção a qualquer regra acima exige ADR (§1.6) declarando qual regra,
@@ -418,4 +472,4 @@ por quê, e por quanto tempo. Exceção sem ADR é violação.
 
 ---
 
-*Regras novas entram como REGRA 7, REGRA 8, … neste mesmo arquivo.*
+*Regras novas entram como REGRA 8, REGRA 9, … neste mesmo arquivo.*

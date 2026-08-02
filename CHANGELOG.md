@@ -8,6 +8,15 @@ interno da implementação.
 
 ## [Não publicado]
 
+### Alterado
+- **"Fase concluída" passou a significar que o caminho do usuário foi
+  percorrido.** Até aqui bastava que os testes citados existissem e
+  passassem — e um módulo pode ter cobertura completa sem que nenhum caminho
+  do produto o execute. Agora pelo menos uma das evidências precisa entrar
+  pela linha de comando ou pela tela, e a fase que entrega garantia interna
+  precisa dizer por escrito que é esse o caso. A tabela de estado foi
+  reavaliada fase a fase sob o critério novo (ADR 0008).
+
 ### Adicionado
 - **O total do documento passou a acompanhar a correção dos itens.** Até aqui,
   alterar o valor de um item deixava o total da nota para trás, e o sistema
@@ -235,6 +244,14 @@ interno da implementação.
   devolvia um "acesso administrativo necessário" a quem não tinha pedido acesso
   a nada — só clicado no que estava lá. O monitoramento já era escondido, sem
   que a diferença tivesse razão.
+- **Webhook de importação disparava contra o banco errado.** Quem rodava
+  `sped-hub importar-ecd --db outro.db` — o caso de quem tem mais de uma base,
+  ou testa antes de valer — via a importação concluir e nenhum webhook sair.
+  O sistema procurava os assinantes no banco configurado no processo, não
+  naquele em que a ECD tinha acabado de entrar; como a entrega não interrompe
+  a importação quando falha, nada aparecia no lugar do evento. O defeito
+  atravessou vinte e um testes de webhook, todos verdes, porque nenhum deles
+  passava pela linha de comando.
 - **Uma duplicata deixou de derrubar a importação inteira.** Com a política
   "recusar", importar uma pasta em que um arquivo já tinha entrado
   interrompia o lote — e os arquivos que vinham depois ficavam de fora, sem

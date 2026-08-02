@@ -5,64 +5,64 @@ Primeiro arquivo a ler depois de `REGRAS-DO-PROJETO.md`.
 Regra §1.8: nada é marcado como concluído sem os testes daquela fase
 passando. A coluna "Evidência" aponta o teste que prova.
 
-**Última atualização:** 2026-07-30 · **Versão:** 0.19.0
+**Última atualização:** 2026-08-02 · **Versão:** 0.19.0
 
 ## Fases
 
 | Fase | Tema | Estado | Evidência | Pendências |
 |---|---|---|---|---|
-| 1–8 | Parsers, relatórios, exportação, dashboard | concluída | `tests/test_parsers.py`, `tests/test_reports.py`, `tests/test_fase2.py` | — |
-| 9 | GraphQL v2, exportação multi-formato | concluída | `tests/test_fase9.py` | — |
-| 10 | Webhooks, multi-ECD, layout customizável | concluída | `tests/test_fase10.py` | — |
-| 11 | Dashboard de webhooks, multi-tenancy | concluída | `tests/test_fase11.py` | — |
-| 12 | Middleware multi-tenant, API keys | concluída | `tests/test_fase12.py` | — |
+| 1–8 | Parsers, relatórios, exportação, dashboard | concluída | `tests/test_parsers.py`, `tests/test_reports.py`, `tests/test_fase2.py`, `tests/test_cli.py` | — |
+| 9 | GraphQL v2, exportação multi-formato | concluída | `tests/test_fase9.py`, `tests/test_review_regressions.py::TestDashboardSecurityRegression::test_graphql_requires_api_key_or_session` | — |
+| 10 | Webhooks, multi-ECD, layout customizável | concluída | `tests/test_fase10.py`, `tests/test_portas_de_entrada.py::TestApiPelaAplicacao` | — |
+| 11 | Dashboard de webhooks, multi-tenancy | concluída | `tests/test_fase11.py`, `tests/test_portas_de_entrada.py::TestApiPelaAplicacao` | — |
+| 12 | Middleware multi-tenant, API keys | concluída | `tests/test_fase12.py`, `tests/test_escopo_de_api_key.py` | — |
 | 13 | Rate limiting, auditoria | concluída | `tests/test_fase13.py` | — |
 | 14 | Jobs assíncronos, cache | concluída | `tests/test_fase14.py` | — |
-| 15 | Redis, fila de workers, e-mail | concluída | `tests/test_fase15.py` | Redis não roda no CI; fallback para memória é o que se testa |
+| 15 | Redis, fila de workers, e-mail | concluída | `tests/test_fase15.py` [interno: a fila vive no worker_runner, daemon cujo laço um teste não atravessa sem travar; o que passa por porta é o job assíncrono, na fase 14] | Redis não roda no CI; fallback para memória é o que se testa |
 | 16 | Observabilidade e monitoramento | concluída | `tests/test_fase16.py`, `tests/test_review_regressions.py` | — |
 | 17 | Fundação de produção | concluída | `tests/test_settings.py`, `tests/test_multibackend.py`, `tests/test_migrations.py`, `tests/test_ecd_grande.py`, `tests/test_hardening.py`, `tests/test_deploy_config.py`, `tests/test_cli.py` | ver "Em aberto" |
 | 18 | Front-end sem CDN | concluída | `tests/test_vendor_assets.py` | testes de navegador seguem opt-in (§3.5) |
-| 19 | Regras do projeto verificáveis | concluída | `tests/test_regras_projeto.py` | — |
+| 19 | Regras do projeto verificáveis | concluída | `tests/test_regras_projeto.py` [interno: a garantia é sobre o repositório, não sobre o produto] | — |
 | 20 | Testes de navegador | concluída | `tests/test_e2e_playwright.py`, `tests/test_hierarquia_ciclica.py` | seguem opt-in sob o marcador `e2e` (ADR 0004) |
-| 21 | Validação de hierarquia cíclica | concluída | `tests/test_validators.py` | recusar o arquivo na importação segue como decisão de produto |
+| 21 | Validação de hierarquia cíclica | concluída | `tests/test_validators.py`, `tests/test_portas_de_entrada.py::TestHierarquiaCiclicaPelaCLI` | recusar o arquivo na importação segue como decisão de produto |
 | 22 | Identidade "Tinta & Latão" nos exportados | concluída | `tests/test_identidade_export.py`, `tests/test_cli.py` | — (o dashboard aderiu na Fase 24) |
-| 23 | Documentação de módulo completa (24/24) | concluída | `tests/test_regras_projeto.py` | conteúdo × código é item de revisão (§1.12) |
+| 23 | Documentação de módulo completa (24/24) | concluída | `tests/test_regras_projeto.py` [interno: a garantia é sobre o repositório, não sobre o produto] | conteúdo × código é item de revisão (§1.12) |
 | 24 | Identidade "Tinta & Latão" no dashboard web | concluída | `tests/test_identidade_dashboard.py`, `tests/test_e2e_playwright.py` | — |
-| 25 | Recusa de ECD com hierarquia cíclica (ADR 0006) | concluída | `tests/test_hierarquia_ciclica.py` | bancos legados seguem cobertos pela validação (h) |
-| 26 | Webhooks emitem os eventos documentados | concluída | `tests/test_webhooks_emissao.py` | sem fila persistente; recuperação é manual |
+| 25 | Recusa de ECD com hierarquia cíclica (ADR 0006) | concluída | `tests/test_hierarquia_ciclica.py`, `tests/test_portas_de_entrada.py::TestHierarquiaCiclicaPelaCLI` | bancos legados seguem cobertos pela validação (h) |
+| 26 | Webhooks emitem os eventos documentados | concluída | `tests/test_webhooks_emissao.py`, `tests/test_portas_de_entrada.py::TestWebhookDisparadoPelaCLI` | sem fila persistente; recuperação é manual |
 | 27 | Configuração documentada com efeito real (§2.2) | concluída | `tests/test_config_com_efeito.py`, `tests/test_regras_projeto.py` | `SPED_HUB_SECRET_KEY` segue reservada, por decisão de produto |
-| 28 | Contabilidade de entregas de webhook | concluída | `tests/test_webhooks_entregas_orfas.py`, `tests/test_migrations.py` | o reenvio segue manual e sequencial |
+| 28 | Contabilidade de entregas de webhook | concluída | `tests/test_webhooks_entregas_orfas.py`, `tests/test_migrations.py`, `tests/test_portas_de_entrada.py::TestApiPelaAplicacao::test_o_dashboard_de_entregas_responde_pela_rota` | o reenvio segue manual e sequencial |
 | 29 | Importação interrompida por reinício é encerrada | concluída | `tests/test_jobs_interrompidos.py` | retomar de onde parou segue fora (§6.1) |
-| 30 | Roadmap com marcador de ausência verificável (§1.13) | concluída | `tests/test_regras_projeto.py::TestRoadmap`, `tests/test_regras_projeto.py::TestResolucaoDeMarcador` | — |
+| 30 | Roadmap com marcador de ausência verificável (§1.13) | concluída | `tests/test_regras_projeto.py::TestRoadmap`, `tests/test_regras_projeto.py::TestResolucaoDeMarcador` [interno: a garantia é sobre o repositório, não sobre o produto] | — |
 | 31 | Retenção de histórico que realmente executa | concluída | `tests/test_manutencao.py` | auditoria segue com limpeza manual, por escolha |
 | 32 | Migração de dados entre bancos (`sped-hub migrar-dados`) | concluída | `tests/test_migracao_de_dados.py` | exercitada contra PostgreSQL real no CI |
 | 33 | Reenvio automático de entrega interrompida | concluída | `tests/test_manutencao.py::TestReenvioAutomatico` | `failed` segue no reenvio manual, por escolha |
 | 34 | Escopo e poder da API Key | concluída | `tests/test_escopo_de_api_key.py` | chave sem dono segue lendo tudo, por retrocompatibilidade |
 | 35 | `docker compose up` funciona na primeira execução | concluída | `tests/test_deploy_config.py::TestEntrypointDoNginxExecutado` | emissão do certificado real segue manual (ver `docs/deploy.md`) |
-| 36 | Worker encerra em vez de girar em vazio com a fila quebrada | concluída | `tests/test_worker_fila_quebrada.py`, `tests/test_migrations.py::TestLoggingSobreviveAMigracao` | — |
+| 36 | Worker encerra em vez de girar em vazio com a fila quebrada | concluída | `tests/test_worker_fila_quebrada.py`, `tests/test_migrations.py::TestLoggingSobreviveAMigracao` [interno: o comportamento é o laço do daemon; entrar pela porta significaria rodar o próprio worker_runner, que não retorna] | — |
 | 37 | Registro público fecha depois do primeiro usuário | concluída | `tests/test_registro_publico.py` | tela de gestão de usuários segue fora; a criação é por CLI |
 | 38 | Mensagem de erro chega à tela | concluída | `tests/test_registro_publico.py::TestMensagemDeErroChegaNaTela`, `tests/test_e2e_playwright.py` | — |
-| 39 | Central de Documentos Fiscais: modelo em três camadas, adaptador de NF-e e importação em lote | concluída | `tests/test_documentos_fiscais.py`, `tests/test_migrations.py` | NFS-e, classificação, alterações em massa e geradores de SPED seguem no roadmap |
-| 40 | Camada efetiva: ajustes com histórico e reversão por lote | concluída | `tests/test_camada_efetiva.py` | — |
-| 41 | Motor de classificação fiscal com regras, prioridade e conflito | concluída | `tests/test_classificacao_fiscal.py` | nenhuma tela mostra as sugestões ainda; a aplicação é por chamada |
-| 42 | Alterações em massa: seleção, simulação com impacto, proteções, recálculo de totais e reversão | concluída | `tests/test_alteracoes_em_massa.py` | o recálculo (§12.5) aparece na simulação e recompõe os totais que são soma de parcela; o vNF segue no roadmap, com aviso |
-| 43 | Gerador da EFD ICMS/IPI (blocos 0, C, E, 9) | concluída | `tests/test_gerador_efd_icms.py` | inventário, ativo, serviços, ajustes 5.1.1 e ST seguem fora — ver `docs/modules/escrituracoes.md` |
-| 44 | Gerador da EFD-Contribuições (blocos 0, C, M, 9), com regime e atividade como cadastro obrigatório | concluída | `tests/test_gerador_efd_contribuicoes.py` | no regime cumulativo os créditos das entradas **não** são descontados, e o resultado avisa; o `IND_ATIV` tem tabela própria, diferente da EFD ICMS/IPI; blocos A, D, F e I, créditos extemporâneos e regimes especiais seguem fora |
-| 45 | Terceira camada: a escrituração arquivada — o arquivo que efetivamente saiu | concluída | `tests/test_escrituracao_arquivada.py` | o conteúdo é guardado, não reconstruído, e a linha nunca é alterada; nenhuma tela mostra o histórico ainda |
-| 47 | Apuração de CBS, IBS e Imposto Seletivo | concluída | `tests/test_apuracao_reforma.py` | o IS **não** gera crédito e as duas parcelas do IBS são apuradas em separado; o total de 2026 não é o valor a recolher, e o resultado avisa. Monofásico, diferimento e split payment seguem fora |
+| 39 | Central de Documentos Fiscais: modelo em três camadas, adaptador de NF-e e importação em lote | concluída | `tests/test_documentos_fiscais.py`, `tests/test_migrations.py`, `tests/test_cli_fiscal.py`, `tests/test_tela_importar.py` | NFS-e, classificação, alterações em massa e geradores de SPED seguem no roadmap |
+| 40 | Camada efetiva: ajustes com histórico e reversão por lote | concluída | `tests/test_camada_efetiva.py`, `tests/test_cli_fiscal.py` | — |
+| 41 | Motor de classificação fiscal com regras, prioridade e conflito | concluída | `tests/test_classificacao_fiscal.py`, `tests/test_cli_fiscal.py`, `tests/test_telas_classificar_corrigir.py` | nenhuma tela mostra as sugestões ainda; a aplicação é por chamada |
+| 42 | Alterações em massa: seleção, simulação com impacto, proteções, recálculo de totais e reversão | concluída | `tests/test_alteracoes_em_massa.py`, `tests/test_cli_fiscal.py` | o recálculo (§12.5) aparece na simulação e recompõe os totais que são soma de parcela; o vNF segue no roadmap, com aviso |
+| 43 | Gerador da EFD ICMS/IPI (blocos 0, C, E, 9) | concluída | `tests/test_gerador_efd_icms.py`, `tests/test_cli_fiscal.py`, `tests/test_tela_gerar.py` | inventário, ativo, serviços, ajustes 5.1.1 e ST seguem fora — ver `docs/modules/escrituracoes.md` |
+| 44 | Gerador da EFD-Contribuições (blocos 0, C, M, 9), com regime e atividade como cadastro obrigatório | concluída | `tests/test_gerador_efd_contribuicoes.py`, `tests/test_cli_fiscal.py` | no regime cumulativo os créditos das entradas **não** são descontados, e o resultado avisa; o `IND_ATIV` tem tabela própria, diferente da EFD ICMS/IPI; blocos A, D, F e I, créditos extemporâneos e regimes especiais seguem fora |
+| 45 | Terceira camada: a escrituração arquivada — o arquivo que efetivamente saiu | concluída | `tests/test_escrituracao_arquivada.py`, `tests/test_cli_fiscal.py` | o conteúdo é guardado, não reconstruído, e a linha nunca é alterada; nenhuma tela mostra o histórico ainda |
+| 47 | Apuração de CBS, IBS e Imposto Seletivo | concluída | `tests/test_apuracao_reforma.py`, `tests/test_cli_fiscal.py` | o IS **não** gera crédito e as duas parcelas do IBS são apuradas em separado; o total de 2026 não é o valor a recolher, e o resultado avisa. Monofásico, diferimento e split payment seguem fora |
 | 46 | `sped-hub fiscal`: a cadeia da Central pela linha de comando | concluída | `tests/test_cli_fiscal.py` | regras, importar, listar, classificar, alterar, desfazer, apurar, gerar e conferir. `classificar` e `alterar` **não gravam** sem que se peça; gerar **sempre** arquiva; `conferir` sai com 2 quando o entregue divergiu. Telas web seguem fora |
 
-| 48 | Leiaute conferido a cada linha escrita, e os campos que faltavam no C100, C170 e E110 | concluída | `tests/test_leiaute_sped.py` | `_add` recusa registro fora do leiaute ou com contagem diferente; o `IND_FRT` vem do `modFrete` do XML e, quando o documento não o traz mas tem frete, sai `9` com aviso nomeando o documento |
+| 48 | Leiaute conferido a cada linha escrita, e os campos que faltavam no C100, C170 e E110 | concluída | `tests/test_leiaute_sped.py`, `tests/test_cli_fiscal.py` | `_add` recusa registro fora do leiaute ou com contagem diferente; o `IND_FRT` vem do `modFrete` do XML e, quando o documento não o traz mas tem frete, sai `9` com aviso nomeando o documento |
 
 | 49 | Espelho da escrituração: ler o arquivo antes de transmitir, com as conferências do validador | concluída | `tests/test_espelho.py`, `tests/test_cli_fiscal.py` | é lido dos **registros**, não do banco; confere itens × documento, C190 × C170, apuração × documentos e as contagens do bloco 9. `sped-hub fiscal espelho` **não arquiva** e sai com 2 quando alguma conferência falha |
 
 | 50 | Marcar qual escrituração foi transmitida, com recibo | concluída | `tests/test_escrituracao_transmitida.py`, `tests/test_cli_fiscal.py` | nenhuma é marcada sozinha; marcar **não se desfaz**; segunda entrega original do mesmo período é recusada (a finalidade é lida do `0000` do arquivo), com `--forcar` para o caso de entrega rejeitada e reenviada |
 
-| 51 | Saldo credor anterior no E110, vindo da escrituração transmitida do período anterior | concluída | `tests/test_saldo_credor_anterior.py` | só de escrituração **transmitida** e só se o período for contíguo; o valor é lido do arquivo, não recalculado. Mês sem nota mas com saldo passa a emitir o E110, senão o crédito some da cadeia |
+| 51 | Saldo credor anterior no E110, vindo da escrituração transmitida do período anterior | concluída | `tests/test_saldo_credor_anterior.py`, `tests/test_portas_de_entrada.py::TestSaldoCredorPelaCLI` | só de escrituração **transmitida** e só se o período for contíguo; o valor é lido do arquivo, não recalculado. Mês sem nota mas com saldo passa a emitir o E110, senão o crédito some da cadeia |
 
 | 52 | Cadastro fiscal pela linha de comando, e a natureza jurídica da empresa | concluída | `tests/test_cli_fiscal.py`, `tests/test_gerador_efd_contribuicoes.py` | `fiscal cadastro` mostra o que falta para cada obrigação e valida contra as tabelas oficiais; o `IND_NAT_PJ` deixa de sair fixo em `00`. Cooperativa (01) e entidade de folha (02) passam a ser declaráveis; as naturezas de SCP (03, 04, 05) avisam que o registro 0035 não é gerado |
 
-| 53 | O CST decide se o valor destacado entra na apuração do PIS/Cofins | concluída | `tests/test_cst_na_apuracao.py` | entrada com CST 70 a 75 não gera crédito; saída 04, 06 a 09 não gera débito. CST do outro sentido — o estado de toda nota recém-importada — soma e aponta `fiscal classificar`; valor descartado é dito com o total |
+| 53 | O CST decide se o valor destacado entra na apuração do PIS/Cofins | concluída | `tests/test_cst_na_apuracao.py`, `tests/test_portas_de_entrada.py::TestCstDescartaPelaCLI` | entrada com CST 70 a 75 não gera crédito; saída 04, 06 a 09 não gera débito. CST do outro sentido — o estado de toda nota recém-importada — soma e aponta `fiscal classificar`; valor descartado é dito com o total |
 
 | 54 | A apuração da Reforma mede o que não consome, em vez de avisar sempre | concluída | `tests/test_apuracao_reforma.py`, `tests/test_cli_fiscal.py` | diferimento, crédito presumido, devolução e monofásico saem com valor e contagem, fora do total; CST de IBS/CBS diferente de `000` é **listado, não interpretado** — a IT 002/2025 segue em revisão e as fontes divergem |
 
@@ -70,9 +70,9 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 56 | Excel de mão dupla: exportar os itens, corrigir fora, reimportar | concluída | `tests/test_planilha_de_documentos.py`, `tests/test_cli_fiscal.py` | a planilha sai com a camada **efetiva** aplicada, e a volta **não grava**: devolve a mesma `Simulacao` de `simular`, que `confirmar` grava num lote reversível. Cada linha leva `documento_id` e `item_id`, e a chave da nota é reconferida contra o banco — planilha de outra base é recusada linha a linha, não aplicada no documento errado. Só as colunas editáveis voltam |
 
-| 57 | Os grupos da reforma lidos onde a NT 2025.002 v1.50 os põe | concluída | `tests/test_leitura_reforma_nt.py`, `tests/test_documentos_fiscais.py` | redução, diferimento e devolução existem **uma por destinação** (`gIBSUF`, `gIBSMun`, `gCBS`); o crédito presumido está em `gCredPresOper`, irmão de `gIBSCBS`; o monofásico foi reformulado em quatro variantes e fecha em `vTotIBSMonoItem`/`vTotCBSMonoItem`; `cMunFGIBS` é campo do `ide`, do documento. Procurados como filhos diretos de `gIBSCBS`, todos liam **zero** sem levantar erro — a fixture reproduzia o mesmo engano |
+| 57 | Os grupos da reforma lidos onde a NT 2025.002 v1.50 os põe | concluída | `tests/test_leitura_reforma_nt.py`, `tests/test_documentos_fiscais.py`, `tests/test_portas_de_entrada.py::TestGruposDaReformaPelaCLI` | redução, diferimento e devolução existem **uma por destinação** (`gIBSUF`, `gIBSMun`, `gCBS`); o crédito presumido está em `gCredPresOper`, irmão de `gIBSCBS`; o monofásico foi reformulado em quatro variantes e fecha em `vTotIBSMonoItem`/`vTotCBSMonoItem`; `cMunFGIBS` é campo do `ide`, do documento. Procurados como filhos diretos de `gIBSCBS`, todos liam **zero** sem levantar erro — a fixture reproduzia o mesmo engano |
 
-| 58 | Os grupos que faltavam da NT, e a retenção que era contada duas vezes | concluída | `tests/test_leitura_reforma_nt.py`, `tests/test_apuracao_reforma.py` | transferência de crédito, ajuste de competência (com a competência, que pode ser retroativa), estorno, diferença de mistura de biocombustível e a base do crédito presumido passam a ser lidos e medidos. A regra UB105a-10 diz que `vTotIBSMonoItem` **já contém** o sujeito à retenção: medi-lo à parte fazia a lista somar 14,00 onde a exposição é 12,00 |
+| 58 | Os grupos que faltavam da NT, e a retenção que era contada duas vezes | concluída | `tests/test_leitura_reforma_nt.py`, `tests/test_apuracao_reforma.py`, `tests/test_portas_de_entrada.py::TestGruposDaReformaPelaCLI` | transferência de crédito, ajuste de competência (com a competência, que pode ser retroativa), estorno, diferença de mistura de biocombustível e a base do crédito presumido passam a ser lidos e medidos. A regra UB105a-10 diz que `vTotIBSMonoItem` **já contém** o sujeito à retenção: medi-lo à parte fazia a lista somar 14,00 onde a exposição é 12,00 |
 
 | 59 | Tela do cadastro fiscal, e a regra num lugar só | concluída | `tests/test_tela_cadastro_fiscal.py`, `tests/test_cli_fiscal.py` | `CADASTRO_FISCAL`, `EXIGIDOS` e a validação saem da CLI para `escrituracoes.cadastro`; a tela e o comando usam a mesma. Escopo por escritório aplicado **na consulta**, não conferido depois de carregar; empresa alheia responde igual a inexistente. Campo em branco é "não alterar", e recusa não grava nem os campos válidos que vieram junto |
 
@@ -84,9 +84,10 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 63 | Tela de gerar, com o espelho antes e a marca de entrega depois | concluída | `tests/test_tela_gerar.py` | o espelho **não gera nem arquiva**; gerar **sempre arquiva**, e não há prévia que grave em disco. O arquivo baixado é o **guardado**, não um recém-gerado — a camada efetiva pode ter mudado, e "o que você entregou" é outra pergunta. Marcar a transmissão não se desfaz, e segunda original do mesmo período é recusada. Com isso o fluxo inteiro existe na tela |
 
-| 64 | O total do documento (vNF) recomposto pela regra W16-10 do MOC | concluída | `tests/test_recomposicao_do_vnf.py`, `tests/test_alteracoes_em_massa.py` | os cinco termos que faltavam entram no modelo (ICMS desonerado, FCP-ST, imposto de importação, IPI devolvido, serviços). As três exceções da regra são tratadas: veículo novo em faturamento direto não soma ST/FCP-ST/IPI devolvido; importação (CFOP 3xxx **efetivo**) não é recomposta, e avisa; e a convenção do ICMS desonerado é **lida do documento original**, porque o Fisco aceita as duas |
+| 64 | O total do documento (vNF) recomposto pela regra W16-10 do MOC | concluída | `tests/test_recomposicao_do_vnf.py`, `tests/test_alteracoes_em_massa.py`, `tests/test_portas_de_entrada.py::TestTotalDoDocumentoPelaCLI` | os cinco termos que faltavam entram no modelo (ICMS desonerado, FCP-ST, imposto de importação, IPI devolvido, serviços). As três exceções da regra são tratadas: veículo novo em faturamento direto não soma ST/FCP-ST/IPI devolvido; importação (CFOP 3xxx **efetivo**) não é recomposta, e avisa; e a convenção do ICMS desonerado é **lida do documento original**, porque o Fisco aceita as duas |
 
 | 65 | Os formulários das telas enviam o que as rotas leem | concluída | `tests/test_formularios_batem_com_as_rotas.py` | fecha a costura entre teste de rota (que monta o POST à mão) e teste de página (que confere o HTML): um `name=` divergente fazia os dois passarem com a página quebrada. O envio parte do formulário **da página**. O menu deixou de oferecer as quatro telas de administrador a quem não é — davam 403 |
+| 66 | Fase concluída é fase alcançada pela porta de entrada (REGRA 7, ADR 0008) | concluída | `tests/test_portas_de_entrada.py`, `tests/test_regras_projeto.py::TestDefinicaoDePronto` | 29 das fases concluídas não tinham evidência que chegasse à CLI ou à tela. A maioria já tinha teste de ponta em outro arquivo e ganhou a citação; o que faltava virou teste novo; cinco declararam `[interno]` com motivo. A lista de portas passou a ser derivada do `pyproject.toml`. O webhook de importação disparava contra o banco configurado, não contra o do `--db` |
 
 ## Limites do comportamento atual
 
