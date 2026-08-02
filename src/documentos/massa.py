@@ -320,6 +320,18 @@ _CFOP_ENTRADA = ("1", "2", "3")
 _CFOP_SAIDA = ("5", "6", "7")
 
 
+def _tabela_oficial():
+    """As tabelas do IBS/CBS, importadas tarde para não circular.
+
+    `tabelas_ibscbs` não depende deste módulo, mas o import no topo criaria
+    a dependência assim mesmo e ela cresceria sozinha.  Aqui o acoplamento
+    fica onde ele é usado, e `lru_cache` faz o custo ser uma vez por processo.
+    """
+    from src.documentos.tabelas_ibscbs import tabelas
+
+    return tabelas()
+
+
 def _verificar(
     campo: str,
     valor: Any,
@@ -356,8 +368,25 @@ def _verificar(
         if not texto.isdigit():
             problemas.append(f"{campo.upper()} {texto!r} não é numérico")
 
-    if campo == "cst_ibscbs" and texto and not re.fullmatch(r"\d{3}", texto):
-        problemas.append(f"CST do IBS/CBS {texto!r} não tem três dígitos")
+    if campo == "cst_ibscbs" and texto:
+        if not re.fullmatch(r"\d{3}", texto):
+            problemas.append(f"CST do IBS/CBS {texto!r} não tem três dígitos")
+        elif texto not in _tabela_oficial().cst:
+            problemas.append(
+                f"CST do IBS/CBS {texto} não está na tabela oficial "
+                f"(publicada em {_tabela_oficial().publicada_em})"
+            )
+
+    # `cClassTrib` tem seis dígitos e os três primeiros repetem o CST — mas
+    # conferir só o formato deixaria passar `999999`, que é a forma mais fácil
+    # de preencher um campo obrigatório sem saber o que pôr.  A tabela é a
+    # única maneira de distinguir código válido de código inventado.
+    if campo == "class_trib_ibscbs" and texto and texto not in _tabela_oficial().class_trib:
+        problemas.append(
+            f"cClassTrib {texto!r} não está na tabela oficial "
+            f"(publicada em {_tabela_oficial().publicada_em}); "
+            "`sped-hub fiscal tabelas` lista os códigos de cada CST"
+        )
 
     return problemas
 

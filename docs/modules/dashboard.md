@@ -81,6 +81,14 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   qual é qual. O XML é servido do que foi guardado (`xml_original`), nunca
   remontado das colunas — a camada original só vale enquanto for o que o
   emitente assinou.
+- **A divergência de classificação fica no item, não na página.** A apuração
+  já apontava CST e `cClassTrib` fora da tabela oficial, mas ela é do mês
+  inteiro: achar *qual* nota tem o problema exigiria sair procurando. Aqui o
+  apontamento aparece ao lado da tabela do item, com a data de publicação da
+  tabela — sem ela, quem lê não sabe se a divergência é do documento ou do
+  sistema. E aparece **só quando existe**: seção que sai sempre treina quem
+  lê a ignorá-la. A conferência é sobre os valores **efetivos**, que são os
+  que vão para o arquivo.
 - **Campo corrigido entra na tabela mesmo fora da lista de revisão.** Revisar
   os 68 campos de cada item seria ilegível, mas um ajuste que a tela não
   mostrasse seria correção invisível — e é isso que a tela existe para

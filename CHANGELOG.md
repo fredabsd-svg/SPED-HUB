@@ -26,6 +26,19 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **Os dois códigos da Reforma passaram a ser corrigíveis.** O CST e a
+  classificação tributária do IBS/CBS eram os únicos códigos que a tela de
+  correção e a planilha não deixavam mexer — e são exatamente os que toda nota
+  passa a trazer a partir de 03/08/2026. Entram agora porque só agora um valor
+  inventado é recusado: `fiscal alterar`, a tela e a planilha conferem contra a
+  tabela oficial. Antes só o formato era conferido, e `999999` tem o formato
+  certo — é a forma mais fácil de preencher um campo obrigatório sem saber o
+  que pôr.
+- **A tela do documento mostra a divergência no item onde ela está.** A
+  apuração já apontava, mas ela é do mês inteiro: achar qual nota tinha o
+  problema exigia sair procurando. O apontamento aparece ao lado da tabela do
+  item, com a data da tabela — sem ela, não dá para saber se a divergência é
+  do documento ou do sistema.
 - **As tabelas oficiais do IBS e da CBS passaram a viver dentro do programa.**
   Até aqui o sistema listava o código de situação tributária que fugisse da
   tributação integral e dizia, com todas as letras, que não sabia interpretá-lo

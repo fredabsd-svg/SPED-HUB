@@ -72,6 +72,14 @@ EDITAVEIS = (
     "cst_ipi",
     "cst_pis",
     "cst_cofins",
+    # Os dois códigos da Reforma entram aqui pelo mesmo motivo que os de cima:
+    # é o que uma nota importada traz errado e o escritório precisa corrigir.
+    # A partir de 03/08/2026 eles passam a existir em toda nota, e sem eles a
+    # planilha e a tela de correção alcançariam só o regime que está saindo.
+    # Entram agora, e não antes, porque só agora um valor inventado é recusado
+    # — a tabela oficial é o que separa código real de dígito digitado.
+    "cst_ibscbs",
+    "class_trib_ibscbs",
     "unidade",
     "quantidade",
     "valor_unitario",

@@ -89,6 +89,18 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   do IT incluiu seis códigos, dividiu o 620004 em dois e renumerou o antigo
   620005. A geração é lida por **nome de coluna**: a planilha tem 82 colunas,
   dezenas vazias, e uma coluna inserida no meio deslocaria tudo em silêncio.
+- **`EDITAVEIS` ganhou os dois códigos da Reforma.** Eram os únicos que a
+  planilha e a tela de correção não alcançavam, e passam a existir em toda
+  nota a partir de 03/08/2026. Entraram agora, e não antes, porque só agora um
+  valor inventado é recusado — a lista de campos editáveis sem uma tabela por
+  trás seria um convite a digitar qualquer coisa num campo obrigatório.
+- **`alterar` recusa código que não existe; a coerência fica para depois.**
+  `_verificar` conhece a tabela e recusa `cst_ibscbs`/`class_trib_ibscbs`
+  inventado — conferir só o formato deixaria passar `999999`, que é a forma
+  mais fácil de preencher um campo obrigatório sem saber o que pôr. O que ele
+  **não** confere é se o CST novo casa com o `cClassTrib` que o item já tem:
+  a correção dos dois é feita num comando cada, e recusar o primeiro
+  impediria a sequência legítima. Quem vê o estado final é a apuração.
 - **A conferência aponta o erro, não a correção.** A tabela diz que a
   classificação está inválida; qual seria a válida depende do enquadramento
   legal do item, que é decisão de quem escritura. Sugerir um código seria

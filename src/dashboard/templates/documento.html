@@ -82,6 +82,23 @@
             {% endif %}
         </h3>
         <div style="overflow-x:auto;margin-top:12px;">{{ tabela(bloco.linhas) }}</div>
+        {% if bloco.classificacao %}
+        <div data-secao="classificacao-{{ loop.index }}"
+             style="margin-top:16px;padding:12px;border-left:3px solid var(--danger,#DC2626);
+                    background:var(--gray-50,#F9FAFB);">
+            <strong style="font-size:.875rem;">Classificação divergente da tabela oficial</strong>
+            <p style="color:var(--gray-500);font-size:.8125rem;margin:4px 0 8px;">
+                Conferido contra {{ tabela_oficial.documento }}, publicada em
+                {{ tabela_oficial.publicada_em }}. Documento com esta divergência é
+                recusado na autorização.
+            </p>
+            <ul style="font-size:.8125rem;margin:0;padding-left:18px;">
+                {% for problema in bloco.classificacao %}
+                <li>{{ problema }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
     </div>
     {% endfor %}
 

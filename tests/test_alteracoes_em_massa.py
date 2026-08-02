@@ -409,6 +409,33 @@ class TestProtecoes:
         assert simulacao.impedida
         assert any("três dígitos" in a.problema for a in simulacao.avisos)
 
+    def test_cst_do_ibscbs_fora_da_tabela_oficial(self, sessao, cenario):
+        """Três dígitos não basta: `999` tem formato certo e não existe."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("cst_ibscbs", "999")])
+
+        assert simulacao.impedida
+        assert any("não está na tabela oficial" in a.problema for a in simulacao.avisos)
+
+    def test_cst_do_ibscbs_que_existe_passa(self, sessao, cenario):
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("cst_ibscbs", "620")])
+
+        assert not simulacao.impedida
+
+    def test_class_trib_inventado_e_recusado(self, sessao, cenario):
+        """`999999` é a forma mais fácil de preencher um campo obrigatório
+        sem saber o que pôr, e só a tabela distingue isso de um código real."""
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("class_trib_ibscbs", "999999")])
+
+        assert simulacao.impedida
+        achado = next(a for a in simulacao.avisos if "cClassTrib" in a.problema)
+        assert "não está na tabela oficial" in achado.problema
+        assert "sped-hub fiscal tabelas" in achado.problema
+
+    def test_class_trib_que_existe_passa(self, sessao, cenario):
+        simulacao = simular(sessao, cenario["selecao"], [Alteracao("class_trib_ibscbs", "200049")])
+
+        assert not simulacao.impedida
+
     def test_documento_cancelado_e_impeditivo(self, sessao, cenario):
         """Alterar nota cancelada gera arquivo que o validador rejeita."""
         cenario["a"].situacao = "cancelado"

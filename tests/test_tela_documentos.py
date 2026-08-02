@@ -330,6 +330,48 @@ class TestAsTresCamadas:
         assert "PRODUTO DE TESTE 2" in _secao(html, "item-2")
 
 
+class TestAClassificacaoConferida:
+    """A tela aponta o que a SEFAZ recusaria, no item onde está.
+
+    A apuração já apontava, mas ela é do mês inteiro: para achar QUAL nota tem
+    o problema seria preciso sair procurando. Aqui o apontamento fica no item,
+    ao lado da tabela que mostra o valor.
+    """
+
+    def _abrir(self, cenario):
+        return _texto(cenario["cliente"].get(f"/fiscal/documentos/{cenario['documento_a']}"))
+
+    def test_nota_bem_classificada_nao_mostra_a_secao(self, cenario):
+        """Seção que aparece sempre treina quem lê a ignorá-la."""
+        assert "Classificação divergente" not in self._abrir(cenario)
+
+    def test_o_par_que_nao_casa_aparece_no_item(self, cenario):
+        _corrigir(cenario["referencia"], cenario["documento_a"], "cst_ibscbs", "620")
+
+        secao = _secao(self._abrir(cenario), "classificacao-1")
+
+        assert "pertence ao CST 000" in secao
+        assert "declara CST 620" in secao
+
+    def test_o_apontamento_diz_de_quando_e_a_tabela(self, cenario):
+        """Sem a data, quem lê não sabe se a divergência é dele ou nossa."""
+        _corrigir(cenario["referencia"], cenario["documento_a"], "cst_ibscbs", "620")
+
+        secao = _secao(self._abrir(cenario), "classificacao-1")
+
+        assert "IT 2025.002" in secao
+        assert "2026-06-22" in secao
+
+    def test_o_item_sem_problema_nao_ganha_a_secao(self, cenario):
+        """A correção é no item 1; o item 2 continua limpo."""
+        _corrigir(cenario["referencia"], cenario["documento_a"], "cst_ibscbs", "620")
+
+        html = self._abrir(cenario)
+
+        assert 'data-secao="classificacao-1"' in html
+        assert 'data-secao="classificacao-2"' not in html
+
+
 class TestOQueMudouFicaVisivel:
     def _abrir(self, cenario):
         return _texto(cenario["cliente"].get(f"/fiscal/documentos/{cenario['documento_a']}"))
