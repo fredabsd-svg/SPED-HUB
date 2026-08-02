@@ -550,7 +550,9 @@ class TestOsCSTSaoListadosNaoInterpretados:
 
         assert resultado.cst_encontrados == {"620": 3}
         aviso = next(a for a in resultado.avisos if "CST de IBS/CBS" in a)
-        assert "620 (3 item(ns))" in aviso
+        # O nome vem da tabela oficial: um código solto obriga quem lê a ir
+        # procurar o que ele quer dizer, e quem faz isso todo mês para.
+        assert "620 (Tributação monofásica) (3 item(ns))" in aviso
 
     def test_o_valor_do_cst_diferente_continua_somado(self, sessao, escritorio):
         """Listar não é descartar: ninguém sabe o tratamento para descartar."""

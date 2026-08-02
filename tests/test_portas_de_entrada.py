@@ -566,3 +566,82 @@ class TestCstDescartaPelaCLI:
         assert self._gerar_contribuicoes(importado, tmp_path / "contrib.txt") == 0
 
         assert "DESCARTADO" not in capsys.readouterr().out
+
+
+# ── Fase 67 — as tabelas oficiais do IBS/CBS pela linha de comando ─────────
+
+
+class TestTabelasOficiaisPelaCLI:
+    """A tabela e a data dela alcançáveis por quem escritura.
+
+    Uma tabela oficial que só o código consulta responde igual quando está
+    atualizada e quando está velha. `sped-hub fiscal tabelas` existe para que
+    a pergunta "de quando é a tabela deste sistema?" tenha resposta sem abrir
+    o repositório.
+    """
+
+    @staticmethod
+    def _tabelas(banco: str, *extras) -> int:
+        return main(["fiscal", "tabelas", "--db", banco, *extras])
+
+    def test_a_procedencia_sai_na_tela(self, banco_fiscal, capsys):
+        assert self._tabelas(banco_fiscal) == 0
+
+        saida = capsys.readouterr().out
+        assert "IT 2025.002" in saida
+        assert "publicada em 2026-06-22" in saida
+        assert "dfe-portal.svrs.rs.gov.br" in saida
+
+    def test_um_cst_consultado_diz_o_grupo_que_exige(self, banco_fiscal, capsys):
+        assert self._tabelas(banco_fiscal, "--codigo", "620") == 0
+
+        saida = capsys.readouterr().out
+        assert "Tributação monofásica" in saida
+        assert "gIBSCBSMono" in saida
+
+    def test_uma_classificacao_consultada_diz_a_reducao_e_a_vigencia(self, banco_fiscal, capsys):
+        assert self._tabelas(banco_fiscal, "--codigo", "200049") == 0
+
+        saida = capsys.readouterr().out
+        assert "40.0%" in saida
+        assert "2026-01-01" in saida
+
+    def test_codigo_desconhecido_sai_com_erro(self, banco_fiscal, capsys):
+        """Sair com 0 faria um script de fechamento tratar como encontrado."""
+        assert self._tabelas(banco_fiscal, "--codigo", "999999") == 1
+
+        assert "não está em nenhuma das três tabelas" in capsys.readouterr().out
+
+
+class TestClassificacaoConferidaPelaCLI:
+    """`fiscal apurar` aponta a classificação que a SEFAZ recusaria."""
+
+    @pytest.fixture
+    def importado(self, banco_fiscal, tmp_path) -> str:
+        assert _importar(banco_fiscal, _pasta_com_nota(tmp_path)) == 0
+        return banco_fiscal
+
+    def test_a_nota_bem_classificada_nao_gera_apontamento(self, importado, capsys):
+        capsys.readouterr()
+
+        _apurar(importado)
+
+        assert "CLASSIFICAÇÃO DIVERGENTE" not in capsys.readouterr().out
+
+    def test_cst_trocado_por_comando_aparece_na_apuracao(self, importado, capsys):
+        """Toda a cadeia: o CST é corrigido por `fiscal alterar` e a
+        conferência da apuração acusa que ele não casa com o `cClassTrib`."""
+        assert (
+            main(
+                ["fiscal", "alterar", "--empresa", "1", "--campo", "cst_ibscbs"]
+                + ["--valor", "620", "--confirmar", "--db", importado]
+            )
+            == 0
+        )
+        capsys.readouterr()
+
+        _apurar(importado)
+
+        saida = capsys.readouterr().out
+        assert "CLASSIFICAÇÃO DIVERGENTE DA TABELA OFICIAL" in saida
+        assert "pertence ao CST 000" in saida

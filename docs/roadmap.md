@@ -62,7 +62,7 @@ O que falta:
 | Bases próprias do monofásico e da alíquota por unidade no PIS/Cofins | O CST já decide se o valor destacado entra na apuração; o que falta é **calcular** base e alíquota próprias em vez de usar o destacado | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.regimes_especiais` |
 | Registro 0035 (identificação da SCP) na EFD-Contribuições | Exigido quando `IND_NAT_PJ` é 03, 04 ou 05; o gerador avisa e não escreve | `src.escrituracoes.efd_contribuicoes:GeradorEFDContribuicoes.registro_0035` |
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
-| Monofásico, diferimento, crédito presumido e split payment na Reforma | A apuração **mede e relata** esses valores, fora do total; o que falta é consumi-los, e para isso é preciso a tabela de CST do IBS/CBS estabilizada | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
+| Monofásico, diferimento, crédito presumido e split payment na Reforma | A apuração **mede e relata** esses valores, fora do total, e confere a classificação contra a tabela oficial (`dados/oficiais/`); o que falta é **consumi-los** — cada um exige decidir a que competência o valor pertence, e a tabela diz o enquadramento, não a apuração de cada regime | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
 
 ## Dívida técnica conhecida
 

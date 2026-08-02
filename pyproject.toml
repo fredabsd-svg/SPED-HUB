@@ -48,6 +48,20 @@ sped-hub = "src.cli:main"
 sped-hub-dashboard = "src.dashboard.app:main"
 sped-hub-watchdog = "src.watchdog:main"
 
+# Os arquivos de dado que o pacote lê em tempo de execução:
+#
+#   layouts/*.yml           leiaute da ECD
+#   templates/*, static/*   o dashboard
+#   *.json                  as tabelas oficiais do IBS/CBS (§1.9)
+#
+# O setuptools de hoje já os inclui no wheel sem esta seção — conferido
+# construindo nos dois modos.  Ela está aqui declarada porque esse default
+# mudou entre versões, e a falha que ele produziria é do tipo que só aparece
+# na máquina de quem instalou: o CI usa instalação editável, que lê o
+# repositório, e nunca veria falta nenhuma.
+[tool.setuptools.package-data]
+"*" = ["*.yml", "*.json", "templates/*", "static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
