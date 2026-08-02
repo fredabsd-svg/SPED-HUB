@@ -72,6 +72,7 @@ class ItemNormalizado:
     valor_cofins: float = 0.0
     valor_iss: float = 0.0
     codigo_beneficio: str | None = None
+    tipo_operacao_veiculo: str | None = None
 
     # Reforma Tributária
     cst_ibscbs: str | None = None
@@ -187,6 +188,11 @@ class DocumentoNormalizado:
     valor_ipi: float = 0.0
     valor_pis: float = 0.0
     valor_cofins: float = 0.0
+    valor_icms_desonerado: float = 0.0
+    valor_fcp_st: float = 0.0
+    valor_imposto_importacao: float = 0.0
+    valor_ipi_devolvido: float = 0.0
+    valor_servicos: float = 0.0
     valor_ibs: float = 0.0
     valor_cbs: float = 0.0
     valor_is: float = 0.0
@@ -391,6 +397,13 @@ class AdaptadorNFe:
             valor_ipi=_numero(icms_tot, "vIPI"),
             valor_pis=_numero(icms_tot, "vPIS"),
             valor_cofins=_numero(icms_tot, "vCOFINS"),
+            valor_icms_desonerado=_numero(icms_tot, "vICMSDeson"),
+            valor_fcp_st=_numero(icms_tot, "vFCPST"),
+            valor_imposto_importacao=_numero(icms_tot, "vII"),
+            valor_ipi_devolvido=_numero(icms_tot, "vIPIDevol"),
+            # `vServ` fica em `ISSQNtot`, irmão de `ICMSTot` — não no mesmo
+            # grupo dos outros totais.
+            valor_servicos=_numero(_achar(inf, "total", "ISSQNtot"), "vServ"),
         )
 
         # Situação: o protocolo diz se foi autorizada, denegada ou cancelada.
@@ -425,6 +438,7 @@ class AdaptadorNFe:
             valor_unitario=_numero(prod, "vUnCom"),
             valor_total=_numero(prod, "vProd"),
             valor_desconto=_numero(prod, "vDesc"),
+            tipo_operacao_veiculo=_texto(prod, "veicProd", "tpOp"),
             valor_frete=_numero(prod, "vFrete"),
             valor_seguro=_numero(prod, "vSeg"),
             valor_outras=_numero(prod, "vOutro"),

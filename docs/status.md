@@ -84,6 +84,8 @@ passando. A coluna "Evidência" aponta o teste que prova.
 
 | 63 | Tela de gerar, com o espelho antes e a marca de entrega depois | concluída | `tests/test_tela_gerar.py` | o espelho **não gera nem arquiva**; gerar **sempre arquiva**, e não há prévia que grave em disco. O arquivo baixado é o **guardado**, não um recém-gerado — a camada efetiva pode ter mudado, e "o que você entregou" é outra pergunta. Marcar a transmissão não se desfaz, e segunda original do mesmo período é recusada. Com isso o fluxo inteiro existe na tela |
 
+| 64 | O total do documento (vNF) recomposto pela regra W16-10 do MOC | concluída | `tests/test_recomposicao_do_vnf.py`, `tests/test_alteracoes_em_massa.py` | os cinco termos que faltavam entram no modelo (ICMS desonerado, FCP-ST, imposto de importação, IPI devolvido, serviços). As três exceções da regra são tratadas: veículo novo em faturamento direto não soma ST/FCP-ST/IPI devolvido; importação (CFOP 3xxx **efetivo**) não é recomposta, e avisa; e a convenção do ICMS desonerado é **lida do documento original**, porque o Fisco aceita as duas |
+
 ## Limites do comportamento atual
 
 O que o sistema **faz hoje** e que alguém poderia esperar diferente. Não é

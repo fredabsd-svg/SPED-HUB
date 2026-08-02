@@ -77,6 +77,18 @@ na planilha, de `openpyxl` — que o projeto já usava para os relatórios. Quem
 
 ## Decisões não óbvias e armadilhas
 
+- **O vNF não é soma de parcela: tem fórmula, e três exceções.** A regra
+  W16-10 do MOC 7.0 soma doze termos, e o sistema só passou a recompô-lo
+  depois de carregar todos — calcular com metade produziria um total errado
+  apresentado como certo, que é pior que um desatualizado (o desatualizado ao
+  menos é o número que o emitente declarou). Onde a regra não vale — operação
+  de importação (CFOP 3xxx **efetivo**) — não se recompõe: avisa-se.
+- **A convenção do ICMS desonerado é lida do documento original.** A própria
+  regra diz que o Fisco não rejeita quem deixou de subtraí-lo, de modo que
+  dois totais diferentes são igualmente válidos para a mesma nota. Não há como
+  escolher um por fora; há como descobrir qual o emitente usou, porque a
+  primeira camada guardou o documento como ele veio. É o uso mais direto que
+  as três camadas têm dentro do próprio domínio.
 - **A terceira camada é calculada, não gravada.** Gravar o valor final numa
   coluna faria as três camadas divergirem no primeiro `UPDATE` escrito fora do
   fluxo. Calculando, desfazer um lote é apagar seus ajustes, e "por que este

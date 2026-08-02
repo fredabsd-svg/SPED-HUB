@@ -418,13 +418,13 @@ class TestOQueAparece:
 
         saida = capsys.readouterr().out
 
-        assert "1.000,00" in saida
+        assert "1.050,00" in saida
         assert "1,000.00" not in saida
 
     def test_documentos_mostra_o_total(self, importado, capsys):
         main(["fiscal", "documentos", "--empresa", "1", "--db", importado])
 
-        assert "3.000,00" in capsys.readouterr().out, "1.000 + 2.000"
+        assert "3.150,00" in capsys.readouterr().out, "1.050 + 2.100, com o IPI da regra W16-10"
 
     def test_empresas_mostra_o_cadastro_fiscal(self, banco, capsys):
         """Descobrir que falta cadastro só na hora de gerar é tarde."""

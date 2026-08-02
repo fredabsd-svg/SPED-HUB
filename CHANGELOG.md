@@ -9,6 +9,18 @@ interno da implementação.
 ## [Não publicado]
 
 ### Adicionado
+- **O total do documento passou a acompanhar a correção dos itens.** Até aqui,
+  alterar o valor de um item deixava o total da nota para trás, e o sistema
+  avisava em vez de recalcular — porque a fórmula do total não é uma soma, e
+  cinco dos seus termos o modelo não guardava. Agora guarda, e o total é
+  refeito pela regra oficial (W16-10 do Manual de Orientação do Contribuinte),
+  com as três exceções que ela prevê: faturamento direto de veículo novo não
+  soma ICMS-ST nem IPI devolvido; operação de importação não é recalculada, e
+  a nota diz por quê; e, quando a nota tem ICMS desonerado — caso em que o
+  Fisco aceita dois totais diferentes como corretos —, o sistema **segue a
+  conta que o emitente usou**, descobrindo-a no documento original que a
+  primeira camada guardou. Onde nada disso permite uma resposta segura, o
+  total continua sendo o que o emitente declarou, com aviso.
 - **Gerar a EFD ganhou tela, e com ela o fluxo inteiro passa a existir na
   interface.** Primeiro o **espelho** — o arquivo em forma de leitura, com as
   conferências que o validador do Fisco faria —, que não gera nem arquiva

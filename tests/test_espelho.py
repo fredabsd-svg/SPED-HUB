@@ -163,8 +163,9 @@ def test_os_documentos_saem_com_sentido_numero_e_valor(sessao, empresa):
     entrada, saida = visao.documentos
     assert (entrada.sentido, entrada.numero, entrada.itens) == ("entrada", "10", 2)
     assert (saida.sentido, saida.numero, saida.itens) == ("saída", "11", 1)
-    assert visao.total_entradas == 2000.0
-    assert visao.total_saidas == 1000.0
+    # 1.000,00 por item mais 50,00 de IPI, como a regra W16-10 fecha o vNF.
+    assert visao.total_entradas == 2100.0
+    assert visao.total_saidas == 1050.0
 
 
 def test_a_apuracao_do_icms_traz_debito_credito_e_saldo(sessao, empresa):

@@ -4,6 +4,10 @@ Sintético, mas fiel à estrutura: namespace, `nfeProc` envolvendo `NFe` e
 `protNFe`, o ICMS embrulhado na variante (`ICMS00`), PIS e Cofins em
 `PISAliq`/`COFINSAliq`, e os grupos `IBSCBS` e `IS` da NT 2025.002.
 
+O `vNF` fecha pela regra W16-10 do MOC — produtos, mais frete, mais IPI. Uma
+nota de teste que não fechasse pela própria regra do leiaute faria todo teste
+sobre o total do documento concordar com um documento que a SEFAZ recusaria.
+
 Não usa arquivo de cliente: XML real de NF-e traz CNPJ, endereço e produtos de
 terceiros, que não podem ser versionados.
 """
@@ -113,7 +117,7 @@ def nfe_xml(
           <vIPI>{50.00 * itens:.2f}</vIPI>
           <vPIS>{16.50 * itens:.2f}</vPIS>
           <vCOFINS>{76.00 * itens:.2f}</vCOFINS>
-          <vNF>{total_prod:.2f}</vNF>
+          <vNF>{total_prod + valor_frete + 50.00 * itens:.2f}</vNF>
         </ICMSTot>{reforma_tot}
       </total>{transporte}
     </infNFe>
