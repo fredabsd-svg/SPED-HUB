@@ -114,6 +114,12 @@ consome via essas rotas, não importa o módulo diretamente.
   `ecd.validada` de `ValidadorIntegridade.validar_todas`, `relatorio.gerado`
   de `ExportEngine.export_pdf`/`export_xlsx`. Emitir em cada chamador seria
   o mesmo fato em três lugares, e um deles esqueceria.
+- **Quem emite diz em qual banco procurar os assinantes.** Sem `db_path`,
+  `emitir` cai em `database_reference()` — a configuração do processo. Isso
+  fazia `sped-hub importar-ecd --db outro.db` procurar assinante no banco
+  configurado, e não naquele onde a ECD acabou de entrar: nenhum assinante
+  lá, evento nenhum, e erro nenhum, porque `emitir` engole as próprias
+  falhas. `ECDImportService` passa a URL da própria sessão.
 - **O evento leva metadado, nunca escrituração.** `relatorio.gerado` informa
   formato, nome do arquivo, empresa e período — não os saldos. Webhook sai
   para endpoint de terceiro.

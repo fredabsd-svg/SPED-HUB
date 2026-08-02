@@ -156,6 +156,16 @@ class ECDImportService:
         self.session = session
         self.parser = parser or ECDParser()
 
+    def _referencia_do_banco(self) -> str:
+        """A URL do banco desta sessão, para quem precisa abrir outra.
+
+        Sem `try`: a chamada só falha em sessão sem bind, que não existe aqui
+        — este método é chamado depois do commit. Engolir a falha devolveria
+        ``None``, e ``None`` cai na configuração do processo, que é exatamente
+        o defeito que este método existe para fechar.
+        """
+        return self.session.get_bind().url.render_as_string(hide_password=False)
+
     def importar(
         self,
         path: Path,
@@ -496,7 +506,13 @@ class ECDImportService:
             #
             # `emitir` não bloqueia e engole as próprias falhas: importação
             # concluída não vira erro porque o endpoint do cliente caiu.
-            emitir("ecd.importada", resultado.to_dict())
+            #
+            # O banco vai explícito.  Sem ele, `emitir` cai na configuração do
+            # processo, e `sped-hub importar-ecd --db outro.db` procurava os
+            # assinantes no banco configurado — não naquele onde a ECD acabou
+            # de entrar.  Nenhum assinante lá, evento nenhum: o webhook não
+            # disparava e ninguém via erro.
+            emitir("ecd.importada", resultado.to_dict(), db_path=self._referencia_do_banco())
             return resultado
         except Exception:
             self.session.rollback()

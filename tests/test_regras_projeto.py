@@ -58,7 +58,35 @@ REGISTRO_CI = {
     "5.4": "tests/test_hardening.py::TestLogSemPII",
     "6.2": "tests/test_migrations.py",
     "6.3": "tests/test_multibackend.py::TestRelatoriosIdenticos",
+    "7.1": "tests/test_regras_projeto.py::TestDefinicaoDePronto::test_fase_concluida_tem_prova_de_ponta",
+    "7.2": "tests/test_regras_projeto.py::TestDefinicaoDePronto::test_todo_modulo_e_alcancavel",
 }
+
+def _portas_de_entrada() -> tuple[str, ...]:
+    """As portas por onde o produto é iniciado, lidas do `pyproject.toml`.
+
+    Um teste que não passa por uma delas prova o módulo, não o produto — e é
+    essa diferença que a REGRA 7 existe para cobrar.  A lista é **derivada**
+    (§1.9): mantida à mão, ela viraria o lugar onde se acrescenta o módulo
+    órfão para calar o teste.  As fontes são os `[project.scripts]` — o que o
+    `pip install` põe no `PATH` — e os módulos com `python -m`, que é como o
+    Dockerfile sobe o worker e o watchdog.
+    """
+    texto = (REPO / "pyproject.toml").read_text("utf-8")
+    bloco = re.search(r"^\[project\.scripts\]\n(.*?)(?=^\[|\Z)", texto, re.S | re.M)
+    assert bloco, "pyproject.toml sem [project.scripts]"
+    portas = set()
+    for alvo in re.findall(r'=\s*"([\w.]+):', bloco.group(1)):
+        portas.add(alvo.replace(".", "/") + ".py")
+    for caminho in (REPO / "src").rglob("*.py"):
+        if "__pycache__" in caminho.parts:
+            continue
+        if '__name__ == "__main__"' in caminho.read_text("utf-8"):
+            portas.add(str(caminho.relative_to(REPO)))
+    return tuple(sorted(portas))
+
+
+PORTAS_DE_ENTRADA = _portas_de_entrada()
 
 MARCAS = ("[CI]", "[REVISÃO]", "[ADOÇÃO]")
 
@@ -114,6 +142,94 @@ def _modulos_reais() -> set[str]:
     arquivos = {p.stem for p in src.glob("*.py") if p.stem != "__init__"}
     pacotes = {p.name for p in src.iterdir() if p.is_dir() and (p / "__init__.py").exists()}
     return arquivos | pacotes
+
+
+def _modulos_importaveis() -> dict[str, Path]:
+    """Nome de módulo → arquivo, para todo `.py` de `src/`."""
+    encontrados: dict[str, Path] = {}
+    for caminho in (REPO / "src").rglob("*.py"):
+        if "__pycache__" in caminho.parts:
+            continue
+        nome = ".".join(caminho.relative_to(REPO).with_suffix("").parts)
+        encontrados[nome.removesuffix(".__init__")] = caminho
+    return encontrados
+
+
+def _importados_por(caminho: Path, conhecidos: set[str]) -> set[str]:
+    """Os módulos de `src/` que este arquivo importa, direta ou por símbolo."""
+    try:
+        arvore = ast.parse(caminho.read_text("utf-8"))
+    except SyntaxError:
+        return set()
+    achados: set[str] = set()
+    for no in ast.walk(arvore):
+        if isinstance(no, ast.ImportFrom) and no.module and no.module.startswith("src"):
+            achados.add(no.module)
+            # `from src.pacote import modulo` importa o módulo, não só o nome.
+            achados.update(f"{no.module}.{a.name}" for a in no.names)
+        elif isinstance(no, ast.Import):
+            achados.update(a.name for a in no.names if a.name.startswith("src"))
+    return achados & conhecidos
+
+
+def _alcance_transitivo() -> set[str]:
+    modulos = _modulos_importaveis()
+    conhecidos = set(modulos)
+    fila = [
+        ".".join(Path(porta).with_suffix("").parts)
+        for porta in PORTAS_DE_ENTRADA
+        if ".".join(Path(porta).with_suffix("").parts) in conhecidos
+    ]
+    alcancados = set(fila)
+    while fila:
+        for vizinho in _importados_por(modulos[fila.pop()], conhecidos):
+            if vizinho not in alcancados:
+                alcancados.add(vizinho)
+                fila.append(vizinho)
+    return alcancados
+
+
+def _alcanca_porta_de_entrada(teste: Path) -> bool:
+    """O teste **chama** a linha de comando, a tela ou o navegador?
+
+    Casar por substring dá falso negativo e falso positivo ao mesmo tempo:
+    `from src import cli` + `cli.main(...)` escapava, e a mera presença de
+    `src.cli_fiscal` bastava — mesmo quando o teste só chama um utilitário
+    interno do módulo (`cli_fiscal.gravar`), que não é porta nenhuma.  Por
+    isso a detecção é por **chamada**, na árvore sintática.
+    """
+    if not teste.exists():
+        return False
+    try:
+        arvore = ast.parse(teste.read_text("utf-8"), filename=str(teste))
+    except SyntaxError:
+        return False
+
+    # Nomes ligados ao `main` da CLI, do jeito que cada teste o importou.
+    diretos = {"TestClient"}
+    por_modulo: set[str] = set()
+    for no in ast.walk(arvore):
+        if isinstance(no, ast.ImportFrom) and no.module == "src.cli":
+            diretos |= {a.asname or a.name for a in no.names if a.name == "main"}
+        elif isinstance(no, ast.ImportFrom) and no.module == "src":
+            por_modulo |= {a.asname or a.name for a in no.names if a.name == "cli"}
+        elif isinstance(no, ast.Import):
+            por_modulo |= {a.asname or a.name.rsplit(".", 1)[0] for a in no.names if a.name == "src.cli"}
+
+    for no in ast.walk(arvore):
+        if not isinstance(no, ast.Call):
+            continue
+        alvo = no.func
+        if isinstance(alvo, ast.Name) and alvo.id in diretos:
+            return True
+        if isinstance(alvo, ast.Attribute):
+            # `cli.main(...)` — a CLI pelo módulo; `page.goto(...)` — o
+            # navegador de verdade, que atravessa a casca inteira.
+            if alvo.attr == "main" and isinstance(alvo.value, ast.Name) and alvo.value.id in por_modulo:
+                return True
+            if alvo.attr == "goto":
+                return True
+    return False
 
 
 def _linhas_de_fase() -> list[list[str]]:
@@ -598,6 +714,57 @@ def marcador_existe(alvo: str) -> bool:
         if isinstance(destino, ast.Name)
     }
     return simbolo in nomes
+
+
+class TestDefinicaoDePronto:
+    """REGRA 7 — pronto é o que o produto alcança, não o que o módulo cobre."""
+
+    def test_fase_concluida_tem_prova_de_ponta(self):
+        """§7.1 — pelo menos uma evidência alcança a CLI ou a tela.
+
+        A §1.8 já cobrava que o teste citado existisse. Existir não é
+        alcançar: um módulo pode ter cobertura completa e nenhum caminho do
+        produto que o execute. A marca `[interno]` declara a fase que não tem
+        porta de entrada — e a declaração é o ponto, porque exceção sem
+        registro vira o caminho fácil para todas.
+        """
+        problemas: dict[str, str] = {}
+        for celulas in _linhas_de_fase():
+            fase, estado, evidencia = celulas[0], celulas[2], celulas[3]
+            if estado != "concluída":
+                continue
+            if re.search(r"\[interno:\s*\S", evidencia):
+                continue
+            if "[interno" in evidencia:
+                problemas[fase] = "marca `[interno]` sem motivo escrito"
+                continue
+            citados = [c.split("::")[0] for c in re.findall(r"`([^`]+)`", evidencia)]
+            if not any(_alcanca_porta_de_entrada(REPO / c) for c in citados if c.endswith(".py")):
+                problemas[fase] = ", ".join(citados) or "sem evidência"
+        assert not problemas, (
+            "fase concluída sem teste que alcance a CLI ou a tela (§7.1); "
+            f"cite um teste de ponta ou marque `[interno: motivo]`: {problemas}"
+        )
+
+    def test_todo_modulo_e_alcancavel(self):
+        """§7.2 — nenhum módulo de `src/` só existe para os testes.
+
+        Alcance por importação transitiva a partir das portas. Módulo que só
+        os testes alcançam é código que o produto não executa, mantido e
+        documentado como se fosse parte do sistema.
+        """
+        alcancados = _alcance_transitivo()
+        todos = set(_modulos_importaveis())
+        orfaos = sorted(
+            nome
+            for nome in todos - alcancados
+            # `__init__` vazio é marcador de pacote, não módulo com código.
+            if len(_modulos_importaveis()[nome].read_text("utf-8").strip()) > 0
+        )
+        assert not orfaos, (
+            "módulo que nenhuma porta de entrada alcança (§7.2) — ligue-o ao "
+            f"produto ou declare-o porta: {orfaos}"
+        )
 
 
 class TestResolucaoDeMarcador:
