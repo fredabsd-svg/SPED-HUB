@@ -392,6 +392,26 @@ class TestCorrigirSimulaPrimeiro:
 
         assert all(a.origem == ORIGEM_USUARIO for a in _ajustes(cenario["referencia"]))
 
+    def test_os_codigos_da_reforma_estao_na_lista_de_campos(self, cenario):
+        """A partir de 03/08/2026 é o que toda nota traz — e era o único
+        conjunto de códigos que a tela não deixava corrigir."""
+        html = _texto(cenario["cliente"].get("/fiscal/corrigir"))
+
+        assert 'value="cst_ibscbs"' in html
+        assert 'value="class_trib_ibscbs"' in html
+
+    def test_codigo_da_reforma_inventado_e_impeditivo_na_tela(self, cenario):
+        """`999999` tem o formato certo. Só a tabela oficial o distingue de
+        um código real, e sem ela a tela aceitaria."""
+        html = _texto(self._simular(cenario, campo="class_trib_ibscbs", valor="999999"))
+
+        assert "não está na tabela oficial" in html
+
+    def test_codigo_da_reforma_que_existe_nao_e_impedido(self, cenario):
+        html = _texto(self._simular(cenario, campo="cst_ibscbs", valor="620"))
+
+        assert "não está na tabela oficial" not in html
+
     def test_campo_inexistente_e_erro_e_nao_traceback(self, cenario):
         resposta = self._simular(cenario, campo="nao_existe")
 

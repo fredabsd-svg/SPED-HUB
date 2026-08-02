@@ -97,6 +97,8 @@ from src.documentos import (
 )
 from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.planilha import EDITAVEIS
+from src.documentos.tabelas_ibscbs import conferir as conferir_classificacao
+from src.documentos.tabelas_ibscbs import tabelas as tabelas_oficiais
 from src.ecd_importer import ECDImportError, ECDImportService
 from src.email_service import get_email_service
 from src.escrituracoes import (
@@ -2087,9 +2089,20 @@ async def documento_page(request: Request, documento_id: int):
                                 item, valores, visao.itens_alterados.get(item.id, set())
                             ),
                             "alterados": visao.itens_alterados.get(item.id, set()),
+                            # Sobre os valores **efetivos**: é o que vai para o
+                            # arquivo.  Conferir o original mostraria um erro
+                            # que já foi corrigido, e esconderia um que alguém
+                            # acabou de introduzir aqui dentro.
+                            "classificacao": conferir_classificacao(
+                                item,
+                                data_emissao=documento.data_emissao,
+                                modelo=documento.modelo or "55",
+                                valor=valores.get,
+                            ),
                         }
                         for item, valores in zip(documento.itens, visao.itens, strict=False)
                     ],
+                    "tabela_oficial": tabelas_oficiais(),
                     "ajustes": historico(session, documento),
                     "escrituracoes": escrituracoes_do_documento(session, documento),
                     "fmt_moeda": fmt_moeda,
