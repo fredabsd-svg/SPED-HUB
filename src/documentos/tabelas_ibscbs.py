@@ -111,6 +111,36 @@ def aliquotas_padrao(ano: int) -> dict[str, float | None] | None:
     return ALIQUOTAS_PADRAO.get(ano)
 
 
+def conferir_valor(campo: str, valor) -> list[str]:
+    """Um valor destinado a um campo de classificação existe na tabela?
+
+    Sem contexto de documento nenhum, de propósito: isto é chamado tanto por
+    quem altera um item quanto por quem **cadastra uma regra**, e a regra não
+    tem documento — ela vai valer para os que ainda nem foram importados.
+    Fosse essa a diferença que impedisse a conferência, uma regra com código
+    inventado seguiria entrando e classificando tudo o que casasse com ela.
+    """
+    texto = "" if valor is None else str(valor).strip()
+    if not texto:
+        return []
+    tab = tabelas()
+    if campo == "cst_ibscbs" and texto not in tab.cst:
+        return [
+            f"CST do IBS/CBS {texto!r} não está na tabela oficial "
+            f"(publicada em {tab.publicada_em})"
+        ]
+    # Seis dígitos com os três primeiros iguais ao CST é só o formato, e
+    # `999999` o cumpre — é a forma mais fácil de preencher um campo
+    # obrigatório sem saber o que pôr.
+    if campo == "class_trib_ibscbs" and texto not in tab.class_trib:
+        return [
+            f"cClassTrib {texto!r} não está na tabela oficial "
+            f"(publicada em {tab.publicada_em}); "
+            "`sped-hub fiscal tabelas` lista os códigos de cada CST"
+        ]
+    return []
+
+
 def _vigente(registro: dict, data: dt.date | None) -> bool:
     if data is None:
         return True

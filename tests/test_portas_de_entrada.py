@@ -645,3 +645,53 @@ class TestClassificacaoConferidaPelaCLI:
         saida = capsys.readouterr().out
         assert "CLASSIFICAÇÃO DIVERGENTE DA TABELA OFICIAL" in saida
         assert "pertence ao CST 000" in saida
+
+
+# ── Fase 69 — a regra com código inventado recusada pela linha de comando ──
+
+
+class TestRegraComCodigoInventadoPelaCLI:
+    """`fiscal regras criar` recusa o que `fiscal alterar` já recusava.
+
+    São dois caminhos que escrevem o mesmo campo, e o da regra é o pior dos
+    dois: ela vale para todo documento que casar com ela, inclusive os que
+    ainda nem foram importados, e grava com origem `regra` — a que ninguém
+    revisa item a item.
+    """
+
+    @staticmethod
+    def _criar(banco: str, campo: str, valor: str) -> int:
+        return main(
+            ["fiscal", "regras", "--acao-regra", "criar", "--nome", "teste"]
+            + ["--se", "ncm:22030000", "--entao", f"{campo}:{valor}"]
+            + ["--escritorio", "1", "--db", banco]
+        )
+
+    def test_class_trib_inventado_sai_com_erro(self, banco_fiscal, capsys):
+        codigo = self._criar(banco_fiscal, "class_trib_ibscbs", "999999")
+
+        assert codigo == 1
+        saida = capsys.readouterr().out
+        assert "não está na tabela oficial" in saida
+        assert "sped-hub fiscal tabelas" in saida
+
+    def test_cst_inventado_sai_com_erro(self, banco_fiscal, capsys):
+        assert self._criar(banco_fiscal, "cst_ibscbs", "999") == 1
+
+        assert "não está na tabela oficial" in capsys.readouterr().out
+
+    def test_codigo_que_existe_e_aceito(self, banco_fiscal, capsys):
+        assert self._criar(banco_fiscal, "class_trib_ibscbs", "620001") == 0
+
+        assert "criada" in capsys.readouterr().out
+
+    def test_a_regra_recusada_nao_fica_no_banco(self, banco_fiscal):
+        """Sair com erro depois de gravar seria o pior dos dois mundos."""
+        from src.db.models import RegraFiscal
+
+        self._criar(banco_fiscal, "class_trib_ibscbs", "999999")
+
+        engine = criar_engine(url=banco_fiscal)
+        with get_session(engine) as sessao:
+            assert sessao.execute(select(RegraFiscal)).scalars().all() == []
+        engine.dispose()

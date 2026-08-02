@@ -58,6 +58,7 @@ As três camadas que a suíte separa:
 | `PlanilhaInvalida` | Arquivo que não abre, ou sem as colunas que ligam a linha ao banco. |
 | `tabelas_ibscbs.tabelas()` | As tabelas oficiais de CST, `cClassTrib` e `cCredPres`, com a data de publicação. |
 | `tabelas_ibscbs.conferir(item, data_emissao=, modelo=, valor=)` | Os problemas de classificação do item, em português. Lista vazia é "sem problema". |
+| `tabelas_ibscbs.conferir_valor(campo, valor)` | O mesmo sem documento nenhum — é o que serve para cadastrar regra. |
 | `tabelas_ibscbs.aliquotas_padrao(ano)` | As alíquotas do ano, ou `None` quando a legislação ainda não as fixou. |
 | `tabelas_ibscbs.TabelaAusente` | O JSON gerado não está no lugar — instalação incompleta. |
 
@@ -94,6 +95,13 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   nota a partir de 03/08/2026. Entraram agora, e não antes, porque só agora um
   valor inventado é recusado — a lista de campos editáveis sem uma tabela por
   trás seria um convite a digitar qualquer coisa num campo obrigatório.
+- **`regras criar` recusa o mesmo que `alterar`, e por um motivo pior.** Uma
+  regra escreve em todo documento que casar com ela — inclusive nos que ainda
+  nem foram importados — e grava com origem `regra`, que é a que ninguém
+  revisa item a item. Aceitar `999999` no cadastro é aceitá-lo mil vezes sem
+  que ninguém tenha digitado nenhuma delas. A conferência **não** alcança a
+  *condição*: filtrar por um código inexistente é procurar exatamente as notas
+  que vieram erradas da origem, e recusar isso impediria de achá-las.
 - **`alterar` recusa código que não existe; a coerência fica para depois.**
   `_verificar` conhece a tabela e recusa `cst_ibscbs`/`class_trib_ibscbs`
   inventado — conferir só o formato deixaria passar `999999`, que é a forma

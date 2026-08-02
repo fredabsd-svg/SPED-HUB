@@ -29,6 +29,7 @@ from src.documentos.tabelas_ibscbs import (
     ARQUIVO,
     aliquotas_padrao,
     conferir,
+    conferir_valor,
     tabelas,
 )
 
@@ -280,3 +281,41 @@ class TestConferencia:
         item = ItemFalso(cst_ibscbs="620", class_trib_ibscbs="000001")
 
         assert len(conferir(item, data_emissao=EMISSAO)) >= 2
+
+
+class TestConferirValor:
+    """A conferência sem documento — a que serve para cadastrar regra.
+
+    Existe separada de `conferir` porque uma regra não tem documento: ela vai
+    valer para os que ainda nem foram importados. Fosse essa a diferença que
+    impedisse a conferência, uma regra com código inventado seguiria entrando
+    e classificando tudo o que casasse com ela.
+    """
+
+    def test_codigo_que_existe_nao_gera_problema(self):
+        assert conferir_valor("class_trib_ibscbs", "620001") == []
+        assert conferir_valor("cst_ibscbs", "620") == []
+
+    def test_codigo_inventado_e_apontado(self):
+        assert conferir_valor("class_trib_ibscbs", "999999")
+        assert conferir_valor("cst_ibscbs", "999")
+
+    def test_o_apontamento_diz_onde_procurar_o_certo(self):
+        achado = conferir_valor("class_trib_ibscbs", "999999")[0]
+
+        assert "sped-hub fiscal tabelas" in achado
+
+    def test_campo_que_nao_e_de_classificacao_e_ignorado(self):
+        """Esta função não sabe nada sobre CFOP, NCM ou valor."""
+        assert conferir_valor("cfop", "9999") == []
+        assert conferir_valor("ncm", "00000000") == []
+
+    def test_valor_vazio_e_ignorado(self):
+        """Limpar um campo é operação legítima; recusá-la impediria corrigir
+        para "não informado", que é o estado de quem ainda não classificou."""
+        for vazio in (None, "", "   "):
+            assert conferir_valor("cst_ibscbs", vazio) == []
+
+    def test_espaco_em_volta_nao_muda_a_resposta(self):
+        """Valor que chega de formulário HTML costuma vir com espaço."""
+        assert conferir_valor("cst_ibscbs", " 620 ") == []

@@ -26,6 +26,12 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **Regra de classificação com código inventado é recusada ao cadastrar.** Uma
+  regra vale para todo documento que casar com ela, inclusive os que ainda nem
+  foram importados, e grava sem que ninguém revise item a item — aceitar um
+  código inexistente no cadastro é aceitá-lo mil vezes. A **condição** da regra
+  segue aceitando qualquer código: filtrar por um que não existe é procurar
+  exatamente as notas que vieram erradas da origem.
 - **Os dois códigos da Reforma passaram a ser corrigíveis.** O CST e a
   classificação tributária do IBS/CBS eram os únicos códigos que a tela de
   correção e a planilha não deixavam mexer — e são exatamente os que toda nota

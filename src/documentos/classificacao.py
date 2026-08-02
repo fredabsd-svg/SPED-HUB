@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import DocumentoFiscal, ItemDocumentoFiscal, RegraFiscal
 from src.documentos.ajustes import ORIGEM_REGRA, aplicar_ajuste, novo_lote, valor_efetivo
+from src.documentos.tabelas_ibscbs import conferir_valor
 
 logger = logging.getLogger("sped-hub.documentos")
 
@@ -172,6 +173,12 @@ def validar_regra(regra: RegraFiscal) -> None:
     for acao in acoes:
         if not isinstance(acao, dict) or "campo" not in acao:
             raise RegraInvalida(f"ação sem campo: {acao!r}")
+        # Uma regra escreve o mesmo tipo de valor que `fiscal alterar`, mas em
+        # todo documento que casar com ela — inclusive nos que ainda nem foram
+        # importados.  Aceitar um código inventado aqui é aceitá-lo mil vezes,
+        # com origem `regra`, sem que ninguém tenha digitado nenhuma delas.
+        for problema in conferir_valor(acao["campo"], acao.get("valor")):
+            raise RegraInvalida(f"ação inválida: {problema}")
 
 
 def _valor_do_campo(
