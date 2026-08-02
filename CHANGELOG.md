@@ -230,6 +230,11 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **O menu não oferece mais telas que o usuário não pode abrir.** API Keys,
+  Webhooks e Auditoria exigem administrador e apareciam para todos; clicar
+  devolvia um "acesso administrativo necessário" a quem não tinha pedido acesso
+  a nada — só clicado no que estava lá. O monitoramento já era escondido, sem
+  que a diferença tivesse razão.
 - **Uma duplicata deixou de derrubar a importação inteira.** Com a política
   "recusar", importar uma pasta em que um arquivo já tinha entrado
   interrompia o lote — e os arquivos que vinham depois ficavam de fora, sem
