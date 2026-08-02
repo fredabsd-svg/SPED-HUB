@@ -570,3 +570,43 @@ class TestOsCSTSaoListadosNaoInterpretados:
         _importar(sessao, escritorio, com_reforma=False)
 
         assert _apurar(sessao, empresa).cst_encontrados == {}
+
+
+class TestAvisoDeTabelaVelha:
+    """A tabela envelhece, e a apuração é onde alguém vai reparar.
+
+    Ela é o único lugar do sistema que se lê todo mês. Deixar a defasagem só
+    em `sped-hub fiscal tabelas` seria pôr o aviso numa tela que só se abre
+    quando já se desconfia — e quem desconfia já foi conferir.
+    """
+
+    def _envelhecer(self, monkeypatch, dias: int):
+        from dataclasses import replace
+
+        import src.escrituracoes.reforma as reforma
+        from src.documentos.tabelas_ibscbs import tabelas
+
+        antiga = replace(
+            tabelas(),
+            publicada_em=(datetime.date.today() - datetime.timedelta(days=dias)).isoformat(),
+        )
+        monkeypatch.setattr(reforma, "tabelas", lambda: antiga)
+
+    def test_tabela_velha_avisa_na_apuracao(self, sessao, escritorio, monkeypatch):
+        empresa = _empresa(sessao, escritorio)
+        self._envelhecer(monkeypatch, 400)
+
+        resultado = _apurar(sessao, empresa)
+
+        aviso = next(a for a in resultado.avisos if "tabela oficial de classificação" in a)
+        assert "400 dias" in aviso
+        assert "gerar_tabelas_ibscbs.py" in aviso
+
+    def test_tabela_recente_nao_avisa(self, sessao, escritorio, monkeypatch):
+        """Aviso que sai sempre é aviso que ninguém lê."""
+        empresa = _empresa(sessao, escritorio)
+        self._envelhecer(monkeypatch, 10)
+
+        resultado = _apurar(sessao, empresa)
+
+        assert not [a for a in resultado.avisos if "tabela oficial de classificação" in a]

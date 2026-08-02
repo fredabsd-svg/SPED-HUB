@@ -27,6 +27,7 @@ from src.documentos import tabelas_ibscbs
 from src.documentos.tabelas_ibscbs import (
     ALIQUOTAS_PADRAO,
     ARQUIVO,
+    DIAS_ATE_ENVELHECER,
     aliquotas_padrao,
     conferir,
     conferir_valor,
@@ -319,3 +320,60 @@ class TestConferirValor:
     def test_espaco_em_volta_nao_muda_a_resposta(self):
         """Valor que chega de formulário HTML costuma vir com espaço."""
         assert conferir_valor("cst_ibscbs", " 620 ") == []
+
+
+class TestValidadeDaTabela:
+    """§8.2 — a defasagem tem de ser visível antes de virar erro.
+
+    Uma tabela de dois anos responde exatamente como uma de ontem. O que
+    distingue as duas é a idade, e ela só serve se alguém a vir: por isso sai
+    em `sped-hub fiscal tabelas`, em toda apuração e no CI.
+    """
+
+    def _com_publicacao(self, quando: str):
+        from dataclasses import replace
+
+        return replace(tabelas(), publicada_em=quando)
+
+    def test_a_idade_conta_da_publicacao_ate_a_data_dada(self):
+        tabela = self._com_publicacao("2026-01-01")
+
+        assert tabela.idade_em_dias(dt.date(2026, 1, 31)) == 30
+
+    def test_recem_publicada_nao_avisa(self):
+        """Aviso que sai sempre é aviso que ninguém lê."""
+        tabela = self._com_publicacao("2026-06-22")
+
+        assert tabela.aviso_de_idade(dt.date(2026, 8, 2)) is None
+        assert not tabela.envelhecida(dt.date(2026, 8, 2))
+
+    def test_no_limite_ainda_nao_avisa(self):
+        """Exatamente 180 dias é o último dia bom, não o primeiro ruim."""
+        tabela = self._com_publicacao("2026-01-01")
+        limite = dt.date(2026, 1, 1) + dt.timedelta(days=DIAS_ATE_ENVELHECER)
+
+        assert tabela.aviso_de_idade(limite) is None
+
+    def test_um_dia_depois_do_limite_avisa(self):
+        tabela = self._com_publicacao("2026-01-01")
+        passou = dt.date(2026, 1, 1) + dt.timedelta(days=DIAS_ATE_ENVELHECER + 1)
+
+        assert tabela.aviso_de_idade(passou) is not None
+
+    def test_o_aviso_diz_o_que_fazer(self):
+        """Aviso que não diz o próximo passo vira ruído no fim de dois meses."""
+        tabela = self._com_publicacao("2020-01-01")
+
+        aviso = tabela.aviso_de_idade(dt.date(2026, 8, 2))
+
+        assert "dfe-portal.svrs.rs.gov.br" in aviso
+        assert "gerar_tabelas_ibscbs.py" in aviso
+        assert "2020-01-01" in aviso
+
+    def test_a_idade_nao_mexe_no_relogio_do_processo(self):
+        """`hoje` é parâmetro de propósito: trocar a data do sistema num teste
+        afetaria todos os que rodam depois dele."""
+        tabela = self._com_publicacao("2026-01-01")
+
+        assert tabela.idade_em_dias(dt.date(2027, 1, 1)) == 365
+        assert tabela.idade_em_dias(dt.date(2026, 1, 1)) == 0

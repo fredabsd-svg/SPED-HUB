@@ -381,6 +381,15 @@ class ApuracaoIBSCBS:
                 "tratamento específico — confira o enquadramento de cada um"
             )
 
+        # Antes dos apontamentos de classificação, e não depois: se a tabela
+        # está velha, o que vem em seguida pode estar medindo contra uma
+        # versão revogada — inclusive a ausência de apontamento.
+        try:
+            if aviso := tabelas().aviso_de_idade():
+                resultado.avisos.append(aviso)
+        except TabelaAusente:
+            pass  # já avisado por item em `_conferir_classificacao`
+
         if resultado.classificacao:
             detalhe = "; ".join(
                 f"{problema} ({itens} item(ns))"

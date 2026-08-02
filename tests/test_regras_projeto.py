@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -60,6 +61,8 @@ REGISTRO_CI = {
     "6.3": "tests/test_multibackend.py::TestRelatoriosIdenticos",
     "7.1": "tests/test_regras_projeto.py::TestDefinicaoDePronto::test_fase_concluida_tem_prova_de_ponta",
     "7.2": "tests/test_regras_projeto.py::TestDefinicaoDePronto::test_todo_modulo_e_alcancavel",
+    "8.1": "tests/test_regras_projeto.py::TestTabelaOficial::test_a_tabela_declara_a_publicacao",
+    "8.2": "tests/test_regras_projeto.py::TestTabelaOficial::test_a_tabela_nao_esta_vencida",
 }
 
 
@@ -771,6 +774,50 @@ class TestDefinicaoDePronto:
         assert not orfaos, (
             "módulo que nenhuma porta de entrada alcança (§7.2) — ligue-o ao "
             f"produto ou declare-o porta: {orfaos}"
+        )
+
+
+class TestTabelaOficial:
+    """REGRA 8 — tabela de terceiro embutida tem procedência e validade.
+
+    A tabela do IBS/CBS é publicada pela SVRS e revista por ato normativo.
+    Embutida sem data, ela responde igual quando está atual e quando está de
+    dois anos atrás — e a resposta errada tem a mesma cara da certa.
+    """
+
+    def test_a_tabela_declara_a_publicacao(self):
+        """§8.1 — a data vem do nome do arquivo oficial, não do relógio."""
+        from src.documentos.tabelas_ibscbs import ARQUIVO, tabelas
+
+        dados = json.loads(ARQUIVO.read_text("utf-8"))
+
+        assert dados["fontes"], "tabela sem nenhuma fonte declarada"
+        for fonte in dados["fontes"]:
+            assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", fonte["publicado_em"]), fonte
+            arquivo = REPO / fonte["arquivo"]
+            assert arquivo.is_file(), f"fonte declarada e ausente: {fonte['arquivo']}"
+            # A data do JSON tem de ser a do NOME do arquivo: derivá-la de
+            # outro lugar é o caminho para "atualizar" a tabela sem trocar a
+            # planilha.
+            assert fonte["publicado_em"] in arquivo.name, arquivo.name
+        assert tabelas().publicada_em
+
+    def test_a_tabela_nao_esta_vencida(self):
+        """§8.2 — passados 180 dias, isto fica vermelho até alguém atualizar.
+
+        Vermelho por calendário é intencional, como o carimbo de 90 dias da
+        §1.12: o defeito que ele acusa é justamente o de ninguém ter olhado.
+        Quando falhar, baixe a planilha nova do portal DF-e da SVRS, ponha em
+        `dados/oficiais/` com a data no nome e rode
+        `python scripts/gerar_tabelas_ibscbs.py`.
+        """
+        from src.documentos.tabelas_ibscbs import DIAS_ATE_ENVELHECER, tabelas
+
+        tabela = tabelas()
+
+        assert not tabela.envelhecida(), (
+            f"tabela oficial com {tabela.idade_em_dias()} dias "
+            f"(limite: {DIAS_ATE_ENVELHECER}) — {tabela.aviso_de_idade()}"
         )
 
 

@@ -260,10 +260,13 @@ alíquota zero —, e o 810 é "Ajuste de IBS na ZFM", no singular, com um únic
 código de classificação.
 
 **Isso não torna a tabela permanente.** Ela muda por ato normativo, e é por isso
-que a versão vem embutida com ela: a defasagem tem de ser visível
-(`sped-hub fiscal tabelas`), porque tabela velha responde exatamente como
-tabela nova. Atualizar é trocar a planilha em `dados/oficiais/` e rodar
-`scripts/gerar_tabelas_ibscbs.py`; o CI recusa planilha trocada sem regerar.
+que a versão vem embutida com ela: a defasagem tem de ser visível, porque tabela
+velha responde exatamente como tabela nova. `sped-hub fiscal tabelas` mostra a
+idade em dias; passados **180 dias**, o CI fica vermelho e a apuração avisa em
+todo resultado (REGRA 8). Atualizar é trocar a planilha em `dados/oficiais/` e
+rodar `scripts/gerar_tabelas_ibscbs.py`; o CI recusa planilha trocada sem
+regerar, e a data vem do **nome do arquivo oficial** — empurrá-la à mão é a
+versão em uma linha de mentir sobre a procedência.
 
 Os **valores** de alíquota continuam sendo dado de entrada, lido do XML — o
 sistema não os calcula nem os presume. O que a tabela acrescentou foi

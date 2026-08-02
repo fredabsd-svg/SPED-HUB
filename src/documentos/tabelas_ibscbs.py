@@ -41,6 +41,15 @@ from pathlib import Path
 
 ARQUIVO = Path(__file__).with_name("tabelas_ibscbs.json")
 
+# Depois de quantos dias a tabela versionada passa a ser tratada como velha.
+#
+# O IT publicou versões em maio, junho e outubro de 2025, novembro, dezembro,
+# janeiro e abril de 2026 — a distância maior entre duas foi de quatro meses.
+# 180 dias é o dobro da cadência observada: não acusa a cada revisão, e acusa
+# quem parou de olhar.  O número é generoso de propósito, porque o custo de
+# acusar cedo demais é o CI vermelho sem defeito, e isso ensina a ignorar.
+DIAS_ATE_ENVELHECER = 180
+
 # Alíquotas padrão do item 05 do IT 2025.002 v1.50.  Ficam aqui, e não no
 # arquivo gerado, porque a fonte delas é o texto do Informe Técnico e não a
 # planilha — derivar do que não é a fonte seria inventar procedência.
@@ -82,6 +91,34 @@ class Tabelas:
     cst: dict[str, dict]
     class_trib: dict[str, dict]
     cred_pres: dict[str, dict]
+
+    def idade_em_dias(self, hoje: dt.date | None = None) -> int:
+        """Quantos dias desde a publicação da fonte mais antiga.
+
+        `hoje` é parâmetro para que o teste possa dizer *quando* está sem
+        mexer no relógio do processo — um teste que empurrasse a data do
+        sistema afetaria todos os outros que rodam depois dele.
+        """
+        return ((hoje or dt.date.today()) - dt.date.fromisoformat(self.publicada_em)).days
+
+    def envelhecida(self, hoje: dt.date | None = None) -> bool:
+        return self.idade_em_dias(hoje) > DIAS_ATE_ENVELHECER
+
+    def aviso_de_idade(self, hoje: dt.date | None = None) -> str | None:
+        """A frase a mostrar quando a tabela está velha, ou `None`.
+
+        Devolve texto em vez de levantar, e `None` em vez de texto vazio: a
+        tabela velha ainda é melhor que tabela nenhuma, e travar a apuração
+        por causa dela deixaria o escritório sem fechar o mês por um problema
+        que não é do mês dele.
+        """
+        if not self.envelhecida(hoje):
+            return None
+        return (
+            f"a tabela oficial de classificação está com {self.idade_em_dias(hoje)} dias "
+            f"({self.documento}, publicada em {self.publicada_em}) e pode ter sido revista: "
+            f"confira em {self.origem} e regere com `python scripts/gerar_tabelas_ibscbs.py`"
+        )
 
 
 @lru_cache(maxsize=1)

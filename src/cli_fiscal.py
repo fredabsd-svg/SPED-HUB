@@ -191,11 +191,16 @@ def _tabelas(sessao: Session, args) -> int:
     """
     tab = tabelas_oficiais()
     print(f"\n  {tab.documento}")
-    print(f"  publicada em {tab.publicada_em}   fonte: {tab.origem}")
+    print(
+        f"  publicada em {tab.publicada_em} "
+        f"(há {tab.idade_em_dias()} dias)   fonte: {tab.origem}"
+    )
     print(
         f"  {len(tab.cst)} CST · {len(tab.class_trib)} cClassTrib · "
         f"{len(tab.cred_pres)} cCredPres\n"
     )
+    if aviso := tab.aviso_de_idade():
+        print(f"  ATENÇÃO: {aviso}\n")
 
     procurado = (args.codigo or "").strip()
     if not procurado:

@@ -465,6 +465,40 @@ um módulo novo virar porta, ele ganha um `[project.scripts]` ou um
 
 ---
 
+## REGRA 8 — TABELA OFICIAL COM VALIDADE
+
+### 8.1 Tabela de terceiro embutida declara quando foi publicada **[CI]**
+
+Tabela de órgão externo que o programa embute — hoje a de CST, `cClassTrib` e
+`cCredPres` do IBS/CBS — carrega a **data de publicação da fonte**, derivada
+do nome do arquivo oficial e nunca do relógio de quem baixou. A data é
+mostrada a quem usa (`sped-hub fiscal tabelas`) e entra no texto de cada
+apontamento que a tabela produz.
+
+Sem a data, uma tabela de dois anos responde exatamente como uma de ontem, e
+quem lê não tem como saber qual das duas está diante de si. É a mesma razão da
+§1.12 exigir o carimbo "Verificado contra o código em" nos documentos de
+arquitetura: informação sem idade não dá para conferir.
+
+### 8.2 Tabela vencida acusa antes de errar **[CI]**
+
+Passados **180 dias** da publicação, o CI falha e o programa avisa em toda
+apuração. Não trava: tabela velha ainda é melhor que tabela nenhuma, e
+impedir o fechamento do mês por causa dela seria punir o escritório por um
+problema que não é do mês dele.
+
+O prazo é o dobro da cadência observada — o Informe Técnico publicou sete
+versões entre maio de 2025 e abril de 2026, com no máximo quatro meses entre
+duas. Um prazo apertado deixaria o pipeline vermelho sem defeito, e pipeline
+que fica vermelho à toa ensina a ignorar o vermelho.
+
+Atualizar é baixar a planilha nova, pô-la em `dados/oficiais/` com a data no
+nome e rodar o gerador (§1.9). O que **não** vale é empurrar a data: a data
+vem do arquivo oficial, e mudá-la à mão é a versão em uma linha de mentir
+sobre a procedência.
+
+---
+
 ## Exceções
 
 Exceção a qualquer regra acima exige ADR (§1.6) declarando qual regra,

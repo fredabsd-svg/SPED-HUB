@@ -26,6 +26,11 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **A tabela oficial passou a ter validade.** Ela mostra quantos dias tem, e
+  depois de 180 dias avisa em toda apuração que pode ter sido revista, com o
+  endereço para conferir. Uma tabela de dois anos responde exatamente como uma
+  de ontem — a diferença é a idade, e ela só serve se alguém a vir. O aviso
+  **não trava** o fechamento: tabela velha ainda é melhor que tabela nenhuma.
 - **Regra de classificação com código inventado é recusada ao cadastrar.** Uma
   regra vale para todo documento que casar com ela, inclusive os que ainda nem
   foram importados, e grava sem que ninguém revise item a item — aceitar um
