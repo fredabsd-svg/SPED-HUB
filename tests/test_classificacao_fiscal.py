@@ -466,6 +466,62 @@ class TestValidacao:
                 escritorio_id=cenario["escritorio"].id,
             )
 
+    def test_acao_com_codigo_da_reforma_inventado(self, sessao, cenario):
+        """Uma regra escreve em TODO documento que casar com ela.
+
+        Aceitar `999999` aqui é aceitá-lo mil vezes, com origem `regra`, sem
+        que ninguém tenha digitado nenhuma delas — e a origem `regra` é
+        justamente a que ninguém revisa item a item.
+        """
+        with pytest.raises(RegraInvalida, match="não está na tabela oficial"):
+            criar_regra(
+                sessao,
+                nome="x",
+                condicoes=[{"campo": "ncm", "operador": "igual", "valor": "22030000"}],
+                acoes=[{"campo": "class_trib_ibscbs", "valor": "999999"}],
+                escritorio_id=cenario["escritorio"].id,
+            )
+
+    def test_acao_com_cst_da_reforma_inventado(self, sessao, cenario):
+        with pytest.raises(RegraInvalida, match="não está na tabela oficial"):
+            criar_regra(
+                sessao,
+                nome="x",
+                condicoes=[{"campo": "ncm", "operador": "igual", "valor": "22030000"}],
+                acoes=[{"campo": "cst_ibscbs", "valor": "999"}],
+                escritorio_id=cenario["escritorio"].id,
+            )
+
+    def test_acao_com_codigo_que_existe_e_aceita(self, sessao, cenario):
+        regra = criar_regra(
+            sessao,
+            nome="monofásico de combustível",
+            condicoes=[{"campo": "ncm", "operador": "comeca_com", "valor": "2710"}],
+            acoes=[
+                {"campo": "cst_ibscbs", "valor": "620"},
+                {"campo": "class_trib_ibscbs", "valor": "620001"},
+            ],
+            escritorio_id=cenario["escritorio"].id,
+        )
+
+        assert regra.id is not None
+
+    def test_a_conferencia_nao_alcanca_a_condicao(self, sessao, cenario):
+        """Filtrar por um código que não existe é consulta que não acha nada.
+
+        Recusar aqui impediria de procurar exatamente o que se quer achar:
+        as notas que vieram com um código errado da origem.
+        """
+        regra = criar_regra(
+            sessao,
+            nome="caça ao código errado",
+            condicoes=[{"campo": "class_trib_ibscbs", "operador": "igual", "valor": "999999"}],
+            acoes=[{"campo": "cfop", "valor": "6404"}],
+            escritorio_id=cenario["escritorio"].id,
+        )
+
+        assert regra.id is not None
+
     def test_json_invalido_no_banco(self, sessao, cenario):
         regra = RegraFiscal(
             nome="corrompida",
