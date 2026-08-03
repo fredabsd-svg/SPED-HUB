@@ -313,6 +313,12 @@ interno da implementação.
   não havia como perceber antes, porque o arquivo sai bem-formado e a recusa só
   aparece no validador, com o fechamento já pronto. As três faixas foram
   conferidas nas Notas Técnicas que as instituíram.
+- **Compartilhar a descrição de um registro entre as duas escriturações passou
+  a exigir justificativa conferida.** Foi assim que o defeito abaixo entrou: o
+  registro foi tratado como igual porque o começo dele é igual. Agora cada
+  registro compartilhado declara por que é o mesmo — conferido nos dois
+  documentos oficiais, ou delegado por um deles ao outro —, e a verificação
+  automática recusa acrescentar sem isso.
 - **O registro de itens da EFD-Contribuições saía com um campo a mais e também
   seria recusado.** O `0200` das duas obrigações tem o mesmo nome e leiautes
   diferentes: na EFD ICMS/IPI ele termina no código da substituição tributária

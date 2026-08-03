@@ -122,6 +122,15 @@ a porta de entrada humana de tudo isto.
 
 ## Decisões não óbvias e armadilhas
 
+- **O critério para compartilhar um registro é ter conferido nos dois
+  documentos — nunca a semelhança dos nomes.** O Guia da EFD-Contribuições
+  resolve isso registro a registro: quando ele **delega** ("estrutura, campos e
+  conteúdo definidos e constantes no Leiaute da EFD ICMS/IPI, instituído pelo
+  Ato COTEPE/ICMS nº 9"), compartilhar é o que o documento manda — é o caso do
+  `C100` e do `C170`, que nem têm tabela de campos lá. Quando ele **traz tabela
+  própria**, o registro é daquela obrigação, ainda que o começo coincida: é o
+  caso do `0200`, do `0150` e do `0140`. `POR_QUE_E_COMUM` obriga a escrever
+  qual dos dois casos é, e o CI trava a lista.
 - **O `0200` não é o mesmo nas duas obrigações — e estava compartilhado.** Na
   EFD ICMS/IPI ele termina no `CEST` (campo 13); na EFD-Contribuições ele acaba
   no `ALIQ_ICMS`, e a palavra "CEST" não aparece uma única vez nas 433 páginas

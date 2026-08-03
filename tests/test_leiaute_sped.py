@@ -41,6 +41,7 @@ from src.escrituracoes.leiaute import (
     EFD_CONTRIBUICOES,
     EFD_ICMS,
     LEIAUTE_CONFERIDO,
+    POR_QUE_E_COMUM,
     VERIFICADO_CONTRA,
     VERIFICADO_EM,
     CamposEmDesacordo,
@@ -409,6 +410,33 @@ class TestOsDoisLeiautesDoMesmoRegistro:
         from src.escrituracoes import leiaute
 
         assert "0200" not in leiaute._COMUNS
+
+    def test_todo_registro_comum_tem_o_motivo_declarado(self):
+        """Estar em `_COMUNS` é afirmação, não conveniência.
+
+        O `0200` foi para lá por parecer igual — o começo dos dois é
+        idêntico — e divergia no último campo. Exigir o motivo escrito é o
+        que transforma "parece o mesmo" em "foi conferido nos dois".
+        """
+        from src.escrituracoes import leiaute
+
+        assert sorted(leiaute._COMUNS) == sorted(POR_QUE_E_COMUM), (
+            "acrescentar registro a `_COMUNS` exige declarar em `POR_QUE_E_COMUM` "
+            "por que ele é o mesmo nas duas obrigações — conferido nos dois "
+            "documentos, ou delegado por um deles ao outro"
+        )
+        assert all(motivo.strip() for motivo in POR_QUE_E_COMUM.values())
+
+    def test_o_c100_e_comum_porque_o_guia_delega(self):
+        """Não é semelhança nossa: é o que o documento manda.
+
+        O Guia da EFD-Contribuições não traz tabela de campos para o C100 —
+        ele diz que a estrutura é a do Leiaute da EFD ICMS/IPI, instituído
+        pelo Ato COTEPE/ICMS nº 9.
+        """
+        for registro in ("C100", "C170"):
+            assert "DELEGA" in POR_QUE_E_COMUM[registro]
+            assert EFD_ICMS[registro] == EFD_CONTRIBUICOES[registro]
 
     def test_o_0000_tambem_difere(self):
         """O caso que já era conhecido, pinado junto para não voltar."""

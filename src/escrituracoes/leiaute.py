@@ -18,8 +18,24 @@ o contrário, para na hora, com o nome do registro e a contagem dos dois lados.
 
 **As duas escriturações têm registros de mesmo nome e leiaute diferente.** O
 `0000` é o caso óbvio, mas não o único, e por isso a tabela é por obrigação,
-não global. Onde o leiaute é de fato o mesmo — `C100`, `C170`, `0150` — a
-definição é compartilhada por `_COMUNS`, para que não haja duas verdades.
+não global. Onde o leiaute é de fato o mesmo, a definição é compartilhada por
+`_COMUNS`, para que não haja duas verdades.
+
+**O critério para entrar em `_COMUNS` é ter sido conferido nos dois documentos
+— nunca a semelhança dos nomes.** Ele existe porque foi violado: o `0200` foi
+para lá por parecer igual, e não era. O Guia Prático da EFD-Contribuições
+resolve isso registro a registro, e diz de duas maneiras:
+
+  * quando ele **delega** — "registro com estrutura, campos e conteúdo
+    definidos e constantes no Leiaute da EFD (ICMS e IPI), instituído pelo Ato
+    COTEPE/ICMS nº 9" —, compartilhar é o que o próprio documento manda. É o
+    caso do `C100` e do `C170`, que não têm tabela de campos no Guia;
+  * quando ele **traz tabela própria**, o registro é daquela obrigação, ainda
+    que o começo coincida. É o caso do `0200`, do `0150` e do `0140` — e o
+    `0200` diverge no último campo.
+
+Compartilhado sem conferir, o engano é invisível: `conferir` compara o gerador
+com **estas** tabelas, nunca estas tabelas com o documento oficial.
 
 Os nomes são os do Guia Prático. Campo que o gerador ainda não preenche
 continua listado: ele ocupa posição no arquivo mesmo vazio, e é justamente a
@@ -68,6 +84,27 @@ VERIFICADO_EM = "2026-08-03"
 # apareceu o `CEST` a mais no `0200`.
 CONTRIBUICOES_VERIFICADO_CONTRA = "Guia Prático da EFD-Contribuições versão 1.35 (18/06/2021)"
 CONTRIBUICOES_VERIFICADO_EM = "2026-08-03"
+
+# Os registros que as duas obrigações compartilham, e por quê.  Estar aqui é
+# afirmação, não conveniência: acrescentar um sem conferir nos dois documentos
+# é como o `CEST` entrou no `0200` da EFD-Contribuições.
+#
+# `tests/test_leiaute_sped.py::TestOsDoisLeiautesDoMesmoRegistro` trava a
+# lista: mexer em `_COMUNS` sem mexer aqui derruba o CI.
+POR_QUE_E_COMUM = {
+    "0001": "abertura de bloco: só o IND_MOV, idêntico em todo o SPED",
+    "0150": "tabela própria nos dois documentos, conferida campo a campo",
+    "0190": "tabela própria nos dois documentos, conferida campo a campo",
+    "0990": "encerramento de bloco: só a contagem de linhas",
+    "C001": "abertura de bloco",
+    "C100": "o Guia da EFD-Contribuições DELEGA ao Ato COTEPE/ICMS 9",
+    "C170": "o Guia da EFD-Contribuições DELEGA ao Ato COTEPE/ICMS 9",
+    "C990": "encerramento de bloco",
+    "9001": "abertura de bloco",
+    "9900": "o mesmo par (registro, quantidade) nas duas",
+    "9990": "encerramento de bloco",
+    "9999": "encerramento do arquivo: só a contagem de linhas",
+}
 
 # ── Registros de estrutura, iguais em toda escrituração ────────────────────
 _ABERTURA_DE_BLOCO = ("IND_MOV",)
