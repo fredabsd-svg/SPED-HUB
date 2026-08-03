@@ -305,6 +305,25 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **A EFD ICMS/IPI saía com itens onde o Guia não os admite.** Em NF-e de
+  emissão própria — a maioria das saídas de qualquer empresa — o Guia manda
+  apresentar *"somente os registros C100 e C190"*, e só admite o registro de
+  itens (C170) acompanhado de registros que este gerador não escreve. O
+  arquivo saía com um C170 por item de cada nota emitida. Junto com eles iam
+  para o arquivo um cadastro de item (0200) e um de unidade (0190) que
+  registro nenhum citava — e a validação de ambos é a mesma: *"somente devem
+  ser apresentados itens referenciados nos demais blocos"*. Nas entradas de
+  terceiros, que é onde o Guia exige o C170, nada mudou.
+- **A NFC-e levava participante, e o Guia diz para não levar.** *"Quando se
+  tratar de NFC-e (modelo 65), o campo não deve ser preenchido"* — o
+  consumidor da venda ao varejo não é cadastrado, e o registro 0150 repete a
+  regra do outro lado.
+- **A conferência do espelho somava o ICMS pelos itens.** Passou a somar pelo
+  consolidado (C190), que é o que o Guia manda comparar com o E110 — e o
+  único que existe em toda nota. Somando itens, ela acusaria de errada
+  justamente a apuração correta de quem só emite NF-e própria. No espelho, a
+  nota sem C170 passou a dizer "itens só no C190" em vez de "0 item(ns)":
+  documento sem C170 não é documento sem item.
 - **Os ajustes da apuração saíam no campo errado do E110, e o arquivo seria
   recusado.** Os valores lançados por `fiscal ajuste` — o registro E111 — iam
   para os campos `VL_AJ_DEBITOS` e `VL_AJ_CREDITOS`, que o Guia Prático

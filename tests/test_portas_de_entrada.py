@@ -1114,3 +1114,105 @@ class TestAjustesNoE110PelaCLI:
         vazios = [(nome, c190) for c190 in analiticos for nome in obrigatorios if c190[nome] == ""]
 
         assert vazios == []
+
+
+# ── Fase 76 — o que o arquivo referencia, pela linha de comando ───────────
+
+
+class TestReferenciasDoArquivoPelaCLI:
+    """O bloco 0 só cadastra o que o arquivo cita, e o C170 só sai onde cabe.
+
+    Quatro frases do Guia Prático 3.2.2, cada uma sobre um registro:
+
+      * Exceção 2 do `C100`: "NF-e de emissão própria: regra geral, devem ser
+        apresentados somente os registros C100 e C190 [...] somente será
+        admitida a informação do registro C170 quando também houver sido
+        informado o registro C176, C180, C181 ou o Registro C177";
+      * validação do `0200`: "somente devem ser apresentados itens
+        referenciados nos demais blocos";
+      * `0190`: "somente devem constar as unidades de medidas informadas em
+        qualquer outro registro";
+      * campo 04 do `C100`: "quando se tratar de NFC-e (modelo 65), o campo
+        não deve ser preenchido", e o `0150` diz o mesmo do outro lado.
+
+    O gerador escrevia `C170` em toda nota, e com ele um `0200` e um `0190`
+    para itens que registro nenhum citava.
+    """
+
+    @staticmethod
+    def _gerar(banco: str, saida: Path) -> int:
+        return main(
+            ["fiscal", "gerar", "--empresa", "1", "--de", "2026-07-01"]
+            + ["--ate", "2026-07-31", "--saida", str(saida), "--db", banco]
+        )
+
+    @staticmethod
+    def _registros(saida: Path, tipo: str) -> list[list[str]]:
+        return [
+            campos[2:-1]
+            for campos in (linha.split("|") for linha in saida.read_text("utf-8").splitlines())
+            if len(campos) > 1 and campos[1] == tipo
+        ]
+
+    def _arquivo(self, banco: str, tmp_path: Path, pasta: Path) -> Path:
+        assert _importar(banco, pasta) == 0
+        saida = tmp_path / "julho.txt"
+        assert self._gerar(banco, saida) == 0
+        return saida
+
+    # Quem emite é a empresa do `banco_fiscal`: é isso que faz a nota ser de
+    # emissão própria, e o `IND_EMIT` do C100 sair "0".
+    PROPRIA = {"emitente_cnpj": CNPJ, "destinatario_cnpj": "12345678000195"}
+
+    @pytest.fixture
+    def com_saida_propria(self, banco_fiscal, tmp_path) -> Path:
+        """Uma NF-e de saída: emissão própria, modelo 55."""
+        return self._arquivo(banco_fiscal, tmp_path, _pasta_com_nota(tmp_path, **self.PROPRIA))
+
+    @pytest.fixture
+    def com_entrada_de_terceiros(self, banco_fiscal, tmp_path) -> Path:
+        """O default da fixture: a empresa é a destinatária."""
+        return self._arquivo(banco_fiscal, tmp_path, _pasta_com_nota(tmp_path))
+
+    @pytest.fixture
+    def com_nfce(self, banco_fiscal, tmp_path) -> Path:
+        return self._arquivo(
+            banco_fiscal, tmp_path, _pasta_com_nota(tmp_path, modelo="65", **self.PROPRIA)
+        )
+
+    def test_a_nfe_propria_sai_sem_c170(self, com_saida_propria):
+        assert self._registros(com_saida_propria, "C170") == []
+        assert self._registros(com_saida_propria, "C190"), "o C190 continua obrigatório"
+
+    def test_a_entrada_de_terceiros_continua_com_c170(self, com_entrada_de_terceiros):
+        """É justamente o caso que o Guia nomeia ao exigir o registro."""
+        assert self._registros(com_entrada_de_terceiros, "C170")
+
+    def test_sem_c170_o_arquivo_nao_cadastra_item_nem_unidade(self, com_saida_propria):
+        assert self._registros(com_saida_propria, "0200") == []
+        assert self._registros(com_saida_propria, "0190") == []
+
+    def test_com_c170_os_cadastros_voltam(self, com_entrada_de_terceiros):
+        assert self._registros(com_entrada_de_terceiros, "0200")
+        assert self._registros(com_entrada_de_terceiros, "0190")
+
+    def test_a_nfce_nao_leva_participante(self, com_nfce):
+        from src.escrituracoes.leiaute import EFD_ICMS
+
+        c100 = self._registros(com_nfce, "C100")[0]
+        cod_part = c100[EFD_ICMS["C100"].index("COD_PART")]
+
+        assert cod_part == ""
+        assert self._registros(com_nfce, "0150") == []
+
+    def test_todo_codigo_citado_existe_no_cadastro(self, com_entrada_de_terceiros):
+        """A regra de referência lida do outro lado: nada citado sem cadastro."""
+        from src.escrituracoes.leiaute import EFD_ICMS
+
+        cadastrados = {r[0] for r in self._registros(com_entrada_de_terceiros, "0200")}
+        citados = {
+            r[EFD_ICMS["C170"].index("COD_ITEM")]
+            for r in self._registros(com_entrada_de_terceiros, "C170")
+        }
+
+        assert citados and citados <= cadastrados

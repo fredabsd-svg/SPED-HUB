@@ -143,6 +143,35 @@ ATIVIDADES_ICMS = {
 }
 
 
+# Modelo da NFC-e.  O Guia a trata à parte em três lugares, e sempre para
+# tirá-la de onde a NF-e entra.
+NFCE = "65"
+
+
+def leva_itens_no_arquivo(cabecalho: dict) -> bool:
+    """O documento leva registros `C170`?
+
+    Guia Prático da EFD ICMS/IPI 3.2.2, Exceção 2 do `C100`: "Notas Fiscais
+    Eletrônicas — NF-e de emissão própria: regra geral, devem ser apresentados
+    somente os registros C100 e C190 [...] somente será admitida a informação
+    do registro C170 quando também houver sido informado o registro C176,
+    C180, C181 ou o Registro C177" — e este gerador não escreve nenhum dos
+    quatro.
+
+    O título do próprio `C170` confirma pelo outro lado: "ITENS DO DOCUMENTO
+    (CÓDIGO 01, 1B, 04 e 55)", sem o modelo 65, e o texto diz "inclusive em
+    operações de entrada de mercadorias acompanhadas de NF-e de emissão de
+    terceiros".  É a entrada que pede o item, não a saída.
+
+    Emissão própria aqui é a saída, como no `IND_EMIT` do `C100`.
+    """
+    if cabecalho["modelo"] == NFCE:
+        return False
+    if cabecalho["modelo"] == "55":
+        return cabecalho["sentido"] == "entrada"
+    return True
+
+
 class GeradorEFDICMS(GeradorBase):
     """Monta a EFD ICMS/IPI de um período."""
 
@@ -280,6 +309,11 @@ class GeradorEFDICMS(GeradorBase):
         vistos: dict[str, list[str]] = {}
         for visao in visoes:
             c = visao["cabecalho"]
+            # "Não devem ser informados como participantes os CNPJ e CPF
+            # apenas citados [...] no C100, quando se tratar de NFC-e" — e o
+            # `COD_PART` da NFC-e sai vazio, então não há o que referenciar.
+            if c["modelo"] == NFCE:
+                continue
             if c["sentido"] == "entrada":
                 cnpj, nome, uf, ie = (
                     c["emitente_cnpj"],
@@ -314,12 +348,29 @@ class GeradorEFDICMS(GeradorBase):
         return list(vistos.values())
 
     def _unidades(self, visoes: Sequence[dict]) -> list[str]:
-        vistas = {i["unidade"] for v in visoes for i in v["itens"] if i["unidade"]}
+        """ "Somente devem constar as unidades de medidas informadas em
+        qualquer outro registro" — e quem as informa é o `C170`."""
+        vistas = {
+            i["unidade"]
+            for v in visoes
+            if leva_itens_no_arquivo(v["cabecalho"])
+            for i in v["itens"]
+            if i["unidade"]
+        }
         return sorted(vistas)
 
     def _itens(self, visoes: Sequence[dict]) -> list[list[str]]:
+        """ "Somente devem ser apresentados itens referenciados nos demais
+        blocos" — a validação do próprio `0200`.
+
+        Quem referencia item é o `COD_ITEM` do `C170`; o `C190` totaliza por
+        CST, CFOP e alíquota e não cita item nenhum.  Num período só de NF-e
+        de emissão própria este bloco sai vazio, e é o que o Guia manda.
+        """
         vistos: dict[str, list[str]] = {}
         for visao in visoes:
+            if not leva_itens_no_arquivo(visao["cabecalho"]):
+                continue
             for item in visao["itens"]:
                 codigo = item["codigo"]
                 if not codigo or codigo in vistos:
@@ -352,6 +403,10 @@ class GeradorEFDICMS(GeradorBase):
         c = visao["cabecalho"]
         entrada = c["sentido"] == "entrada"
         participante = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
+        # "Quando se tratar de NFC-e (modelo 65), o campo não deve ser
+        # preenchido" — validação do campo 04 do C100.
+        if c["modelo"] == NFCE:
+            participante = ""
 
         self._add(
             "C100",
@@ -385,8 +440,9 @@ class GeradorEFDICMS(GeradorBase):
             "",  # VL_COFINS_ST
         )
 
-        for item in visao["itens"]:
-            self._item_c170(item)
+        if leva_itens_no_arquivo(c):
+            for item in visao["itens"]:
+                self._item_c170(item)
         for campos in self._analitico_c190(visao):
             self._add("C190", *campos)
 
