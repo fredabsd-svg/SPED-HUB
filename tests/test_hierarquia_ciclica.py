@@ -160,7 +160,7 @@ class TestImportacaoRecusaCiclo:
             "|0000|LECD|01012024|31122024|EMPRESA CICLO LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||",
             "|I001|0|",
             "|I010|G|009|",
-            "|I030|01012024|31122024|A|",
+            "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|",
             *linhas_i050,
             "|I990|99|",
             "|9001|0|",

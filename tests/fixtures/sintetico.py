@@ -30,7 +30,9 @@ def gerar_ecd(
         escrever(f"|0000|LECD|01012024|31122024|{empresa}|{cnpj}|SP||1234567||0|0|1|0|0|E||1|0||\n")
         escrever("|I001|0|\n")
         escrever("|I010|G|009|\n")
-        escrever("|I030|01012024|31122024|A|\n")
+        escrever(
+            "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|\n"
+        )
 
         for i in range(contas):
             # Conta 1 é topo; as demais apontam para ela. O sup=1 na

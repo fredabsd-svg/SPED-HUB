@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import logging
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,6 +34,8 @@ from src.parsers.ecd import ECDParser
 from src.settings import get_settings
 from src.validators.integridade import encontrar_ciclos
 from src.webhooks import emitir
+
+logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[float, str], None]
 
@@ -166,6 +169,31 @@ class ECDImportService:
         """
         return self.session.get_bind().url.render_as_string(hide_password=False)
 
+    def _avisar_leiaute_diferente(self, cod_ver_lc: str) -> None:
+        """O arquivo diz uma versão de leiaute; nós lemos com outra.
+
+        O parser carrega sempre o `ecd_v9.yml`, seja qual for o `COD_VER_LC`
+        do I010.  Quando as duas versões não batem, o arquivo é lido do
+        mesmo jeito — e os campos podem estar em posições diferentes, o que
+        põe dado errado em coluna certa sem erro nenhum.
+
+        Avisa em vez de recusar (ADR 0009), pela razão da §8.2: uma ECD
+        antiga ainda é melhor que ECD nenhuma, e travar a leitura de um
+        arquivo de 2019 seria tirar uma capacidade para evitar um risco que
+        o aviso já expõe.
+        """
+        do_arquivo, do_leiaute = str(cod_ver_lc).strip(), str(self.parser.versao).strip()
+        if do_arquivo.lstrip("0") == do_leiaute.lstrip("0"):
+            return
+        logger.warning(
+            "O arquivo declara leiaute %s (COD_VER_LC do I010) e foi lido com "
+            "o leiaute %s, o único que este programa conhece. Os campos podem "
+            "estar em outras posições: confira os valores importados antes de "
+            "usar.",
+            do_arquivo,
+            do_leiaute,
+        )
+
     def importar(
         self,
         path: Path,
@@ -265,6 +293,7 @@ class ECDImportService:
                 raise DuplicateECDImportError(existing.id)
 
             leiaute = (header_i010 or {}).get("COD_VER_LC") or "009"
+            self._avisar_leiaute_diferente(leiaute)
             ecd = ECD(
                 empresa_id=empresa.id,
                 leiaute=str(leiaute),
@@ -322,7 +351,7 @@ class ECDImportService:
                         ecd_id=current_ecd.id,
                         cod_cta=record.get("COD_CTA") or "",
                         cod_cta_sup=record.get("COD_CTA_SUP") or None,
-                        nome_cta=record.get("NOME_CTA") or "",
+                        nome_cta=record.get("CTA") or "",
                         cod_nat=record.get("COD_NAT") or "01",
                         ind_cta=record.get("IND_CTA") or "A",
                         nivel=int(record.get("NIVEL") or 0),
@@ -404,7 +433,11 @@ class ECDImportService:
                         dt_lcto=launch_date,
                         vl_lcto=record.get("VL_LCTO") or 0.0,
                         ind_lcto=record.get("IND_LCTO") or "N",
-                        num_arq=_optional_int(record.get("NUM_ARQ")),
+                        # Sem `num_arq`: o I200 do leiaute 9 não tem esse
+                        # campo.  Na posição 6 está o DT_LCTO_EXT (data do
+                        # lançamento extemporâneo), e ler uma data como
+                        # número de arquivo gravava 31122025 em `num_arq`.
+                        # Quem tem NUM_ARQ é o I250, logo abaixo.
                     )
                     # Este `flush()` era o gargalo: um round-trip por
                     # lançamento.  Num arquivo com 80 mil lançamentos eram 80
@@ -454,8 +487,10 @@ class ECDImportService:
                             cod_cta=record.get("COD_CTA") or "",
                             cod_ccus=record.get("COD_CCUS") or None,
                             dt_res=_date(record.get("DT_RES"), end_date),
-                            vl_sld_fin=record.get("VL_SLD_FIN") or 0.0,
-                            ind_dc_fin=record.get("IND_DC_FIN") or "D",
+                            # No I355 o manual chama esses campos de VL_CTA e
+                            # IND_DC; a coluna do banco mantém o nome antigo.
+                            vl_sld_fin=record.get("VL_CTA") or 0.0,
+                            ind_dc_fin=record.get("IND_DC") or "D",
                         )
                     )
 

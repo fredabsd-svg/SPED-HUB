@@ -1,9 +1,23 @@
-# Metadados do Leiaute 9 da ECD (Anexo ADE Cofis nº 57/2023)
-# A partir do ano-calendário 2020
-# Fonte: Manual de Orientação do Leiaute 9 da ECD — RFB
+# Metadados do Leiaute 9 da ECD.
+# A partir do ano-calendário 2020.
+#
+# Procedência (§8.1): os campos abaixo foram conferidos campo a campo contra o
+# Manual de Orientação do Leiaute 9 da ECD, Anexo ao Ato Declaratório Executivo
+# Cofis nº 01/2026 (atualização: janeiro de 2026) — a versão vigente, que
+# sucede o ADE Cofis nº 57/2023 que este arquivo citava antes.  Não vale a
+# validade de 180 dias da §8.2: o leiaute muda por ano-calendário, não por
+# informe técnico, e um prazo curto deixaria o CI vermelho sem defeito.
+#
+# Só entram aqui os campos fixos do leiaute.  Os campos de moeda funcional
+# (VL_*_MF), que o manual descreve depois de "I - Observações" nos registros
+# I155, I157, I200, I250, I310 e I355, não são fixos: a pessoa jurídica os
+# cria via registro I020 quando IDENT_MF do 0000 é "S".  Como o parser lê por
+# posição e esses campos vêm no fim da linha, ignorá-los é correto.
 
 versao: "9"
 ano_base: 2020
+conferido_contra: "Manual do Leiaute 9 da ECD — Anexo ao ADE Cofis nº 01/2026 (janeiro de 2026)"
+conferido_em: "2026-08-03"
 encoding_entrada: ["UTF-8", "ISO-8859-1"]
 encoding_saida: "UTF-8"
 delimitador: "|"
@@ -28,14 +42,15 @@ registros:
       - { nome: IND_SIT_INI_PER, tipo: N, tamanho: 1, obrigatorio: true, posicao: 12 }
       - { nome: IND_NIRE, tipo: N, tamanho: 1, obrigatorio: true, posicao: 13 }
       - { nome: IND_FIN_ESC, tipo: N, tamanho: 1, obrigatorio: true, posicao: 14 }
-      - { nome: COD_HASH, tipo: C, tamanho: 255, obrigatorio: false, posicao: 15 }
-      - { nome: IND_GRANDE_POR, tipo: N, tamanho: 1, obrigatorio: true, posicao: 16 }
+      - { nome: COD_HASH_SUB, tipo: C, tamanho: 40, obrigatorio: false, posicao: 15 }
+      - { nome: IND_GRANDE_PORTE, tipo: N, tamanho: 1, obrigatorio: true, posicao: 16 }
       - { nome: TIP_ECD, tipo: C, tamanho: 1, obrigatorio: true, posicao: 17 }
       - { nome: COD_SCP, tipo: N, tamanho: 14, obrigatorio: false, posicao: 18 }
       - { nome: IDENT_MF, tipo: C, tamanho: 1, obrigatorio: true, posicao: 19 }
       - { nome: IND_ESC_CONS, tipo: C, tamanho: 1, obrigatorio: true, posicao: 20 }
       - { nome: IND_CENTRALIZADA, tipo: C, tamanho: 1, obrigatorio: false, posicao: 21 }
-      - { nome: IND_QUALIF_PJ, tipo: C, tamanho: 1, obrigatorio: false, posicao: 22 }
+      - { nome: IND_MUDANC_PC, tipo: N, tamanho: 1, obrigatorio: true, posicao: 22 }
+      - { nome: COD_PLAN_REF, tipo: C, tamanho: 2, obrigatorio: false, posicao: 23 }
 
   "I001":
     descricao: "Abertura do Bloco I"
@@ -70,23 +85,34 @@ registros:
       - { nome: COD_CTA_RES, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
 
   "I020":
+    # O manual grafa o campo 05 como DESCRIÇÃO; aqui vai sem acento porque o
+    # nome vira chave de dicionário no parser.
     descricao: "Campos adicionais"
-    nivel: 2
+    nivel: 3
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
       - { nome: REG_COD, tipo: C, tamanho: 4, obrigatorio: true, posicao: 2 }
       - { nome: NUM_AD, tipo: N, tamanho: 10, obrigatorio: true, posicao: 3 }
-      - { nome: CAMP_AD, tipo: C, tamanho: 255, obrigatorio: true, posicao: 4 }
-      - { nome: DESC, tipo: C, tamanho: 255, obrigatorio: false, posicao: 5 }
+      - { nome: CAMPO, tipo: C, tamanho: 255, obrigatorio: true, posicao: 4 }
+      - { nome: DESCRICAO, tipo: C, tamanho: 255, obrigatorio: false, posicao: 5 }
+      - { nome: TIPO, tipo: C, tamanho: 1, obrigatorio: true, posicao: 6 }
 
   "I030":
-    descricao: "Período da escrituração contábil"
-    nivel: 2
+    descricao: "Termo de abertura"
+    nivel: 3
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: DT_INI, tipo: N, tamanho: 8, obrigatorio: true, posicao: 2 }
-      - { nome: DT_FIN, tipo: N, tamanho: 8, obrigatorio: true, posicao: 3 }
-      - { nome: PER_ESC, tipo: C, tamanho: 1, obrigatorio: true, posicao: 4 }
+      - { nome: DNRC_ABERT, tipo: C, tamanho: 17, obrigatorio: true, posicao: 2 }
+      - { nome: NUM_ORD, tipo: N, tamanho: 10, obrigatorio: true, posicao: 3 }
+      - { nome: NAT_LIVR, tipo: C, tamanho: 80, obrigatorio: true, posicao: 4 }
+      - { nome: QTD_LIN, tipo: N, tamanho: 10, obrigatorio: true, posicao: 5 }
+      - { nome: NOME, tipo: C, tamanho: 150, obrigatorio: true, posicao: 6 }
+      - { nome: NIRE, tipo: N, tamanho: 11, obrigatorio: false, posicao: 7 }
+      - { nome: CNPJ, tipo: C, tamanho: 14, obrigatorio: true, posicao: 8 }
+      - { nome: DT_ARQ, tipo: N, tamanho: 8, obrigatorio: false, posicao: 9 }
+      - { nome: DT_ARQ_CONV, tipo: N, tamanho: 8, obrigatorio: false, posicao: 10 }
+      - { nome: DESC_MUN, tipo: C, tamanho: 255, obrigatorio: false, posicao: 11 }
+      - { nome: DT_EX_SOCIAL, tipo: N, tamanho: 8, obrigatorio: true, posicao: 12 }
 
   "I050":
     descricao: "Plano de contas"
@@ -99,7 +125,7 @@ registros:
       - { nome: NIVEL, tipo: N, tamanho: 3, obrigatorio: true, posicao: 5 }
       - { nome: COD_CTA, tipo: C, tamanho: 255, obrigatorio: true, posicao: 6 }
       - { nome: COD_CTA_SUP, tipo: C, tamanho: 255, obrigatorio: false, posicao: 7 }
-      - { nome: NOME_CTA, tipo: C, tamanho: 255, obrigatorio: true, posicao: 8 }
+      - { nome: CTA, tipo: C, tamanho: 255, obrigatorio: true, posicao: 8 }
 
   "I051":
     descricao: "Plano de contas referencial"
@@ -189,7 +215,7 @@ registros:
       - { nome: DT_LCTO, tipo: N, tamanho: 8, obrigatorio: true, posicao: 3 }
       - { nome: VL_LCTO, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
       - { nome: IND_LCTO, tipo: C, tamanho: 1, obrigatorio: true, posicao: 5 }
-      - { nome: NUM_ARQ, tipo: N, tamanho: 10, obrigatorio: false, posicao: 6 }
+      - { nome: DT_LCTO_EXT, tipo: N, tamanho: 8, obrigatorio: false, posicao: 6 }
 
   "I250":
     descricao: "Partidas do lançamento"
@@ -207,20 +233,22 @@ registros:
       - { nome: COD_PART, tipo: C, tamanho: 255, obrigatorio: false, posicao: 9 }
 
   "I300":
-    descricao: "Período da escrituração contábil — datas dos arquivos auxiliares"
-    nivel: 2
+    descricao: "Balancetes diários — identificação da data"
+    nivel: 3
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: DT_INI, tipo: N, tamanho: 8, obrigatorio: true, posicao: 2 }
-      - { nome: DT_FIN, tipo: N, tamanho: 8, obrigatorio: true, posicao: 3 }
+      - { nome: DT_BCTE, tipo: N, tamanho: 8, obrigatorio: true, posicao: 2 }
 
   "I310":
-    descricao: "Assinaturas dos arquivos auxiliares"
-    nivel: 3
+    descricao: "Detalhes do balancete diário"
+    nivel: 4
     pai: "I300"
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: COD_HASH_AUX, tipo: C, tamanho: 255, obrigatorio: false, posicao: 2 }
+      - { nome: COD_CTA, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
+      - { nome: COD_CCUS, tipo: C, tamanho: 255, obrigatorio: false, posicao: 3 }
+      - { nome: VAL_DEBD, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
+      - { nome: VAL_CREDD, tipo: N, tamanho: 19, obrigatorio: true, posicao: 5 }
 
   "I350":
     descricao: "Saldos das contas de resultado antes do encerramento"
@@ -237,8 +265,8 @@ registros:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
       - { nome: COD_CTA, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
       - { nome: COD_CCUS, tipo: C, tamanho: 255, obrigatorio: false, posicao: 3 }
-      - { nome: VL_SLD_FIN, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
-      - { nome: IND_DC_FIN, tipo: C, tamanho: 1, obrigatorio: true, posicao: 5 }
+      - { nome: VL_CTA, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
+      - { nome: IND_DC, tipo: C, tamanho: 1, obrigatorio: true, posicao: 5 }
 
   "I500":
     descricao: "Parâmetros de impressão"
@@ -248,37 +276,38 @@ registros:
       - { nome: TAM_FONTE, tipo: N, tamanho: 3, obrigatorio: true, posicao: 2 }
 
   "I510":
-    descricao: "Parâmetros de impressão — definição dos campos"
+    descricao: "Definição de campos do livro razão auxiliar parametrizável"
     nivel: 3
     pai: "I500"
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: COD_MOD_REF, tipo: C, tamanho: 2, obrigatorio: true, posicao: 2 }
-      - { nome: COLUNA, tipo: N, tamanho: 3, obrigatorio: true, posicao: 3 }
-      - { nome: COD_CAMPO, tipo: C, tamanho: 255, obrigatorio: true, posicao: 4 }
-      - { nome: DESCR_COL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 5 }
+      - { nome: NM_CAMPO, tipo: C, tamanho: 16, obrigatorio: true, posicao: 2 }
+      - { nome: DESC_CAMPO, tipo: C, tamanho: 50, obrigatorio: true, posicao: 3 }
+      - { nome: TIPO_CAMPO, tipo: C, tamanho: 1, obrigatorio: true, posicao: 4 }
+      - { nome: TAM_CAMPO, tipo: N, tamanho: 3, obrigatorio: true, posicao: 5 }
+      - { nome: DEC_CAMPO, tipo: N, tamanho: 2, obrigatorio: false, posicao: 6 }
+      - { nome: COL_CAMPO, tipo: N, tamanho: 3, obrigatorio: true, posicao: 7 }
 
   "I550":
-    descricao: "Parâmetros de impressão — detalhes dos campos"
+    # Registro de largura variável: depois do REG vêm tantos campos quantos
+    # forem os I510 do arquivo (o manual marca a coluna com “*”, não com um
+    # número).  Aqui fica só o primeiro; o parser lê por posição e não usa
+    # este registro.
+    descricao: "Detalhes do livro auxiliar com leiaute parametrizável"
     nivel: 3
     pai: "I500"
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: COD_MOD_REF, tipo: C, tamanho: 2, obrigatorio: true, posicao: 2 }
-      - { nome: LINHA, tipo: N, tamanho: 10, obrigatorio: true, posicao: 3 }
-      - { nome: COLUNA, tipo: N, tamanho: 3, obrigatorio: true, posicao: 4 }
-      - { nome: VL_REF, tipo: C, tamanho: 255, obrigatorio: false, posicao: 5 }
+      - { nome: RZ_CONT, tipo: C, tamanho: 255, obrigatorio: false, posicao: 2 }
 
   "I555":
-    descricao: "Parâmetros de impressão — totalizadores"
-    nivel: 3
-    pai: "I500"
+    # Largura variável, como o I550.
+    descricao: "Totais no livro auxiliar com leiaute parametrizável"
+    nivel: 4
+    pai: "I550"
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: COD_MOD_REF, tipo: C, tamanho: 2, obrigatorio: true, posicao: 2 }
-      - { nome: LINHA, tipo: N, tamanho: 10, obrigatorio: true, posicao: 3 }
-      - { nome: COLUNA, tipo: N, tamanho: 3, obrigatorio: true, posicao: 4 }
-      - { nome: COD_CTA, tipo: C, tamanho: 255, obrigatorio: true, posicao: 5 }
+      - { nome: RZ_CONT_TOT, tipo: C, tamanho: 255, obrigatorio: false, posicao: 2 }
 
   "I990":
     descricao: "Encerramento do Bloco I"
@@ -305,28 +334,43 @@ registros:
       - { nome: CAB_DEM, tipo: C, tamanho: 255, obrigatorio: false, posicao: 5 }
 
   "J100":
-    descricao: "Balanço Patrimonial"
+    descricao: "Balanço patrimonial"
     nivel: 3
     pai: "J005"
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
       - { nome: COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
-      - { nome: IND_GRP_BAL, tipo: C, tamanho: 1, obrigatorio: true, posicao: 3 }
-      - { nome: VL_SLD_INI, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
-      - { nome: IND_DC_INI, tipo: C, tamanho: 1, obrigatorio: true, posicao: 5 }
-      - { nome: VL_SLD_FIN, tipo: N, tamanho: 19, obrigatorio: true, posicao: 6 }
-      - { nome: IND_DC_FIN, tipo: C, tamanho: 1, obrigatorio: true, posicao: 7 }
+      - { nome: IND_COD_AGL, tipo: C, tamanho: 1, obrigatorio: true, posicao: 3 }
+      - { nome: NIVEL_AGL, tipo: N, tamanho: 3, obrigatorio: true, posicao: 4 }
+      - { nome: COD_AGL_SUP, tipo: C, tamanho: 255, obrigatorio: false, posicao: 5 }
+      - { nome: IND_GRP_BAL, tipo: C, tamanho: 1, obrigatorio: true, posicao: 6 }
+      - { nome: DESCR_COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 7 }
+      - { nome: VL_CTA_INI, tipo: N, tamanho: 19, obrigatorio: true, posicao: 8 }
+      - { nome: IND_DC_CTA_INI, tipo: C, tamanho: 1, obrigatorio: true, posicao: 9 }
+      - { nome: VL_CTA_FIN, tipo: N, tamanho: 19, obrigatorio: true, posicao: 10 }
+      - { nome: IND_DC_CTA_FIN, tipo: C, tamanho: 1, obrigatorio: true, posicao: 11 }
+      - { nome: NOTA_EXP_REF, tipo: C, tamanho: 12, obrigatorio: false, posicao: 12 }
 
   "J150":
-    descricao: "Demonstração do Resultado"
+    # O manual imprime o campo 08 como “VL_CTA_INI_”, com um sublinhado solto
+    # no fim; o nome usado aqui é o do campo equivalente do J100.
+    descricao: "Demonstração do resultado do exercício"
     nivel: 3
     pai: "J005"
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
-      - { nome: IND_GRP_DRE, tipo: C, tamanho: 1, obrigatorio: true, posicao: 3 }
-      - { nome: VL_SLD_FIN, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
-      - { nome: IND_DC_FIN, tipo: C, tamanho: 1, obrigatorio: true, posicao: 5 }
+      - { nome: NU_ORDEM, tipo: N, tamanho: 19, obrigatorio: true, posicao: 2 }
+      - { nome: COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 3 }
+      - { nome: IND_COD_AGL, tipo: C, tamanho: 1, obrigatorio: true, posicao: 4 }
+      - { nome: NIVEL_AGL, tipo: N, tamanho: 3, obrigatorio: true, posicao: 5 }
+      - { nome: COD_AGL_SUP, tipo: C, tamanho: 255, obrigatorio: false, posicao: 6 }
+      - { nome: DESCR_COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 7 }
+      - { nome: VL_CTA_INI, tipo: N, tamanho: 19, obrigatorio: false, posicao: 8 }
+      - { nome: IND_DC_CTA_INI, tipo: C, tamanho: 1, obrigatorio: false, posicao: 9 }
+      - { nome: VL_CTA_FIN, tipo: N, tamanho: 19, obrigatorio: true, posicao: 10 }
+      - { nome: IND_DC_CTA_FIN, tipo: C, tamanho: 1, obrigatorio: true, posicao: 11 }
+      - { nome: IND_GRP_DRE, tipo: C, tamanho: 1, obrigatorio: true, posicao: 12 }
+      - { nome: NOTA_EXP_REF, tipo: C, tamanho: 12, obrigatorio: false, posicao: 13 }
 
   "J210":
     descricao: "DLPA / DMPL"
@@ -334,56 +378,61 @@ registros:
     pai: "J005"
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
-      - { nome: IND_GRP_DLPA, tipo: C, tamanho: 1, obrigatorio: true, posicao: 3 }
-      - { nome: VL_SLD_INI, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
-      - { nome: IND_DC_INI, tipo: C, tamanho: 1, obrigatorio: true, posicao: 5 }
-      - { nome: VL_DEB, tipo: N, tamanho: 19, obrigatorio: true, posicao: 6 }
-      - { nome: VL_CRED, tipo: N, tamanho: 19, obrigatorio: true, posicao: 7 }
-      - { nome: VL_SLD_FIN, tipo: N, tamanho: 19, obrigatorio: true, posicao: 8 }
-      - { nome: IND_DC_FIN, tipo: C, tamanho: 1, obrigatorio: true, posicao: 9 }
+      - { nome: IND_TIP, tipo: C, tamanho: 1, obrigatorio: true, posicao: 2 }
+      - { nome: COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 3 }
+      - { nome: DESCR_COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 4 }
+      - { nome: VL_CTA_INI, tipo: N, tamanho: 19, obrigatorio: true, posicao: 5 }
+      - { nome: IND_DC_CTA_INI, tipo: C, tamanho: 1, obrigatorio: true, posicao: 6 }
+      - { nome: VL_CTA_FIN, tipo: N, tamanho: 19, obrigatorio: true, posicao: 7 }
+      - { nome: IND_DC_CTA_FIN, tipo: C, tamanho: 1, obrigatorio: true, posicao: 8 }
+      - { nome: NOTAS_EXP_REF, tipo: C, tamanho: 12, obrigatorio: false, posicao: 9 }
 
   "J215":
-    descricao: "Notas explicativas"
-    nivel: 3
-    pai: "J005"
+    descricao: "Fato contábil que altera lucros/prejuízos acumulados ou o PL"
+    nivel: 4
+    pai: "J210"
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: COD_AGL, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
-      - { nome: TXT, tipo: C, tamanho: 255, obrigatorio: true, posicao: 3 }
+      - { nome: COD_HIST_FAT, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
+      - { nome: DESC_FAT, tipo: C, tamanho: 255, obrigatorio: true, posicao: 3 }
+      - { nome: VL_FAT_CONT, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
+      - { nome: IND_DC_FAT, tipo: C, tamanho: 1, obrigatorio: true, posicao: 5 }
 
   "J800":
     descricao: "Outras informações"
-    nivel: 2
+    nivel: 3
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: TIPO_DOC, tipo: C, tamanho: 2, obrigatorio: true, posicao: 2 }
-      - { nome: DESC_RTF, tipo: C, tamanho: 255, obrigatorio: true, posicao: 3 }
-      - { nome: COD_MOT_SUBS, tipo: C, tamanho: 2, obrigatorio: false, posicao: 4 }
+      - { nome: TIPO_DOC, tipo: C, tamanho: 3, obrigatorio: true, posicao: 2 }
+      - { nome: DESC_RTF, tipo: C, tamanho: 255, obrigatorio: false, posicao: 3 }
+      - { nome: HASH_RTF, tipo: C, tamanho: 41, obrigatorio: false, posicao: 4 }
       - { nome: ARQ_RTF, tipo: C, tamanho: 255, obrigatorio: true, posicao: 5 }
+      - { nome: IND_FIM_RTF, tipo: C, tamanho: 7, obrigatorio: true, posicao: 6 }
 
   "J801":
-    descricao: "Termo de verificação"
+    descricao: "Termo de verificação para fins de substituição da ECD"
     nivel: 2
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: TIPO_DOC, tipo: C, tamanho: 2, obrigatorio: true, posicao: 2 }
-      - { nome: DESC_RTF, tipo: C, tamanho: 255, obrigatorio: true, posicao: 3 }
-      - { nome: COD_MOT_SUBS, tipo: C, tamanho: 2, obrigatorio: false, posicao: 4 }
-      - { nome: ARQ_RTF, tipo: C, tamanho: 255, obrigatorio: true, posicao: 5 }
+      - { nome: TIPO_DOC, tipo: C, tamanho: 3, obrigatorio: true, posicao: 2 }
+      - { nome: DESC_RTF, tipo: C, tamanho: 255, obrigatorio: false, posicao: 3 }
+      - { nome: COD_MOT_SUBS, tipo: C, tamanho: 10, obrigatorio: true, posicao: 4 }
+      - { nome: HASH_RTF, tipo: C, tamanho: 41, obrigatorio: false, posicao: 5 }
+      - { nome: ARQ_RTF, tipo: C, tamanho: 255, obrigatorio: true, posicao: 6 }
+      - { nome: IND_FIM_RTF, tipo: C, tamanho: 7, obrigatorio: true, posicao: 7 }
 
   "J900":
-    descricao: "Assinaturas"
+    descricao: "Termo de encerramento"
     nivel: 2
     campos:
       - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
-      - { nome: NOME, tipo: C, tamanho: 150, obrigatorio: true, posicao: 2 }
-      - { nome: CPF, tipo: N, tamanho: 11, obrigatorio: true, posicao: 3 }
-      - { nome: QUALIF, tipo: C, tamanho: 2, obrigatorio: true, posicao: 4 }
-      - { nome: COD_CRC, tipo: C, tamanho: 20, obrigatorio: false, posicao: 5 }
-      - { nome: DT_CRC, tipo: N, tamanho: 8, obrigatorio: false, posicao: 6 }
-      - { nome: IND_CRC, tipo: C, tamanho: 2, obrigatorio: false, posicao: 7 }
-      - { nome: NUM_SEQ, tipo: N, tamanho: 3, obrigatorio: false, posicao: 8 }
+      - { nome: DNRC_ENCER, tipo: C, tamanho: 21, obrigatorio: true, posicao: 2 }
+      - { nome: NUM_ORD, tipo: N, tamanho: 10, obrigatorio: true, posicao: 3 }
+      - { nome: NAT_LIVRO, tipo: C, tamanho: 80, obrigatorio: true, posicao: 4 }
+      - { nome: NOME, tipo: C, tamanho: 150, obrigatorio: true, posicao: 5 }
+      - { nome: QTD_LIN, tipo: N, tamanho: 10, obrigatorio: true, posicao: 6 }
+      - { nome: DT_INI_ESCR, tipo: N, tamanho: 8, obrigatorio: true, posicao: 7 }
+      - { nome: DT_FIN_ESCR, tipo: N, tamanho: 8, obrigatorio: true, posicao: 8 }
 
   "J990":
     descricao: "Encerramento do Bloco J"
@@ -423,6 +472,8 @@ hierarquia:
   "I200": ["I250"]
   "I300": ["I310"]
   "I350": ["I355"]
-  "I500": ["I510", "I550", "I555"]
+  "I500": ["I510", "I550"]
+  "I550": ["I555"]
   "J001": ["J005", "J800", "J801", "J900", "J990"]
-  "J005": ["J100", "J150", "J210", "J215"]
+  "J005": ["J100", "J150", "J210"]
+  "J210": ["J215"]

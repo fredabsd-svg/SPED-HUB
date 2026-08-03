@@ -442,7 +442,7 @@ class TestUploadAsync:
             "|0000|LECD|01012024|31122024|EMPRESA TESTE LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||\n"
             "|I001|0|\n"
             "|I010|G|009|\n"
-            "|I030|01012024|31122024|A|\n"
+            "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|\n"
             "|I050|01012024|01|S|1|1||ATIVO|\n"
             "|I050|01012024|01|A|3|1.1|1|CAIXA|\n"
             "|I050|01012024|02|S|1|2||PASSIVO|\n"
@@ -604,7 +604,9 @@ class TestBenchmark:
         )
         linhas.append("|I001|0|")
         linhas.append("|I010|G|009|")
-        linhas.append("|I030|01012024|31122024|A|")
+        linhas.append(
+            "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|"
+        )
 
         # 100 contas
         for i in range(100):
@@ -699,7 +701,9 @@ class TestBenchmark:
         )
         linhas.append("|I001|0|")
         linhas.append("|I010|G|009|")
-        linhas.append("|I030|01012024|31122024|A|")
+        linhas.append(
+            "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|"
+        )
 
         # 500 contas
         for i in range(500):
@@ -769,7 +773,9 @@ class TestBenchmark:
         )
         linhas.append("|I001|0|")
         linhas.append("|I010|G|009|")
-        linhas.append("|I030|01012024|31122024|A|")
+        linhas.append(
+            "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|"
+        )
 
         for i in range(300):
             linhas.append(f"|I050|01012024|01|A|3|{i+1}|1|CONTA_{i+1}|")

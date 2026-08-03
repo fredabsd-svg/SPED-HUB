@@ -329,7 +329,7 @@ class TestWatchdog:
 
         # Cria arquivo ECD mínimo
         ecd_content = """|0000|12345678000199|EMPRESA TESTE WATCHDOG LTDA||SP|||7107001|||0|0|0|0|||01012024|31122024|
-|I010|009|G|
+|I010|G|009|
 |I050|1|ATIVO|01|S|1|||
 |I050|1.1|Caixa|01|A|2|1||
 |I051|1.1||1.01.01|

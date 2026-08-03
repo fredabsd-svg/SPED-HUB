@@ -82,7 +82,7 @@ def _criar_ecd_teste(cnpj: str = "00123456000199", empresa: str = "EMPRESA E2E L
         f"|0000|LECD|01012024|31122024|{empresa}|{cnpj}|SP||1234567||0|0|1|0|0|E||1|0||",
         "|I001|0|",
         "|I010|G|009|",
-        "|I030|01012024|31122024|A|",
+        "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|",
     ]
     for i in range(10):
         # Conta 1 é topo (sem sintética): sup=1 para ela mesma era um

@@ -150,7 +150,7 @@ class TestHierarquiaCiclicaPelaCLI:
             "|0000|LECD|01012024|31122024|EMPRESA CICLO LTDA|00123456000199|SP||1234567||0|0|1|0|0|E||1|0||",
             "|I001|0|",
             "|I010|G|009|",
-            "|I030|01012024|31122024|A|",
+            "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|",
             *linhas_i050,
             "|I990|99|",
             "|9001|0|",
@@ -819,3 +819,161 @@ class TestRegistro0200DaEFDContribuicoesPelaCLI:
         assert self._gerar(importado, saida, "efd_icms") == 0
 
         assert len(self._campos_do_0200(saida)) == 12
+
+
+# ── Fase 74 — o leiaute 9 da ECD conferido pelas linhas do próprio manual ──
+
+
+class TestLeiaute9DaECDPelaCLI:
+    """As linhas do "Exemplo de Preenchimento" do manual, pela linha de comando.
+
+    Nove registros do `ecd_v9.yml` não correspondiam a leiaute nenhum. O
+    pior era o J100: os valores do balanço estavam quatro colunas à
+    esquerda de onde estão de verdade, e a posição 4 — que o arquivo lê
+    como saldo inicial — guarda o nível de aglutinação, um inteiro pequeno.
+
+    A suíte inteira passava. Ela tinha que passar: as fixtures são escritas
+    a partir do próprio yml, então conferiam a cópia contra a cópia. Foi o
+    mesmo furo do `CEST` no `0200` da EFD-Contribuições, uma fase antes.
+
+    O que quebra o círculo são as linhas que a RFB publica prontas, cada
+    uma seguida da explicação campo a campo. As constantes `*_DO_MANUAL`
+    são cópias literais delas — mudar uma vírgula ali é reescrever o
+    documento oficial. As outras linhas do arquivo são nossas, e estão
+    marcadas.
+    """
+
+    # Manual do Leiaute 9 da ECD (Anexo ao ADE Cofis nº 01/2026), "V - Exemplo
+    # de Preenchimento" de cada registro.
+    I030_DO_MANUAL = (
+        "|I030|TERMO DE ABERTURA|1|Balancete|500|EMPRESA TESTE"
+        "|31123456789|11111111000191|01012015||BELO HORIZONTE|31122023|"
+    )
+    I050_DO_MANUAL = "|I050|01012015|01|S|1|1.01.01.01||Ativo Sintética 1|"
+    I200_DO_MANUAL = "|I200|1000|02052023|5000,00|N||"
+    I250_DO_MANUAL = "|I250|1.1||5000,00|D|123||RECEBIMENTO DE CLIENTES – DUPLICATA N. 100.2011||"
+    I355_DO_MANUAL = "|I355|4.1||200000,00|C|"
+
+    @pytest.fixture
+    def banco(self, tmp_path) -> str:
+        caminho = str(tmp_path / "leiaute9.db")
+        engine = criar_engine(caminho)
+        init_db(engine)
+        engine.dispose()
+        return caminho
+
+    @pytest.fixture
+    def arquivo(self, tmp_path) -> Path:
+        linhas = [
+            "|0000|LECD|01012023|31122023|EMPRESA TESTE|11111111000191|MG||3106200"
+            "||0|0|1|0||0|G||N|0||0||",
+            "|I001|0|",
+            "|I010|G|009|",
+            self.I030_DO_MANUAL,
+            self.I050_DO_MANUAL,
+            "|I050|01012015|01|A|2|4.1|1.01.01.01|Receita de Vendas|",
+            self.I200_DO_MANUAL,
+            self.I250_DO_MANUAL,
+            # O lançamento extemporâneo é o que expõe o campo 6: ele leva a
+            # data dos fatos que o lançamento registra (DT_LCTO_EXT).
+            "|I200|2000|02052023|1500,00|X|31122022|",
+            "|I250|1.1||1500,00|D|456||AJUSTE DE EXERCICIO ANTERIOR|",
+            "|I350|31122023|",
+            self.I355_DO_MANUAL,
+            "|I990|11|",
+            "|J001|0|",
+            "|J990|2|",
+            "|9001|0|",
+            "|9999|16|",
+        ]
+        caminho = tmp_path / "leiaute9.txt"
+        caminho.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+        return caminho
+
+    @pytest.fixture
+    def importado(self, banco, arquivo) -> str:
+        assert main(["importar-ecd", str(arquivo), "--db", banco]) == 0
+        return banco
+
+    @staticmethod
+    def _sessao(banco: str):
+        return get_session(criar_engine(banco))
+
+    def test_o_nome_da_conta_vem_do_campo_8(self, importado):
+        """ "Campo 08 – CTA – Nome da Conta Analítica/Grupo de Contas"."""
+        from src.db.models import PlanoConta
+
+        with self._sessao(importado) as sessao:
+            conta = sessao.execute(
+                select(PlanoConta).where(PlanoConta.cod_cta == "1.01.01.01")
+            ).scalar_one()
+
+            assert conta.nome_cta == "Ativo Sintética 1"
+
+    def test_a_data_extemporanea_nao_vira_numero_de_arquivo(self, importado):
+        """O campo 6 do I200 é DT_LCTO_EXT — o I200 não tem NUM_ARQ.
+
+        Lida como número, `31122022` entrava no banco como se fosse a
+        localização do documento arquivado.
+        """
+        from src.db.models import Lancamento
+
+        with self._sessao(importado) as sessao:
+            extemporaneo = sessao.execute(
+                select(Lancamento).where(Lancamento.num_lcto == "2000")
+            ).scalar_one()
+
+            assert extemporaneo.num_arq is None
+
+    def test_o_numero_do_documento_da_partida_continua_vindo(self, importado):
+        """Quem tem NUM_ARQ é o I250, no campo 6 — e esse segue sendo lido."""
+        from src.db.models import Lancamento, Partida
+
+        with self._sessao(importado) as sessao:
+            partida = sessao.execute(
+                select(Partida).join(Lancamento).where(Lancamento.num_lcto == "1000")
+            ).scalar_one()
+
+            assert partida.num_arq == 123
+
+    def test_o_saldo_de_resultado_vem_dos_campos_4_e_5(self, importado):
+        """ "Campo 04 – VL_CTA", "Campo 05 – IND_DC" — não VL_SLD_FIN/IND_DC_FIN."""
+        from src.db.models import SaldoResultado
+
+        with self._sessao(importado) as sessao:
+            saldo = sessao.execute(
+                select(SaldoResultado).where(SaldoResultado.cod_cta == "4.1")
+            ).scalar_one()
+
+            assert (saldo.vl_sld_fin, saldo.ind_dc_fin) == (200000.00, "C")
+
+    def test_o_leiaute_declarado_pelo_arquivo_e_conferido(self, banco, arquivo, caplog):
+        """Ler um leiaute 8 com o leiaute 9 é o mesmo defeito, de novo.
+
+        O parser carrega sempre o `ecd_v9.yml`. Se o arquivo diz outra
+        versão, os campos podem estar em outras posições e o dado errado
+        entra na coluna certa — em silêncio, que é o que este aviso quebra.
+        """
+        antigo = arquivo.read_text(encoding="utf-8").replace("|I010|G|009|", "|I010|G|008|")
+        arquivo.write_text(antigo, encoding="utf-8")
+        assert "|I010|G|008|" in antigo, "o arquivo não foi adulterado"
+
+        assert main(["importar-ecd", str(arquivo), "--db", banco]) == 0
+
+        assert "declara leiaute 008" in caplog.text
+        assert "lido com o leiaute 9" in caplog.text
+
+    def test_o_leiaute_que_bate_nao_avisa_nada(self, banco, arquivo, caplog):
+        """009 e 9 são a mesma versão — avisar aqui seria ruído."""
+        assert main(["importar-ecd", str(arquivo), "--db", banco]) == 0
+
+        assert "declara leiaute" not in caplog.text
+
+    def test_a_procedencia_do_leiaute_esta_declarada(self, importado):
+        """§8.1: quem embute tabela de terceiro diz de onde ela veio."""
+        import yaml
+
+        leiaute = yaml.safe_load((Path("src/layouts/ecd_v9.yml")).read_text(encoding="utf-8"))
+
+        assert "01/2026" in leiaute["conferido_contra"]
+        assert leiaute["conferido_em"] == "2026-08-03"

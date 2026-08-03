@@ -305,6 +305,33 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **Nove registros da ECD eram lidos em colunas erradas.** O arquivo que
+  descreve o leiaute 9 foi conferido campo a campo contra o Manual da Receita
+  (Anexo ao ADE Cofis nº 01/2026), e metade dos registros não correspondia a
+  leiaute nenhum. O pior era o **balanço patrimonial publicado (J100)**: os
+  valores estavam quatro colunas à esquerda do lugar certo — o que o arquivo
+  lia como saldo inicial é, no documento oficial, o nível de aglutinação da
+  linha. A DRE (J150) e a DLPA/DMPL (J210) tinham o mesmo problema. Nenhum
+  desses três é importado hoje, então nenhum número já mostrado estava errado
+  por causa deles; o que se corrigiu foi a descrição que a importação usa.
+- **A data do lançamento extemporâneo entrava no banco como número do
+  documento arquivado.** O campo 6 do registro de lançamento (I200) é
+  `DT_LCTO_EXT`, a data dos fatos que o lançamento registra; era lido como
+  `NUM_ARQ`, que só existe no registro das partidas (I250). Um lançamento
+  extemporâneo gravava `31122022` no lugar da localização do documento. O
+  I250, esse sim, continua trazendo o número.
+- **A suíte inteira passava com o leiaute errado, e tinha que passar.** As
+  fixtures de teste eram escritas a partir do próprio arquivo de leiaute:
+  conferiam a cópia contra a cópia. As conferências novas usam as linhas de
+  exemplo que a Receita publica prontas no manual, cada uma seguida da
+  explicação campo a campo — mudar uma vírgula ali é reescrever o documento
+  oficial. As fixtures que ensinavam registros inventados foram trocadas
+  pelas linhas do manual.
+- **Ler uma ECD de outra versão de leiaute passou a avisar.** O programa lê
+  todo arquivo com o leiaute 9, seja qual for a versão que o próprio arquivo
+  declara. Quando as duas não batem, os campos podem estar em outras posições
+  e o dado errado entra na coluna certa, em silêncio. Agora o aviso sai na
+  importação. Não trava: uma ECD de 2019 ainda é melhor que ECD nenhuma.
 - **A EFD ICMS/IPI saía com a versão de leiaute errada e seria recusada na
   transmissão.** O código da versão estava fixo em `018` no registro de
   abertura, e o validador do Fisco o confere contra a data final do período:
