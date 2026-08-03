@@ -769,3 +769,53 @@ class TestVersaoDoLeiautePelaCLI:
         saida = capsys.readouterr().out
         assert "NÃO entram neste arquivo" in saida
         assert "CBS" in saida
+
+
+# ── Fase 73 — o 0200 da EFD-Contribuições no arquivo que sai pela CLI ──────
+
+
+class TestRegistro0200DaEFDContribuicoesPelaCLI:
+    """O `0200` sai com onze campos no arquivo que vai para o Fisco.
+
+    O campo a mais era invisível daqui: o gerador confere contra a nossa
+    própria tabela, e a tabela é que estava errada. Contar os campos do
+    arquivo é a única conferência que não usa a fonte suspeita como
+    referência.
+    """
+
+    @pytest.fixture
+    def importado(self, banco_fiscal, tmp_path) -> str:
+        assert _importar(banco_fiscal, _pasta_com_nota(tmp_path)) == 0
+        return banco_fiscal
+
+    @staticmethod
+    def _gerar(banco: str, saida: Path, tipo: str) -> int:
+        return main(
+            ["fiscal", "gerar", "--empresa", "1", "--de", "2026-07-01", "--ate", "2026-07-31"]
+            + ["--tipo", tipo, "--saida", str(saida), "--db", banco]
+        )
+
+    @staticmethod
+    def _campos_do_0200(saida: Path) -> list[str]:
+        for linha in saida.read_text("utf-8").splitlines():
+            campos = linha.split("|")
+            if len(campos) > 1 and campos[1] == "0200":
+                # A linha é |0200|c1|...|cN| — fora o vazio inicial, o tipo e
+                # o vazio final.
+                return campos[2:-1]
+        raise AssertionError("nenhum 0200 no arquivo gerado")
+
+    def test_o_0200_da_contribuicoes_sai_com_onze_campos(self, importado, tmp_path):
+        saida = tmp_path / "contrib.txt"
+
+        assert self._gerar(importado, saida, "efd_contribuicoes") == 0
+
+        assert len(self._campos_do_0200(saida)) == 11
+
+    def test_o_0200_da_icms_sai_com_doze(self, importado, tmp_path):
+        """A mesma nota, a outra obrigação: são leiautes diferentes."""
+        saida = tmp_path / "icms.txt"
+
+        assert self._gerar(importado, saida, "efd_icms") == 0
+
+        assert len(self._campos_do_0200(saida)) == 12
