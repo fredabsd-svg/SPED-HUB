@@ -31,6 +31,12 @@ conferência é registro a registro, contra a Nota Técnica que institui o
 leiaute, e o que ela compara é a **contagem e a ordem**, que é o que decide se
 o arquivo é aceito.
 
+A conferência é **por obrigação**: a EFD ICMS/IPI contra a Nota Técnica que
+institui o leiaute, a EFD-Contribuições contra o Guia Prático dela. Foram duas
+conferências, e a segunda achou o que a primeira não podia achar — um campo a
+mais no `0200` desta, que estava em `_COMUNS` como se os dois leiautes fossem
+o mesmo.
+
 Duas armadilhas para quem reconferir:
 
   * **o PDF da NT perde linhas na extração de texto.** No `C100` ele salta de
@@ -57,6 +63,12 @@ LEIAUTE_CONFERIDO = "020"
 VERIFICADO_CONTRA = "NT 2025.001 v1.0 (leiaute versão 020), item 4.1 do Anexo Único"
 VERIFICADO_EM = "2026-08-03"
 
+# A EFD-Contribuições tem leiaute próprio, e por isso procedência própria.  A
+# primeira conferência cobriu só a EFD ICMS/IPI, e foi na segunda — desta — que
+# apareceu o `CEST` a mais no `0200`.
+CONTRIBUICOES_VERIFICADO_CONTRA = "Guia Prático da EFD-Contribuições versão 1.35 (18/06/2021)"
+CONTRIBUICOES_VERIFICADO_EM = "2026-08-03"
+
 # ── Registros de estrutura, iguais em toda escrituração ────────────────────
 _ABERTURA_DE_BLOCO = ("IND_MOV",)
 
@@ -77,20 +89,6 @@ _COMUNS: dict[str, tuple[str, ...]] = {
         "BAIRRO",
     ),
     "0190": ("UNID", "DESCR"),
-    "0200": (
-        "COD_ITEM",
-        "DESCR_ITEM",
-        "COD_BARRA",
-        "COD_ANT_ITEM",
-        "UNID_INV",
-        "TIPO_ITEM",
-        "COD_NCM",
-        "EX_IPI",
-        "COD_GEN",
-        "COD_LST",
-        "ALIQ_ICMS",
-        "CEST",
-    ),
     "0990": ("QTD_LIN_0",),
     "C001": _ABERTURA_DE_BLOCO,
     # O IND_FRT é o campo 17, logo depois do VL_MERC.  Foi o que faltava.
@@ -188,6 +186,26 @@ EFD_ICMS: dict[str, tuple[str, ...]] = {
         "IND_PERFIL",
         "IND_ATIV",
     ),
+    # O `0200` **não** é o mesmo nas duas obrigações, e estava em `_COMUNS`.
+    # Aqui ele termina em `CEST` (campo 13); na EFD-Contribuições ele acaba no
+    # `ALIQ_ICMS`, e a palavra "CEST" não aparece uma única vez nas 433 páginas
+    # do Guia Prático dela.  Compartilhado, o gerador de Contribuições escrevia
+    # doze valores onde o validador espera onze — "quantidade de campos
+    # inválida", registro recusado.
+    "0200": (
+        "COD_ITEM",
+        "DESCR_ITEM",
+        "COD_BARRA",
+        "COD_ANT_ITEM",
+        "UNID_INV",
+        "TIPO_ITEM",
+        "COD_NCM",
+        "EX_IPI",
+        "COD_GEN",
+        "COD_LST",
+        "ALIQ_ICMS",
+        "CEST",
+    ),
     "C190": (
         "CST_ICMS",
         "CFOP",
@@ -229,6 +247,21 @@ EFD_ICMS: dict[str, tuple[str, ...]] = {
 # que o IND_ATIV — mesmo nome, tabela diferente.
 EFD_CONTRIBUICOES: dict[str, tuple[str, ...]] = {
     **_COMUNS,
+    # Sem `CEST`: o campo não existe nesta obrigação.  Ver a nota no `0200` da
+    # EFD ICMS/IPI, acima.
+    "0200": (
+        "COD_ITEM",
+        "DESCR_ITEM",
+        "COD_BARRA",
+        "COD_ANT_ITEM",
+        "UNID_INV",
+        "TIPO_ITEM",
+        "COD_NCM",
+        "EX_IPI",
+        "COD_GEN",
+        "COD_LST",
+        "ALIQ_ICMS",
+    ),
     "0000": (
         "COD_VER",
         "TIPO_ESCRIT",

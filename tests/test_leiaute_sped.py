@@ -36,6 +36,8 @@ from src.escrituracoes import GeradorEFDContribuicoes, GeradorEFDICMS
 from src.escrituracoes.base import GeradorBase
 from src.escrituracoes.efd_icms import VERSOES_DO_LEIAUTE
 from src.escrituracoes.leiaute import (
+    CONTRIBUICOES_VERIFICADO_CONTRA,
+    CONTRIBUICOES_VERIFICADO_EM,
     EFD_CONTRIBUICOES,
     EFD_ICMS,
     LEIAUTE_CONFERIDO,
@@ -353,7 +355,61 @@ class TestProcedencia:
             "Técnica nova e atualize LEIAUTE_CONFERIDO/VERIFICADO_CONTRA/VERIFICADO_EM"
         )
 
+    def test_a_procedencia_das_duas_obrigacoes_esta_preenchida(self):
+        """Cada obrigação tem leiaute próprio, e por isso procedência própria.
+
+        A primeira conferência cobriu só a EFD ICMS/IPI, e o módulo passou a
+        declarar uma procedência que valia para metade do que ele continha.
+        """
+        assert "Guia Prático" in CONTRIBUICOES_VERIFICADO_CONTRA
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", CONTRIBUICOES_VERIFICADO_EM)
+
     def test_a_procedencia_esta_preenchida(self):
         assert re.fullmatch(r"\d{3}", LEIAUTE_CONFERIDO)
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", VERIFICADO_EM)
         assert "NT" in VERIFICADO_CONTRA and LEIAUTE_CONFERIDO in VERIFICADO_CONTRA
+
+
+class TestOsDoisLeiautesDoMesmoRegistro:
+    """Registro de mesmo nome com leiaute diferente nas duas obrigações.
+
+    `conferir` compara o gerador com a NOSSA tabela — nunca a nossa tabela com
+    o documento oficial. Um campo a mais aqui passa por toda a suíte e só é
+    recusado pelo validador do Fisco. Por isso as diferenças conhecidas entre
+    as duas obrigações ficam pinadas uma a uma: elas são o que `_COMUNS` não
+    pode engolir.
+    """
+
+    def test_o_0200_da_efd_contribuicoes_nao_tem_cest(self):
+        """O campo não existe nesta obrigação.
+
+        A palavra "CEST" não aparece uma única vez nas 433 páginas do Guia
+        Prático da EFD-Contribuições. Compartilhado com o da EFD ICMS/IPI —
+        onde ele é o campo 13 —, o gerador escrevia doze valores onde o
+        validador espera onze.
+        """
+        assert "CEST" not in EFD_CONTRIBUICOES["0200"]
+        assert len(EFD_CONTRIBUICOES["0200"]) == 11
+        assert EFD_CONTRIBUICOES["0200"][-1] == "ALIQ_ICMS"
+
+    def test_o_0200_da_efd_icms_termina_no_cest(self):
+        assert EFD_ICMS["0200"][-1] == "CEST"
+        assert len(EFD_ICMS["0200"]) == 12
+
+    def test_os_dois_0200_compartilham_o_comeco_e_divergem_no_fim(self):
+        """O prefixo igual é o que faz o engano parecer inofensivo."""
+        contribuicoes = EFD_CONTRIBUICOES["0200"]
+
+        assert EFD_ICMS["0200"][: len(contribuicoes)] == contribuicoes
+        assert EFD_ICMS["0200"] != contribuicoes
+
+    def test_o_0200_nao_esta_entre_os_comuns(self):
+        """Se voltar para `_COMUNS`, as duas obrigações voltam a divergir do
+        oficial em silêncio — foi exatamente assim que o defeito entrou."""
+        from src.escrituracoes import leiaute
+
+        assert "0200" not in leiaute._COMUNS
+
+    def test_o_0000_tambem_difere(self):
+        """O caso que já era conhecido, pinado junto para não voltar."""
+        assert EFD_ICMS["0000"] != EFD_CONTRIBUICOES["0000"]

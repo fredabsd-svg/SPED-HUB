@@ -305,6 +305,21 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **A EFD ICMS/IPI saía com a versão de leiaute errada e seria recusada na
+  transmissão.** O código da versão estava fixo em `018` no registro de
+  abertura, e o validador do Fisco o confere contra a data final do período:
+  `019` vale a partir de janeiro de 2025 e `020` a partir de janeiro de 2026.
+  Na prática, **todo arquivo gerado para 2025 em diante voltaria recusado** — e
+  não havia como perceber antes, porque o arquivo sai bem-formado e a recusa só
+  aparece no validador, com o fechamento já pronto. As três faixas foram
+  conferidas nas Notas Técnicas que as instituíram.
+- **O registro de itens da EFD-Contribuições saía com um campo a mais e também
+  seria recusado.** O `0200` das duas obrigações tem o mesmo nome e leiautes
+  diferentes: na EFD ICMS/IPI ele termina no código da substituição tributária
+  (CEST), e na EFD-Contribuições esse campo simplesmente não existe — a palavra
+  não aparece uma vez nas 433 páginas do Guia Prático dela. A descrição estava
+  compartilhada entre as duas, e o arquivo saía com doze valores onde o
+  validador espera onze.
 - **O menu não oferece mais telas que o usuário não pode abrir.** API Keys,
   Webhooks e Auditoria exigem administrador e apareciam para todos; clicar
   devolvia um "acesso administrativo necessário" a quem não tinha pedido acesso

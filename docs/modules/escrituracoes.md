@@ -122,6 +122,17 @@ a porta de entrada humana de tudo isto.
 
 ## Decisões não óbvias e armadilhas
 
+- **O `0200` não é o mesmo nas duas obrigações — e estava compartilhado.** Na
+  EFD ICMS/IPI ele termina no `CEST` (campo 13); na EFD-Contribuições ele acaba
+  no `ALIQ_ICMS`, e a palavra "CEST" não aparece uma única vez nas 433 páginas
+  do Guia Prático dela. Em `_COMUNS`, o gerador de Contribuições escrevia doze
+  valores onde o validador espera onze, e o registro voltava recusado. É o
+  mesmo engano do `IND_ATIV`: mesmo nome, leiaute diferente.
+- **`conferir` não podia achar isso.** Ele compara o gerador com a **nossa**
+  tabela, nunca a nossa tabela com o documento oficial. Um campo a mais na
+  tabela passa por toda a suíte — a única conferência que não usa a fonte
+  suspeita como referência é contar os campos do arquivo gerado, e é o que o
+  teste de porta faz.
 - **`leiaute.py` declara contra qual versão foi conferido (§8.1).** É cópia
   de documento de terceiro, e sem a versão ninguém sabe se os registros
   descrevem o leiaute que o arquivo diz declarar. Os registros que o gerador

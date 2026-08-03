@@ -329,19 +329,23 @@ class GeradorEFDContribuicoes(GeradorBase):
                 codigo = item["codigo"]
                 if not codigo or codigo in vistos:
                     continue
+                # Onze campos, e o último é o `ALIQ_ICMS`.  O `CEST` existe no
+                # `0200` da EFD ICMS/IPI e **não** existe aqui — a palavra não
+                # aparece uma vez nas 433 páginas do Guia Prático desta
+                # obrigação.  Escrevê-lo dava doze valores onde o validador
+                # espera onze, e o registro voltava recusado.
                 vistos[codigo] = [
                     codigo,
                     _texto(item["descricao"]),
-                    "",
-                    "",
+                    "",  # COD_BARRA
+                    "",  # COD_ANT_ITEM
                     _texto(item["unidade"]),
-                    "00",
+                    "00",  # TIPO_ITEM: mercadoria para revenda
                     _texto(item["ncm"]),
-                    "",
-                    "",
-                    "",
-                    "",
-                    _texto(item["cest"]),
+                    "",  # EX_IPI
+                    "",  # COD_GEN
+                    "",  # COD_LST
+                    "",  # ALIQ_ICMS
                 ]
         return list(vistos.values())
 
