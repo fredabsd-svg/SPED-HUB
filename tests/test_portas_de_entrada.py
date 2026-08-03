@@ -720,3 +720,52 @@ class TestIdadeDaTabelaPelaCLI:
         main(["fiscal", "tabelas", "--db", banco_fiscal])
 
         assert "ATENÇÃO" not in capsys.readouterr().out
+
+
+# ── Fase 71 — a versão do leiaute no arquivo que sai pela CLI ──────────────
+
+
+class TestVersaoDoLeiautePelaCLI:
+    """O `COD_VER` do arquivo que `fiscal gerar` escreve em disco.
+
+    É onde o defeito importava: o número certo na função e errado no arquivo
+    seria o mesmo que nada. O validador do Fisco lê o arquivo, e a recusa
+    chega depois de o fechamento estar pronto.
+    """
+
+    @pytest.fixture
+    def importado(self, banco_fiscal, tmp_path) -> str:
+        assert _importar(banco_fiscal, _pasta_com_nota(tmp_path)) == 0
+        return banco_fiscal
+
+    @staticmethod
+    def _gerar(banco: str, saida: Path, de: str, ate: str) -> int:
+        return main(
+            ["fiscal", "gerar", "--empresa", "1", "--de", de, "--ate", ate]
+            + ["--saida", str(saida), "--db", banco]
+        )
+
+    @staticmethod
+    def _cod_ver(saida: Path) -> str:
+        for linha in saida.read_text("utf-8").splitlines():
+            campos = linha.split("|")
+            if len(campos) > 2 and campos[1] == "0000":
+                return campos[2]
+        raise AssertionError("nenhum 0000 no arquivo gerado")
+
+    def test_o_arquivo_de_2026_sai_com_o_leiaute_020(self, importado, tmp_path):
+        """Fixo em 018, este arquivo voltaria recusado da transmissão."""
+        saida = tmp_path / "julho.txt"
+
+        assert self._gerar(importado, saida, "2026-07-01", "2026-07-31") == 0
+
+        assert self._cod_ver(saida) == "020"
+
+    def test_o_aviso_dos_tributos_da_reforma_sai_na_tela(self, importado, tmp_path, capsys):
+        capsys.readouterr()
+
+        self._gerar(importado, tmp_path / "julho.txt", "2026-07-01", "2026-07-31")
+
+        saida = capsys.readouterr().out
+        assert "NÃO entram neste arquivo" in saida
+        assert "CBS" in saida

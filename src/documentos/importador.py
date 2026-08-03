@@ -259,6 +259,7 @@ class ImportadorDeDocumentos:
             valor_imposto_importacao=normalizado.valor_imposto_importacao,
             valor_ipi_devolvido=normalizado.valor_ipi_devolvido,
             valor_servicos=normalizado.valor_servicos,
+            valor_total_com_reforma=normalizado.valor_total_com_reforma,
             valor_ibs=normalizado.valor_ibs,
             valor_cbs=normalizado.valor_cbs,
             valor_is=normalizado.valor_is,

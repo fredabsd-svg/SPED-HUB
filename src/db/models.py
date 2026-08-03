@@ -814,6 +814,11 @@ class DocumentoFiscal(Base):
     valor_ipi_devolvido: Mapped[float] = mapped_column(default=0.0)
     # `vServ` mora em `ISSQNtot`, e não em `ICMSTot` como os outros.
     valor_servicos: Mapped[float] = mapped_column(default=0.0)
+    # `vNFTot` (W60 da NT 2025.002): o total COM os novos tributos.  Campo à
+    # parte do `vNF`, não uma versão nova dele — somá-los ao `vNF` daria um
+    # documento que a SEFAZ recusa.  Opcional no leiaute, com as regras de
+    # validação ainda marcadas "implementação futura".
+    valor_total_com_reforma: Mapped[float] = mapped_column(default=0.0)
     # Reforma: totais do documento.  Convivem com os de cima durante toda a
     # transição (2026–2032).
     valor_ibs: Mapped[float] = mapped_column(default=0.0)

@@ -122,6 +122,27 @@ a porta de entrada humana de tudo isto.
 
 ## Decisões não óbvias e armadilhas
 
+- **O `COD_VER` do 0000 depende do período, e estava fixo.** O validador
+  confere o código contra o `DT_FIN` e recusa o arquivo inteiro quando ele não
+  vale para o período — "A versão do leiaute não é válida para o período
+  informado". Fixo em `018`, todo arquivo de 2025 em diante saía recusado, e
+  nada acusava: o arquivo é bem-formado, e a recusa só aparece no validador do
+  Fisco, depois de o fechamento estar pronto. Cada faixa de
+  `VERSOES_DO_LEIAUTE` cita a Nota Técnica que a instituiu.
+- **Período anterior ao leiaute mais antigo levanta, não escolhe o mais
+  velho.** Devolver `018` para um arquivo de 2020 repetiria o mesmo defeito em
+  menor escala: outro código que o validador recusa, escrito com a confiança
+  de quem sabe.
+- **A EFD ICMS/IPI não leva IBS, CBS nem IS.** É decisão do GT48 da COTEPE, e
+  a consequência prática é que o `VL_DOC` do C100 deixou de ter de bater com a
+  soma dos `VL_OPR` dos C190 — a validação que cobrava a igualdade foi
+  desativada em 01/2026. A geração diz **quanto** de cada tributo ficou de
+  fora, porque a diferença tem exatamente a cara de um defeito do gerador e é
+  a primeira coisa que quem confere vai investigar.
+- **O `COD_VER` da EFD-Contribuições continua `006`**, e isso foi conferido,
+  não presumido: o leiaute 006 vale para períodos a partir de abril de 2021.
+
+
 - **O espelho é lido dos registros, não do banco.** É a decisão que dá sentido
   ao módulo. Um espelho montado a partir dos documentos responderia "o que eu
   acredito que vai sair" — e concordaria com o banco mesmo quando o gerador
