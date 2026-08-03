@@ -19,6 +19,7 @@ acrescentar campo ao gerador sem acrescentá-lo ao leiaute para na hora.
 from __future__ import annotations
 
 import datetime
+import re
 
 import pytest
 
@@ -33,9 +34,13 @@ from src.db.models import (
 from src.documentos import ImportadorDeDocumentos
 from src.escrituracoes import GeradorEFDContribuicoes, GeradorEFDICMS
 from src.escrituracoes.base import GeradorBase
+from src.escrituracoes.efd_icms import VERSOES_DO_LEIAUTE
 from src.escrituracoes.leiaute import (
     EFD_CONTRIBUICOES,
     EFD_ICMS,
+    LEIAUTE_CONFERIDO,
+    VERIFICADO_CONTRA,
+    VERIFICADO_EM,
     CamposEmDesacordo,
     RegistroForaDoLeiaute,
     conferir,
@@ -320,3 +325,35 @@ def test_gerar_duas_vezes_nao_soma_os_avisos_da_primeira(sessao, empresa):
     # O documento aparece uma vez, não duas: o estado da primeira geração não
     # sobrevive para a segunda.
     assert aviso.count("55") == 1
+
+
+class TestProcedencia:
+    """§8.1 — o leiaute embutido diz de qual versão veio e quando foi conferido.
+
+    Estas tabelas são cópia de documento de terceiro. Sem a versão declarada,
+    ninguém sabe se elas descrevem o leiaute que o arquivo diz declarar — e a
+    divergência entre as duas coisas é justamente o defeito que fez todo
+    arquivo de 2025 sair recusado.
+    """
+
+    def test_a_versao_conferida_e_a_mais_nova_do_gerador(self):
+        """A trava que liga a tabela de versões à conferência dos registros.
+
+        Acrescentar o leiaute 021 em `VERSOES_DO_LEIAUTE` é dizer que o
+        arquivo passa a declarar 021. Se os registros aqui continuam sendo os
+        do 020, o arquivo declara uma coisa e é outra — e o validador recusa
+        sem dizer qual campo. Reconferir os registros é trabalho humano, e
+        este teste é o que o torna obrigatório.
+        """
+        mais_nova = VERSOES_DO_LEIAUTE[0][1]
+
+        assert LEIAUTE_CONFERIDO == mais_nova, (
+            f"o gerador declara o leiaute {mais_nova} e os registros foram conferidos "
+            f"contra o {LEIAUTE_CONFERIDO}. Reconfira os registros contra a Nota "
+            "Técnica nova e atualize LEIAUTE_CONFERIDO/VERIFICADO_CONTRA/VERIFICADO_EM"
+        )
+
+    def test_a_procedencia_esta_preenchida(self):
+        assert re.fullmatch(r"\d{3}", LEIAUTE_CONFERIDO)
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", VERIFICADO_EM)
+        assert "NT" in VERIFICADO_CONTRA and LEIAUTE_CONFERIDO in VERIFICADO_CONTRA
