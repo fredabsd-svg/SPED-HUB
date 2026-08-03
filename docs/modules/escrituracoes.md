@@ -122,6 +122,21 @@ a porta de entrada humana de tudo isto.
 
 ## Decisões não óbvias e armadilhas
 
+- **`leiaute.py` declara contra qual versão foi conferido (§8.1).** É cópia
+  de documento de terceiro, e sem a versão ninguém sabe se os registros
+  descrevem o leiaute que o arquivo diz declarar. Os registros que o gerador
+  emite foram conferidos campo a campo contra a NT 2025.001 (leiaute 020) —
+  contagem e ordem, que é o que decide se o arquivo é aceito. Acrescentar uma
+  versão em `VERSOES_DO_LEIAUTE` sem reconferir os registros derruba o CI: as
+  duas coisas precisam andar juntas, porque uma diz o que o arquivo declara
+  ser e a outra diz o que ele é.
+- **Duas armadilhas para quem reconferir**, as duas encontradas na
+  conferência de 2026-08-03: o PDF da NT **perde linhas** na extração — no
+  `C100` ele salta de "15 VL_ABAT_NT" para "17 IND_FRT", e concluir pela
+  ausência apagaria um campo e deslocaria os doze seguintes (a prova de que a
+  posição existe é o próprio `IND_FRT` estar numerado 17); e o documento
+  **repete nomes** — no `C170` os campos 27 e 29 se chamam os dois
+  `ALIQ_PIS`, um "em percentual" e outro "em reais".
 - **O `COD_VER` do 0000 depende do período, e estava fixo.** O validador
   confere o código contra o `DT_FIN` e recusa o arquivo inteiro quando ele não
   vale para o período — "A versão do leiaute não é válida para o período

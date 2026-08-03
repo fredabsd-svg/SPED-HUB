@@ -5,7 +5,7 @@ Primeiro arquivo a ler depois de `REGRAS-DO-PROJETO.md`.
 Regra §1.8: nada é marcado como concluído sem os testes daquela fase
 passando. A coluna "Evidência" aponta o teste que prova.
 
-**Última atualização:** 2026-08-02 · **Versão:** 0.19.0
+**Última atualização:** 2026-08-03 · **Versão:** 0.19.0
 
 ## Fases
 
@@ -93,6 +93,7 @@ passando. A coluna "Evidência" aponta o teste que prova.
 | 69 | A regra de classificação é conferida no cadastro, não no fechamento | concluída | `tests/test_classificacao_fiscal.py::TestValidacao`, `tests/test_portas_de_entrada.py::TestRegraComCodigoInventadoPelaCLI` | `regras criar` recusa CST/`cClassTrib` fora da tabela oficial — a regra vale para documento que ainda nem foi importado e grava com origem `regra`. A **condição** segue livre: filtrar por código inexistente é procurar a nota que veio errada da origem. A conferência de valor vive em `tabelas_ibscbs.conferir_valor`, uma só, usada por `alterar` e por `regras` |
 | 70 | Tabela oficial com validade: a defasagem acusa antes de errar (REGRA 8, §8.1 e §8.2) | concluída | `tests/test_tabelas_ibscbs.py::TestValidadeDaTabela`, `tests/test_regras_projeto.py::TestTabelaOficial`, `tests/test_portas_de_entrada.py::TestIdadeDaTabelaPelaCLI` | 180 dias — o dobro da cadência observada do IT. Passado o prazo o CI fica vermelho e a apuração avisa; **não trava**, porque tabela velha ainda é melhor que tabela nenhuma. A data vem do nome do arquivo oficial, e o CI recusa mudá-la sem trocar a planilha |
 | 71 | A versão do leiaute da EFD segue o período, e os tributos novos ficam fora do arquivo | concluída | `tests/test_portas_de_entrada.py::TestVersaoDoLeiautePelaCLI`, `tests/test_gerador_efd_icms.py::TestVersaoDoLeiaute`, `tests/test_gerador_efd_icms.py::TestOsTributosDaReformaFicamForaDoArquivo`, `tests/test_leitura_reforma_nt.py::TestTotalComOsTributosNovos` | o `COD_VER` estava fixo em `018` e **todo arquivo de 2025 em diante seria recusado** na transmissão. Faixas conferidas nas NTs 2023.001 (018), 2024.001 (019) e 2025.001 (020), baixadas do portal do SPED. `vNFTot` (W60) passa a ser lido — é campo à parte do `vNF`, não uma versão nova dele. A EFD-Contribuições segue em `006`, conferido |
+| 72 | Os registros do leiaute conferidos contra a Nota Técnica oficial, com procedência declarada (§8.1) | concluída | `tests/test_leiaute_sped.py::TestProcedencia`, `tests/test_gerador_efd_icms.py::TestVersaoDoLeiaute` [interno: a conferência é do repositório contra o documento oficial; o efeito no produto é a fase 71] | contagem e ordem de todos os registros que o gerador emite batem com a NT 2025.001 (leiaute 020). Nenhum defeito encontrado — as três divergências aparentes eram artefato da extração do PDF, e estão registradas como armadilha em `docs/modules/escrituracoes.md`. Acrescentar versão em `VERSOES_DO_LEIAUTE` sem reconferir derruba o CI |
 
 ## Limites do comportamento atual
 

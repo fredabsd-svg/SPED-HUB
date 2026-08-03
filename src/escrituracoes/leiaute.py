@@ -24,9 +24,38 @@ definição é compartilhada por `_COMUNS`, para que não haja duas verdades.
 Os nomes são os do Guia Prático. Campo que o gerador ainda não preenche
 continua listado: ele ocupa posição no arquivo mesmo vazio, e é justamente a
 posição que este módulo protege.
+
+**Procedência (REGRA 8 §8.1).** Isto é tabela de terceiro embutida, e por isso
+declara de onde veio e quando foi conferida — ver `VERIFICADO_CONTRA`. A
+conferência é registro a registro, contra a Nota Técnica que institui o
+leiaute, e o que ela compara é a **contagem e a ordem**, que é o que decide se
+o arquivo é aceito.
+
+Duas armadilhas para quem reconferir:
+
+  * **o PDF da NT perde linhas na extração de texto.** No `C100` ele salta de
+    "15 VL_ABAT_NT" para "17 IND_FRT", e não há campo 16 no texto extraído. A
+    posição existe: a prova é o próprio `IND_FRT` estar numerado 17. Concluir
+    pela ausência apagaria um campo e deslocaria os doze seguintes.
+  * **o documento repete nomes.** No `C170`, os campos 27 e 29 se chamam os
+    dois `ALIQ_PIS` — um "em percentual", outro "em reais". Aqui eles são
+    `ALIQ_PIS` e `ALIQ_PIS_QUANT`, como no Guia Prático; a diferença de nome é
+    proposital e não é divergência.
 """
 
 from __future__ import annotations
+
+# A versão do leiaute contra a qual estes registros foram conferidos, campo a
+# campo, e a data da conferência.
+#
+# Anda junto de `efd_icms.VERSOES_DO_LEIAUTE`: acrescentar uma versão nova lá
+# sem reconferir os registros aqui derruba o CI
+# (`test_leiaute_sped.py::TestProcedencia`).  As duas coisas precisam andar
+# juntas — a versão diz o que o arquivo declara ser, e estas tabelas dizem o
+# que ele é.
+LEIAUTE_CONFERIDO = "020"
+VERIFICADO_CONTRA = "NT 2025.001 v1.0 (leiaute versão 020), item 4.1 do Anexo Único"
+VERIFICADO_EM = "2026-08-03"
 
 # ── Registros de estrutura, iguais em toda escrituração ────────────────────
 _ABERTURA_DE_BLOCO = ("IND_MOV",)

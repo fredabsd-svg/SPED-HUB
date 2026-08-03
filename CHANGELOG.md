@@ -26,6 +26,12 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **A descrição dos registros do SPED passou a dizer contra qual versão do
+  leiaute foi conferida.** Todos os registros que o sistema escreve foram
+  comparados, campo a campo, com a Nota Técnica oficial — e batem. A partir de
+  agora, declarar uma versão nova de leiaute sem reconferir os registros
+  derruba a verificação automática: uma coisa diz o que o arquivo afirma ser,
+  a outra diz o que ele é, e elas precisam andar juntas.
 - **A geração da EFD diz quanto de IBS, CBS e IS ficou de fora do arquivo.**
   Os tributos da Reforma não entram na EFD ICMS/IPI, por decisão do GT48 da
   COTEPE — e a partir de agosto de 2026 isso faz o total do arquivo deixar de
