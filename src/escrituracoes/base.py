@@ -46,6 +46,27 @@ def formatar_valor(valor: float | Decimal | None) -> str:
     return f"{numero:.2f}".replace(".", ",")
 
 
+def formatar_valor_obrigatorio(valor: float | Decimal | None) -> str:
+    """Como `formatar_valor`, mas zero sai `0,00` — não vazio.
+
+    Para os campos marcados "O" onde o Guia Prático da EFD ICMS/IPI 3.2.2
+    define, no Capítulo III, o que a marca significa: "o 'O' significa que o
+    campo deve ser sempre preenchido.  Por exemplo: nos registros analíticos
+    dos blocos 'C' e 'D' e nos registros de apuração (Bloco E) todos os campos
+    numéricos devem ser preenchidos, com valores ou com '0' (zero)".
+
+    É a exceção que a regra do `formatar_valor` prevê ao dizer "na maioria dos
+    campos": num E110 sem ajuste nenhum, metade dos campos é zero, e todos são
+    obrigatórios — e num C190 de operação isenta o Guia manda escrever zero
+    com todas as letras ("CST_ICMS 40, contendo valor zero nos campos
+    VL_BC_ICMS e VL_ICMS").
+
+    Não vale para os campos "OC", que só são preenchidos quando há informação.
+    """
+    formatado = formatar_valor(valor)
+    return formatado or "0,00"
+
+
 def formatar_data(data: datetime.date | None) -> str:
     """ddmmaaaa — o formato do leiaute, sem separador."""
     return data.strftime("%d%m%Y") if data else ""

@@ -1731,7 +1731,7 @@ class TestAjusteDeApuracao:
         saida = capsys.readouterr().out
         assert codigo == 0
         assert "outros créditos" in saida
-        assert "VL_AJ_CREDITOS" in saida
+        assert "VL_TOT_AJ_CREDITOS" in saida
         assert "1.234,56" in saida
 
     def test_valor_aceita_o_formato_brasileiro(self, banco, capsys):
@@ -1779,7 +1779,7 @@ class TestAjusteDeApuracao:
         self._ajuste(banco)
 
         saida = capsys.readouterr().out
-        assert "VL_AJ_CREDITOS" in saida
+        assert "VL_TOT_AJ_CREDITOS" in saida
         assert "— fora da apuração" in saida
 
     def test_o_ajuste_chega_ao_arquivo_gerado(self, importado, tmp_path, capsys):

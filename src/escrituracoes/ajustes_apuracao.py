@@ -30,13 +30,21 @@ from src.db.models import AjusteApuracao, Empresa
 
 # A quarta posição do código: para onde o valor vai no E110, e como se lê.
 #
+# Conferido (§8.1) contra o Guia Prático da EFD ICMS/IPI versão 3.2.2
+# (11/02/2026), validações dos campos 04, 05, 08, 09, 12 e 15 do registro E110,
+# em 2026-08-03.  O próprio Guia resume no cabeçalho do E111: ele discrimina os
+# ajustes lançados em VL_TOT_AJ_DEBITOS, VL_ESTORNOS_CRED, VL_TOT_AJ_CREDITOS,
+# VL_ESTORNOS_DEB, VL_TOT_DED e DEB_ESP.  Os campos VL_AJ_DEBITOS (03) e
+# VL_AJ_CREDITOS (07) **não** estão nessa lista: são os ajustes que nascem de
+# um documento (C197/D197), que este gerador não escreve.
+#
 # `campo` é `None` no controle extra-apuração (9): ele existe justamente para
 # registrar valor que **não** entra na apuração do período — somá-lo seria o
 # oposto do que o código pede.
 UTILIZACOES: dict[str, tuple[str, str | None]] = {
-    "0": ("outros débitos", "VL_AJ_DEBITOS"),
+    "0": ("outros débitos", "VL_TOT_AJ_DEBITOS"),
     "1": ("estorno de créditos", "VL_ESTORNOS_CRED"),
-    "2": ("outros créditos", "VL_AJ_CREDITOS"),
+    "2": ("outros créditos", "VL_TOT_AJ_CREDITOS"),
     "3": ("estorno de débitos", "VL_ESTORNOS_DEB"),
     "4": ("deduções", "VL_TOT_DED"),
     "5": ("débito especial", "DEB_ESP"),

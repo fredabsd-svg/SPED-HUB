@@ -482,7 +482,19 @@ class TestSaldoCredorPelaCLI:
         )
 
     @staticmethod
-    def _campo_do_e110(saida: Path, posicao: int) -> str:
+    def _campo_do_e110(saida: Path, nome: str) -> str:
+        """O campo pelo NOME, com a posição resolvida pelo leiaute.
+
+        Este teste lia por índice, e lia errado: `-2` é o `DEB_ESP`, não o
+        `VL_SLD_CREDOR_TRANSPORTAR`, e `4` é o `VL_TOT_AJ_DEBITOS`, não o
+        `VL_SLD_CREDOR_ANT`. Comparava dois campos vazios e passava sem provar
+        nada. O que escondeu isso por tanto tempo foi o zero sair como campo
+        vazio; quando o Bloco E passou a escrever `0,00`, a guarda do próprio
+        teste acusou.
+        """
+        from src.escrituracoes.leiaute import EFD_ICMS
+
+        posicao = EFD_ICMS["E110"].index(nome) + 2
         for linha in saida.read_text("utf-8").splitlines():
             campos = linha.split("|")
             if len(campos) > posicao and campos[1] == "E110":
@@ -511,15 +523,16 @@ class TestSaldoCredorPelaCLI:
 
     def test_o_saldo_de_julho_chega_ao_e110_de_agosto(self, com_julho_transmitido, tmp_path):
         banco, julho = com_julho_transmitido
-        # VL_SLD_CREDOR_TRANSPORTAR é o último campo do E110.
-        transportado = self._campo_do_e110(julho, -2)
-        assert transportado != "0,00", "julho fechou sem saldo credor; o teste não prova nada"
+        transportado = self._campo_do_e110(julho, "VL_SLD_CREDOR_TRANSPORTAR")
+        assert transportado not in (
+            "",
+            "0,00",
+        ), "julho fechou sem saldo credor; o teste não prova nada"
 
         agosto = tmp_path / "agosto.txt"
         assert self._gerar(banco, agosto, "2026-08-01", "2026-08-31") == 0
 
-        # VL_SLD_CREDOR_ANT é o quarto campo do E110.
-        assert self._campo_do_e110(agosto, 4) == transportado
+        assert self._campo_do_e110(agosto, "VL_SLD_CREDOR_ANT") == transportado
 
 
 # ── Fase 53 — o CST que descarta o valor, decidido pela CLI ───────────────
@@ -977,3 +990,127 @@ class TestLeiaute9DaECDPelaCLI:
 
         assert "01/2026" in leiaute["conferido_contra"]
         assert leiaute["conferido_em"] == "2026-08-03"
+
+
+# ── Fase 75 — o E110 conferido contra o Guia Prático, pela linha de comando ──
+
+
+class TestAjustesNoE110PelaCLI:
+    """Onde o ajuste do período aparece no arquivo que vai para o Fisco.
+
+    O gerador escrevia os E111 nos campos 03 e 07 do E110 — `VL_AJ_DEBITOS` e
+    `VL_AJ_CREDITOS` —, que o Guia descreve como "ajustes decorrentes do
+    documento fiscal". Os do período são os campos 04 e 08, e o Guia diz isso
+    no cabeçalho do próprio E111: ele "discrimina os ajustes lançados nos
+    campos VL_TOT_AJ_DEBITOS, VL_ESTORNOS_CRED, VL_TOT_AJ_CREDITOS,
+    VL_ESTORNOS_DEB, VL_TOT_DED e DEB_ESP".
+
+    A conta fechava — o saldo apurado soma os dois pares —, então nada na tela
+    denunciava. O que denunciaria é o validador do Fisco, com o fechamento
+    pronto: campos 04 e 08 vazios sendo obrigatórios, e 03 e 07 com valor sem
+    um C197 que os justifique.
+    """
+
+    @staticmethod
+    def _ajuste(banco: str, codigo: str, valor: str) -> int:
+        return main(
+            ["fiscal", "ajuste", "--empresa", "1", "--de", "2026-07-01"]
+            + ["--ate", "2026-07-31", "--codigo", codigo, "--valor", valor]
+            + ["--db", banco]
+        )
+
+    @staticmethod
+    def _e110(saida: Path) -> dict[str, str]:
+        from src.escrituracoes.leiaute import EFD_ICMS
+
+        for linha in saida.read_text("utf-8").splitlines():
+            campos = linha.split("|")
+            if len(campos) > 1 and campos[1] == "E110":
+                return dict(zip(EFD_ICMS["E110"], campos[2:], strict=False))
+        raise AssertionError(f"nenhum E110 em {saida.name}")
+
+    @staticmethod
+    def _c190(saida: Path) -> list[dict[str, str]]:
+        from src.escrituracoes.leiaute import EFD_ICMS
+
+        return [
+            dict(zip(EFD_ICMS["C190"], campos[2:], strict=False))
+            for campos in (linha.split("|") for linha in saida.read_text("utf-8").splitlines())
+            if len(campos) > 1 and campos[1] == "C190"
+        ]
+
+    @pytest.fixture
+    def arquivo(self, banco_fiscal, tmp_path) -> Path:
+        assert _importar(banco_fiscal, _pasta_com_nota(tmp_path)) == 0
+        assert self._ajuste(banco_fiscal, "TO000001", "20,00") == 0
+        assert self._ajuste(banco_fiscal, "TO020001", "30,00") == 0
+
+        saida = tmp_path / "julho.txt"
+        assert (
+            main(
+                ["fiscal", "gerar", "--empresa", "1", "--de", "2026-07-01"]
+                + ["--ate", "2026-07-31", "--saida", str(saida), "--db", banco_fiscal]
+            )
+            == 0
+        )
+        return saida
+
+    @pytest.fixture
+    def gerado(self, banco_fiscal, tmp_path) -> dict[str, str]:
+        assert _importar(banco_fiscal, _pasta_com_nota(tmp_path)) == 0
+        assert self._ajuste(banco_fiscal, "TO000001", "20,00") == 0
+        assert self._ajuste(banco_fiscal, "TO020001", "30,00") == 0
+
+        saida = tmp_path / "julho.txt"
+        assert (
+            main(
+                ["fiscal", "gerar", "--empresa", "1", "--de", "2026-07-01"]
+                + ["--ate", "2026-07-31", "--saida", str(saida), "--db", banco_fiscal]
+            )
+            == 0
+        )
+        return self._e110(saida)
+
+    def test_o_ajuste_a_debito_sai_no_campo_dos_ajustes_do_periodo(self, gerado):
+        assert gerado["VL_TOT_AJ_DEBITOS"] == "20,00"
+
+    def test_o_ajuste_a_credito_sai_no_campo_dos_ajustes_do_periodo(self, gerado):
+        assert gerado["VL_TOT_AJ_CREDITOS"] == "30,00"
+
+    def test_os_campos_do_documento_saem_zerados(self, gerado):
+        """Sem C197/D197 no arquivo, os campos 03 e 07 valem zero."""
+        assert gerado["VL_AJ_DEBITOS"] == "0,00"
+        assert gerado["VL_AJ_CREDITOS"] == "0,00"
+
+    def test_nenhum_campo_numerico_do_e110_sai_vazio(self, gerado):
+        """Bloco E: obrigatório sai com valor ou com zero, nunca em branco.
+
+        "Nos registros analíticos dos blocos 'C' e 'D' e nos registros de
+        apuração (Bloco E) todos os campos numéricos devem ser preenchidos,
+        com valores ou com '0' (zero)" — Guia 3.2.2, Capítulo III.
+        """
+        vazios = [nome for nome, valor in gerado.items() if valor == ""]
+
+        assert vazios == []
+
+    def test_nenhum_valor_do_c190_sai_vazio(self, arquivo):
+        """O C190 é registro analítico do bloco C — a mesma regra o alcança.
+
+        Numa nota tributada normal o ST e a redução de base valem zero, e
+        saíam em branco: sete campos "O" com três deles vazios.
+        """
+        analiticos = self._c190(arquivo)
+        assert analiticos, "nenhum C190 no arquivo gerado"
+
+        obrigatorios = (
+            "VL_OPR",
+            "VL_BC_ICMS",
+            "VL_ICMS",
+            "VL_BC_ICMS_ST",
+            "VL_ICMS_ST",
+            "VL_RED_BC",
+            "VL_IPI",
+        )
+        vazios = [(nome, c190) for c190 in analiticos for nome in obrigatorios if c190[nome] == ""]
+
+        assert vazios == []

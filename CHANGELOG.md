@@ -305,6 +305,27 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **Os ajustes da apuração saíam no campo errado do E110, e o arquivo seria
+  recusado.** Os valores lançados por `fiscal ajuste` — o registro E111 — iam
+  para os campos `VL_AJ_DEBITOS` e `VL_AJ_CREDITOS`, que o Guia Prático
+  descreve como *"ajustes decorrentes do documento fiscal"*: são os C197/D197,
+  que este gerador não escreve. Os ajustes do período são `VL_TOT_AJ_DEBITOS`
+  e `VL_TOT_AJ_CREDITOS`, e o Guia diz isso no cabeçalho do próprio E111. **A
+  conta fechava** — o saldo apurado soma os dois pares —, então nada na tela
+  denunciava; quem denunciaria é o validador do Fisco, com o fechamento pronto.
+- **Campo obrigatório de valor zero saía em branco.** O Guia é explícito sobre
+  onde: *"nos registros analíticos dos blocos 'C' e 'D' e nos registros de
+  apuração (Bloco E) todos os campos numéricos devem ser preenchidos, com
+  valores ou com '0' (zero)"*. O programa deixava em branco todo valor zero, o
+  que é a regra certa na maioria do arquivo e a errada exatamente ali — num
+  E110 sem ajuste nenhum metade dos campos é zero, e no registro analítico de
+  uma nota tributada normal o ST e a redução de base também são. Todos
+  obrigatórios.
+- **Uma conferência de ponta a ponta não provava nada.** O teste que garante
+  que o saldo credor de um mês entra no mês seguinte lia os campos do E110 por
+  posição, e lia duas posições erradas: comparava o `DEB_ESP` de julho com o
+  `VL_TOT_AJ_DEBITOS` de agosto. Como os dois saíam vazios, passava. Passou a
+  ler pelo nome, com a posição resolvida pelo leiaute.
 - **Nove registros da ECD eram lidos em colunas erradas.** O arquivo que
   descreve o leiaute 9 foi conferido campo a campo contra o Manual da Receita
   (Anexo ao ADE Cofis nº 01/2026), e metade dos registros não correspondia a

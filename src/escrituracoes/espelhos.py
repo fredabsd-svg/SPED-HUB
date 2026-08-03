@@ -294,9 +294,9 @@ class _Leitor:
         # é o que explica por que o imposto não é débito menos crédito.  Uma
         # linha de 0,00 para cada um afogaria a que tem valor.
         for nome, rotulo in (
-            ("VL_AJ_DEBITOS", "ajustes a débito (E111)"),
+            ("VL_TOT_AJ_DEBITOS", "ajustes a débito (E111)"),
             ("VL_ESTORNOS_CRED", "estornos de crédito (E111)"),
-            ("VL_AJ_CREDITOS", "ajustes a crédito (E111)"),
+            ("VL_TOT_AJ_CREDITOS", "ajustes a crédito (E111)"),
             ("VL_ESTORNOS_DEB", "estornos de débito (E111)"),
         ):
             if ajuste := _valor(self.campo(e110, nome)):
@@ -477,7 +477,11 @@ class _Leitor:
         partir dos E111 do arquivo — pelo código de cada um, cuja 4ª posição
         diz o campo de destino —, não perguntada a quem escreveu o E110.
         """
-        from src.escrituracoes.ajustes_apuracao import APURACAO_ICMS, utilizacao
+        from src.escrituracoes.ajustes_apuracao import (
+            APURACAO_ICMS,
+            UTILIZACOES,
+            utilizacao,
+        )
 
         e110 = self.primeiro("E110")
         if e110 is None:
@@ -492,15 +496,12 @@ class _Leitor:
             if campo:
                 somado[campo] = somado.get(campo, 0.0) + _valor(self.campo(registro, "VL_AJ_APUR"))
 
+        # Os campos vêm da própria tabela de utilizações, não de uma lista
+        # à parte (§1.9): uma lista repetida é uma lista que envelhece sozinha,
+        # e foi assim que ela ficou apontando para VL_AJ_DEBITOS e
+        # VL_AJ_CREDITOS, que são os ajustes de documento.
         problemas = []
-        for campo in (
-            "VL_AJ_DEBITOS",
-            "VL_ESTORNOS_CRED",
-            "VL_AJ_CREDITOS",
-            "VL_ESTORNOS_DEB",
-            "VL_TOT_DED",
-            "DEB_ESP",
-        ):
+        for campo in sorted({campo for _, campo in UTILIZACOES.values() if campo}):
             declarado = _valor(self.campo(e110, campo))
             dos_ajustes = somado.get(campo, 0.0)
             if abs(declarado - dos_ajustes) > MEIO_CENTAVO:

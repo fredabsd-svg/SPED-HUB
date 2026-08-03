@@ -79,6 +79,13 @@ LEIAUTE_CONFERIDO = "020"
 VERIFICADO_CONTRA = "NT 2025.001 v1.0 (leiaute versão 020), item 4.1 do Anexo Único"
 VERIFICADO_EM = "2026-08-03"
 
+# O leiaute diz quais campos existem e em que ordem; o Guia Prático diz o que
+# entra em cada um.  São conferências separadas, e a segunda achou o que a
+# primeira não podia achar: os ajustes do E111 iam para os campos 03 e 07 do
+# E110, que são os do C197/D197.
+GUIA_ICMS_VERIFICADO_CONTRA = "Guia Prático da EFD ICMS/IPI versão 3.2.2 (11/02/2026)"
+GUIA_ICMS_VERIFICADO_EM = "2026-08-03"
+
 # A EFD-Contribuições tem leiaute próprio, e por isso procedência própria.  A
 # primeira conferência cobriu só a EFD ICMS/IPI, e foi na segunda — desta — que
 # apareceu o `CEST` a mais no `0200`.

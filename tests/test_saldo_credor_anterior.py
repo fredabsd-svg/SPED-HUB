@@ -16,6 +16,11 @@ O que estes testes protegem:
   * **o valor é lido do arquivo**, não recalculado — regerar o mês anterior
     hoje pode dar outro número, e o Fisco tem o primeiro;
   * **o silêncio avisa**, e avisa coisas diferentes conforme o motivo.
+
+
+No Bloco E, campo numérico obrigatório sai com valor ou com "0" — nunca em
+branco (Guia Prático da EFD ICMS/IPI 3.2.2, Capítulo III). Por isso as
+ausências abaixo são conferidas como "0,00", e não como campo vazio.
 """
 
 from __future__ import annotations
@@ -154,7 +159,7 @@ def test_o_saldo_anterior_abate_o_imposto_a_recolher(sessao, empresa):
 
     de_agosto = gerar(sessao, empresa, AGOSTO)
 
-    assert e110(de_agosto, "VL_ICMS_RECOLHER") == ""
+    assert e110(de_agosto, "VL_ICMS_RECOLHER") == "0,00"
     assert e110(de_agosto, "VL_SLD_CREDOR_TRANSPORTAR") == "180,00"
 
 
@@ -180,7 +185,7 @@ def test_geracao_nao_transmitida_nao_estabelece_saldo(sessao, empresa):
 
     de_agosto = gerar(sessao, empresa, AGOSTO)
 
-    assert e110(de_agosto, "VL_SLD_CREDOR_ANT") == ""
+    assert e110(de_agosto, "VL_SLD_CREDOR_ANT") == "0,00"
 
 
 def test_o_aviso_distingue_nao_marcada_de_inexistente(sessao, empresa):
@@ -219,7 +224,7 @@ def test_mes_sem_entrega_no_meio_nao_carrega_o_saldo(sessao, empresa):
 
     de_setembro = gerar(sessao, empresa, SETEMBRO)
 
-    assert e110(de_setembro, "VL_SLD_CREDOR_ANT") == ""
+    assert e110(de_setembro, "VL_SLD_CREDOR_ANT") == "0,00"
 
 
 def test_o_intervalo_sem_entrega_e_avisado_com_as_datas(sessao, empresa):
@@ -283,7 +288,7 @@ def test_escrituracao_de_outra_empresa_nao_conta(sessao, empresa):
 
     de_agosto = gerar(sessao, outra, AGOSTO)
 
-    assert e110(de_agosto, "VL_SLD_CREDOR_ANT") == ""
+    assert e110(de_agosto, "VL_SLD_CREDOR_ANT") == "0,00"
 
 
 def test_escrituracao_de_outra_obrigacao_nao_conta(sessao, empresa):
@@ -311,7 +316,7 @@ def test_escrituracao_de_outra_obrigacao_nao_conta(sessao, empresa):
 
     de_agosto = gerar(sessao, empresa, AGOSTO)
 
-    assert e110(de_agosto, "VL_SLD_CREDOR_ANT") == ""
+    assert e110(de_agosto, "VL_SLD_CREDOR_ANT") == "0,00"
     # O campo vazio sozinho não prova nada: a EFD-Contribuições não tem E110,
     # então lê-la por engano também daria vazio.  O aviso é o que distingue —
     # ele diz que NÃO HÁ escrituração de ICMS anterior, e só sai assim se a de

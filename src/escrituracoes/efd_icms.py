@@ -52,6 +52,7 @@ from src.escrituracoes.base import (
     ResultadoGeracao,
     formatar_data,
     formatar_valor,
+    formatar_valor_obrigatorio,
 )
 from src.escrituracoes.base import texto as _texto
 from src.escrituracoes.leiaute import EFD_ICMS
@@ -462,15 +463,18 @@ class GeradorEFDICMS(GeradorBase):
                 [
                     cst,
                     cfop,
+                    # ALIQ_ICMS é "OC": só sai quando há alíquota.  Os sete
+                    # campos de valor abaixo são "O", e num C190 de operação
+                    # isenta todos valem zero — que se escreve, não se omite.
                     aliquota,
-                    formatar_valor(soma["valor_operacao"]),
-                    formatar_valor(soma["base_icms"]),
-                    formatar_valor(soma["valor_icms"]),
-                    formatar_valor(soma["base_icms_st"]),
-                    formatar_valor(soma["valor_icms_st"]),
-                    "",  # VL_RED_BC
-                    formatar_valor(soma["valor_ipi"]),
-                    "",  # COD_OBS
+                    formatar_valor_obrigatorio(soma["valor_operacao"]),
+                    formatar_valor_obrigatorio(soma["base_icms"]),
+                    formatar_valor_obrigatorio(soma["valor_icms"]),
+                    formatar_valor_obrigatorio(soma["base_icms_st"]),
+                    formatar_valor_obrigatorio(soma["valor_icms_st"]),
+                    formatar_valor_obrigatorio(0.0),  # VL_RED_BC
+                    formatar_valor_obrigatorio(soma["valor_ipi"]),
+                    "",  # COD_OBS: "OC"
                 ]
             )
         return linhas
@@ -577,9 +581,14 @@ class GeradorEFDICMS(GeradorBase):
         − créditos − ajustes a crédito − estornos de débito − saldo credor
         anterior; e `VL_ICMS_RECOLHER` = saldo apurado − deduções.
 
-        Os campos `VL_TOT_AJ_*` continuam vazios de propósito: eles são os
-        ajustes que nascem de um documento (`C197`/`D197`), não do período, e
-        este gerador não os escreve. Ver o roadmap.
+        Os ajustes do período vão para `VL_TOT_AJ_DEBITOS` (campo 04) e
+        `VL_TOT_AJ_CREDITOS` (campo 08). Quem fica zerado é o par de campos
+        03 e 07 — `VL_AJ_DEBITOS` e `VL_AJ_CREDITOS` —, que o Guia descreve
+        como "ajustes decorrentes do documento fiscal": são os `C197`/`D197`,
+        que este gerador não escreve. Ver o roadmap.
+
+        Zerado, e não vazio: no Bloco E todo campo numérico é obrigatório e
+        sai com valor ou com zero — ver `formatar_valor_obrigatorio`.
         """
         debitos = credito = 0.0
         for visao in visoes:
@@ -596,10 +605,10 @@ class GeradorEFDICMS(GeradorBase):
 
         saldo = (
             debitos
-            + ajustado("VL_AJ_DEBITOS")
+            + ajustado("VL_TOT_AJ_DEBITOS")
             + ajustado("VL_ESTORNOS_CRED")
             - credito
-            - ajustado("VL_AJ_CREDITOS")
+            - ajustado("VL_TOT_AJ_CREDITOS")
             - ajustado("VL_ESTORNOS_DEB")
             - credor_anterior
         )
@@ -609,20 +618,23 @@ class GeradorEFDICMS(GeradorBase):
 
         self._add(
             "E110",
-            formatar_valor(debitos),
-            formatar_valor(ajustado("VL_AJ_DEBITOS")),
-            "",  # VL_TOT_AJ_DEBITOS: ajuste de documento, não de período
-            formatar_valor(ajustado("VL_ESTORNOS_CRED")),
-            formatar_valor(credito),
-            formatar_valor(ajustado("VL_AJ_CREDITOS")),
-            "",  # VL_TOT_AJ_CREDITOS: idem
-            formatar_valor(ajustado("VL_ESTORNOS_DEB")),
-            formatar_valor(credor_anterior),
-            formatar_valor(saldo) if saldo > 0 else "",
-            formatar_valor(ajustado("VL_TOT_DED")),
-            formatar_valor(a_recolher) if a_recolher > 0 else "",
-            formatar_valor(-saldo) if saldo < 0 else "",
-            formatar_valor(ajustado("DEB_ESP")),
+            formatar_valor_obrigatorio(debitos),
+            # Campos 03 e 07: ajustes decorrentes do documento fiscal
+            # (C197/D197), que este gerador não escreve.  Os do período são os
+            # campos 04 e 08 — o Guia diz isso no cabeçalho do próprio E111.
+            formatar_valor_obrigatorio(0.0),
+            formatar_valor_obrigatorio(ajustado("VL_TOT_AJ_DEBITOS")),
+            formatar_valor_obrigatorio(ajustado("VL_ESTORNOS_CRED")),
+            formatar_valor_obrigatorio(credito),
+            formatar_valor_obrigatorio(0.0),
+            formatar_valor_obrigatorio(ajustado("VL_TOT_AJ_CREDITOS")),
+            formatar_valor_obrigatorio(ajustado("VL_ESTORNOS_DEB")),
+            formatar_valor_obrigatorio(credor_anterior),
+            formatar_valor_obrigatorio(saldo if saldo > 0 else 0.0),
+            formatar_valor_obrigatorio(ajustado("VL_TOT_DED")),
+            formatar_valor_obrigatorio(a_recolher if a_recolher > 0 else 0.0),
+            formatar_valor_obrigatorio(-saldo if saldo < 0 else 0.0),
+            formatar_valor_obrigatorio(ajustado("DEB_ESP")),
         )
         self._avisar_sobre_os_ajustes(ajustes)
 
