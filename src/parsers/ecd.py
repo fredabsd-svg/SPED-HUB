@@ -137,6 +137,11 @@ class ECDParser:
         with open(layout_path, encoding="utf-8") as f:
             self.metadados = yaml.safe_load(f)
 
+    @property
+    def versao(self) -> str:
+        """A versão do leiaute que este parser carregou."""
+        return str(self.metadados["versao"])
+
     def parse(self, caminho: Path) -> Iterator[dict]:
         """Faz o parse linha a linha, yieldando registros de interesse."""
         encoding = detectar_encoding(caminho)

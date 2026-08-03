@@ -391,11 +391,17 @@ class TestCargaSyntheticECD:
         )
 
         # I010
-        linhas.append("|I010|009|G|")
+        linhas.append("|I010|G|009|")
 
         # I030 — identificação (2 registros)
-        linhas.append("|I030|1|CONTADOR TESTE|12345678901|123456|SP|99999999999|")
-        linhas.append("|I030|2|EMPRESA TESTE|00987654000188|654321|SP|88888888888|")
+        linhas.append(
+            "|I030|TERMO DE ABERTURA|1|Diario|500|EMPRESA TESTE"
+            "|31123456789|00987654000188|01012015||BELO HORIZONTE|31122023|"
+        )
+        linhas.append(
+            "|I030|TERMO DE ABERTURA|2|Diario|500|EMPRESA TESTE"
+            "|31123456789|00987654000188|01012015||BELO HORIZONTE|31122023|"
+        )
 
         # I050 — plano de contas
         for i in range(1, n_contas + 1):
