@@ -75,9 +75,10 @@ from src.escrituracoes.efd_contribuicoes import (
 from src.escrituracoes.efd_icms import (
     ATIVIDADES_ICMS,
     BLOCOS,
-    COD_VER,
     PERFIS,
+    VERSOES_DO_LEIAUTE,
     GeradorEFDICMS,
+    cod_ver,
 )
 from src.escrituracoes.espelhos import (
     Conferencia,
@@ -107,7 +108,8 @@ __all__ = [
     "ATIVIDADES_ICMS",
     "BLOCOS",
     "CADASTRO_FISCAL",
-    "COD_VER",
+    "VERSOES_DO_LEIAUTE",
+    "cod_ver",
     "EFD_CONTRIBUICOES",
     "EFD_ICMS",
     "EXIGIDOS",

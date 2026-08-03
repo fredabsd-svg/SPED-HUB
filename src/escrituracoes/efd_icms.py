@@ -69,9 +69,57 @@ def _numero(bruto: str) -> float:
         return 0.0
 
 
-# Versão do leiaute declarada no 0000.  Fixa e explícita: o leiaute muda por
-# ato normativo, e um gerador que "descobre" a versão sozinho erra calado.
-COD_VER = "018"
+# O `COD_VER` do 0000 **depende do período**, e era fixo em "018" aqui.
+#
+# O campo é "Código da versão do leiaute conforme a tabela indicada no Ato
+# Cotepe", e o validador o confere contra a data do `DT_FIN`: versão que não
+# vale para o período faz o arquivo inteiro ser recusado, com a mensagem "A
+# versão do leiaute não é válida para o período informado".  Fixo em 018, todo
+# arquivo de 2025 em diante saía recusado.
+#
+# Cada faixa vem da Nota Técnica que institui o leiaute, baixada do portal do
+# SPED.  A data está na capa de cada uma, em "Institui o leiaute válido a
+# partir de", e o número da versão no cabeçalho de todas as páginas:
+#
+#   018  a partir de 01/01/2024 — NT 2023.001 v1.2
+#   019  a partir de 01/01/2025 — NT 2024.001 v1.0
+#   020  a partir de 01/01/2026 — NT 2025.001 v1.0 (Ato COTEPE/ICMS 79/2025)
+#
+# Continua explícito, e não "descoberto": o que muda é depender do período, que
+# é o que o leiaute manda.  Versão nova entra aqui com a NT que a instituiu.
+VERSOES_DO_LEIAUTE = (
+    (datetime.date(2026, 1, 1), "020"),
+    (datetime.date(2025, 1, 1), "019"),
+    (datetime.date(2024, 1, 1), "018"),
+)
+
+
+class PeriodoSemLeiaute(ValueError):
+    """Período anterior ao leiaute mais antigo que este sistema conhece."""
+
+
+def cod_ver(data_fim: datetime.date) -> str:
+    """A versão do leiaute válida para o período que termina em `data_fim`.
+
+    É o `DT_FIN` que decide, não o `DT_INI`: é contra ele que o validador
+    confere.  Um período que atravessa a virada do ano usa a versão do fim.
+
+    Período anterior a 2024 **levanta**, em vez de cair na versão mais antiga
+    conhecida.  Devolver `018` para um arquivo de 2020 seria repetir em menor
+    escala o defeito que esta função existe para corrigir: um código que o
+    validador recusa, escrito com a confiança de quem sabe.
+    """
+    for inicio, versao in VERSOES_DO_LEIAUTE:
+        if data_fim >= inicio:
+            return versao
+    mais_antiga = VERSOES_DO_LEIAUTE[-1]
+    raise PeriodoSemLeiaute(
+        f"período terminando em {data_fim:%d/%m/%Y}: o leiaute mais antigo que este "
+        f"sistema conhece é o {mais_antiga[1]}, válido a partir de "
+        f"{mais_antiga[0]:%d/%m/%Y}. Escriturar período anterior exige acrescentar a "
+        "versão em VERSOES_DO_LEIAUTE, com a Nota Técnica que a instituiu"
+    )
+
 
 BLOCOS = ("0", "C", "E", "9")
 
@@ -133,6 +181,7 @@ class GeradorEFDICMS(GeradorBase):
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
         self._avisar_frete_sem_modalidade()
+        self._avisar_reforma_fora_do_arquivo(visoes)
         return self._resultado
 
     def _conferir_cadastro(self) -> None:
@@ -194,7 +243,7 @@ class GeradorEFDICMS(GeradorBase):
         e = self.empresa
         self._add(
             "0000",
-            COD_VER,
+            cod_ver(self.data_fim),
             self.cod_fin,
             formatar_data(self.data_inicio),
             formatar_data(self.data_fim),

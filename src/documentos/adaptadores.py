@@ -193,6 +193,16 @@ class DocumentoNormalizado:
     valor_imposto_importacao: float = 0.0
     valor_ipi_devolvido: float = 0.0
     valor_servicos: float = 0.0
+    # `vNFTot` (W60): o total **com** IBS, CBS e IS.  É campo à parte de
+    # `vNF`, e não uma versão nova dele — a NT 2025.002 v1.51 mantém o `vNF`
+    # como está e acrescenta este ao lado.  Somar os novos tributos ao `vNF`
+    # teria a mesma cara e produziria um documento que a SEFAZ recusa.
+    #
+    # Opcional (0-1) e com as regras de validação marcadas "implementação
+    # futura": nota que não o traz fica com zero, que é diferente de "o total
+    # com os novos tributos é zero" só quando há novos tributos — e aí a
+    # apuração já os mede por item.
+    valor_total_com_reforma: float = 0.0
     valor_ibs: float = 0.0
     valor_cbs: float = 0.0
     valor_is: float = 0.0
@@ -404,6 +414,10 @@ class AdaptadorNFe:
             # `vServ` fica em `ISSQNtot`, irmão de `ICMSTot` — não no mesmo
             # grupo dos outros totais.
             valor_servicos=_numero(_achar(inf, "total", "ISSQNtot"), "vServ"),
+            # `vNFTot` é filho de `total` (W01), irmão de `ICMSTot` — não está
+            # dentro dele.  Procurado no lugar errado devolveria zero calado,
+            # que foi o engano que a v1.50 nos custou nos grupos da Reforma.
+            valor_total_com_reforma=_numero(total, "vNFTot"),
         )
 
         # Situação: o protocolo diz se foi autorizada, denegada ou cancelada.

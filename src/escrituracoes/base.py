@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -162,6 +163,46 @@ class GeradorBase:
             f"IND_FRT saiu como 9 (sem frete) em documento que TEM frete, por não "
             f"trazer a modalidade: {documentos}. São documentos importados antes de o "
             "campo existir — reimporte o XML ou corrija o C100 à mão antes de transmitir"
+        )
+
+    # Os tributos da Reforma que o arquivo **não** leva, e o rótulo de cada um.
+    # Não é omissão nossa: o GT48 da COTEPE decidiu pela não inclusão de CBS,
+    # IBS e IS na EFD ICMS/IPI, e a partir de 01/2026 o `VL_DOC` do C100 deixou
+    # de ter de bater com a soma dos `VL_OPR` dos C190 por causa disso.
+    FORA_DA_EFD = {
+        "valor_ibs_uf": "IBS estadual",
+        "valor_ibs_mun": "IBS municipal",
+        "valor_cbs": "CBS",
+        "valor_is": "Imposto Seletivo",
+    }
+
+    def _avisar_reforma_fora_do_arquivo(self, visoes: Sequence[dict]) -> None:
+        """Diz **quanto** de IBS/CBS/IS ficou de fora, quando ficou.
+
+        A pergunta que este aviso responde chega todo mês a partir de agosto
+        de 2026: *por que o total da EFD não bate com o total das notas?* A
+        resposta é que não deve bater — mas quem confere não tem como saber
+        disso olhando o arquivo, e a diferença tem exatamente a cara de um
+        defeito do gerador.
+
+        Medido, e não genérico: um aviso que sai igual para quem tem cinquenta
+        mil reais de CBS e para quem tem zero treina a pessoa a ignorar todos
+        os outros.  Por isso ele só aparece quando há valor, com o valor.
+        """
+        somas: dict[str, float] = {}
+        for visao in visoes:
+            for item in visao["itens"]:
+                for campo, rotulo in self.FORA_DA_EFD.items():
+                    if valor := item.get(campo) or 0.0:
+                        somas[rotulo] = somas.get(rotulo, 0.0) + valor
+        if not somas:
+            return
+        detalhe = ", ".join(f"{rotulo} {valor:.2f}" for rotulo, valor in sorted(somas.items()))
+        self._resultado.avisos.append(
+            f"os tributos da Reforma NÃO entram neste arquivo, por decisão do GT48 da "
+            f"COTEPE: {detalhe} ficaram de fora. É por isso que o VL_DOC do C100 pode "
+            "não bater com a soma dos VL_OPR dos C190 — a validação que cobrava essa "
+            "igualdade foi desativada em 01/2026. Ver docs/reforma-tributaria.md"
         )
 
     def _add(self, tipo: str, *campos: Any) -> None:

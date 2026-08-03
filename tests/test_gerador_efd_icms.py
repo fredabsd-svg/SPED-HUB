@@ -38,6 +38,8 @@ from src.escrituracoes import (
     formatar_data,
     formatar_valor,
 )
+from src.escrituracoes.efd_icms import PeriodoSemLeiaute, cod_ver
+from src.escrituracoes.leiaute import EFD_ICMS
 from tests.fixtures_nfe import nfe_xml
 
 INICIO = datetime.date(2026, 7, 1)
@@ -79,6 +81,11 @@ def com_documento(sessao, empresa):
     )
     sessao.commit()
     return sessao.get(DocumentoFiscal, ocorrencia.documento_id)
+
+
+def _importar(sessao, empresa, **kwargs):
+    ImportadorDeDocumentos(sessao, escritorio_id=empresa.escritorio_id).importar(nfe_xml(**kwargs))
+    sessao.commit()
 
 
 def _gerar(sessao, empresa, **kwargs):
@@ -179,7 +186,7 @@ class TestCadastroObrigatorio:
 class TestBloco0:
     def test_identificacao_da_empresa(self, sessao, empresa, com_documento):
         campos = _primeiro(_linhas(_gerar(sessao, empresa)), "0000")
-        assert campos[0] == "018", "versão do leiaute"
+        assert campos[0] == "020", "versão do leiaute — o período é de 2026"
         assert campos[2] == "01072026"
         assert campos[3] == "31072026"
         assert campos[4] == "COMERCIO EXEMPLO LTDA"
@@ -513,3 +520,112 @@ class TestPeriodo:
 
         linhas = _linhas(_gerar(sessao, outra))
         assert not [linha for linha in linhas if linha.startswith("|C100|")]
+
+
+class TestOsTributosDaReformaFicamForaDoArquivo:
+    """A EFD ICMS/IPI não leva IBS, CBS nem IS — e diz quanto ficou de fora.
+
+    A decisão é do GT48 da COTEPE, não nossa. A consequência prática chega
+    todo mês a partir de agosto de 2026: o total da EFD deixa de bater com o
+    total das notas, e a diferença tem exatamente a cara de um defeito do
+    gerador. Sem o aviso, quem confere gasta o fechamento procurando um erro
+    que não existe.
+    """
+
+    def test_o_aviso_diz_quanto_de_cada_tributo_ficou_de_fora(self, sessao, empresa):
+        _importar(sessao, empresa, itens=2)
+
+        resultado = _gerar(sessao, empresa)
+
+        aviso = next(a for a in resultado.avisos if "NÃO entram neste arquivo" in a)
+        assert "CBS 18.00" in aviso, aviso
+        assert "IBS estadual 1.40" in aviso, aviso
+        assert "IBS municipal 0.60" in aviso, aviso
+
+    def test_o_aviso_explica_o_vl_doc_contra_o_vl_opr(self, sessao, empresa):
+        """É a pergunta que o contador faz ao conferir o arquivo."""
+        _importar(sessao, empresa)
+
+        aviso = next(a for a in _gerar(sessao, empresa).avisos if "NÃO entram neste arquivo" in a)
+
+        assert "VL_DOC" in aviso and "VL_OPR" in aviso
+        assert "GT48" in aviso
+
+    def test_sem_os_tributos_novos_o_aviso_nao_sai(self, sessao, empresa):
+        """Nota anterior à Reforma não gera aviso: seria ruído em todo
+        fechamento de período antigo."""
+        _importar(sessao, empresa, com_reforma=False)
+
+        resultado = _gerar(sessao, empresa)
+
+        assert not [a for a in resultado.avisos if "NÃO entram neste arquivo" in a]
+
+    def test_o_vl_doc_do_c100_segue_sendo_o_vnf(self, sessao, empresa):
+        """O `vNF` não inclui os tributos novos — eles têm o `vNFTot`, à parte.
+
+        Escrever o `vNFTot` no VL_DOC poria na EFD justamente o que o GT48
+        decidiu manter fora.
+        """
+        _importar(sessao, empresa, itens=2)
+
+        resultado = _gerar(sessao, empresa)
+
+        c100 = next(r for r in resultado.registros if r.tipo == "C100")
+        posicao = EFD_ICMS["C100"].index("VL_DOC")
+        assert c100.campos[posicao] == "2100,00"
+
+
+class TestVersaoDoLeiaute:
+    """O `COD_VER` do 0000 depende do período, e era fixo.
+
+    O validador confere o código contra a data do `DT_FIN` e recusa o arquivo
+    inteiro quando ele não vale para o período — "A versão do leiaute não é
+    válida para o período informado". Fixo em `018`, todo arquivo de 2025 em
+    diante saía recusado, e nada aqui acusava: o arquivo é bem-formado, e a
+    recusa só aparece no validador do Fisco.
+
+    Cada faixa vem da capa da Nota Técnica que instituiu o leiaute, em
+    "Institui o leiaute válido a partir de".
+    """
+
+    @pytest.mark.parametrize(
+        "fim,esperado",
+        [
+            (datetime.date(2024, 12, 31), "018"),
+            (datetime.date(2025, 1, 1), "019"),  # NT 2024.001 v1.0
+            (datetime.date(2025, 12, 31), "019"),
+            (datetime.date(2026, 1, 1), "020"),  # NT 2025.001 v1.0
+            (datetime.date(2026, 7, 31), "020"),
+        ],
+    )
+    def test_a_versao_segue_a_data_final_do_periodo(self, fim, esperado):
+        assert cod_ver(fim) == esperado
+
+    def test_e_o_dt_fin_que_decide_nao_o_dt_ini(self, sessao, empresa):
+        """Período que atravessa a virada do ano usa a versão do fim.
+
+        É contra o `DT_FIN` que o validador confere; escolher pelo início
+        daria `019` num arquivo de janeiro de 2026.
+        """
+        resultado = GeradorEFDICMS(
+            sessao,
+            empresa=empresa,
+            data_inicio=datetime.date(2025, 12, 1),
+            data_fim=datetime.date(2026, 1, 31),
+        ).gerar()
+
+        campos = _primeiro(_linhas(resultado), "0000")
+        assert campos[0] == "020"
+
+    def test_periodo_anterior_ao_leiaute_mais_antigo_levanta(self):
+        """Devolver `018` para 2020 repetiria o defeito em menor escala.
+
+        Seria outro código que o validador recusa, escrito com a confiança de
+        quem sabe — e sem ninguém para desconfiar.
+        """
+        with pytest.raises(PeriodoSemLeiaute, match="018"):
+            cod_ver(datetime.date(2020, 12, 31))
+
+    def test_a_vespera_do_leiaute_mais_antigo_ainda_levanta(self):
+        with pytest.raises(PeriodoSemLeiaute):
+            cod_ver(datetime.date(2023, 12, 31))

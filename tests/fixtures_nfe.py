@@ -65,7 +65,8 @@ def nfe_xml(
           <gIBSMun><vIBSMun>{0.30 * itens:.2f}</vIBSMun></gIBSMun>
         </gIBS>
         <gCBS><vCBS>{9.00 * itens:.2f}</vCBS></gCBS>
-      </IBSCBSTot>"""
+      </IBSCBSTot>
+      <vNFTot>{total_prod + valor_frete + 50.00 * itens + (9.00 + 0.70 + 0.30 + 10.00) * itens:.2f}</vNFTot>"""
         if com_reforma
         else ""
     )

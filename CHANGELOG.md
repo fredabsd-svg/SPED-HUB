@@ -26,6 +26,16 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **A geração da EFD diz quanto de IBS, CBS e IS ficou de fora do arquivo.**
+  Os tributos da Reforma não entram na EFD ICMS/IPI, por decisão do GT48 da
+  COTEPE — e a partir de agosto de 2026 isso faz o total do arquivo deixar de
+  bater com o total das notas. A diferença tem exatamente a cara de um defeito
+  do gerador, e sem o aviso quem confere gasta o fechamento procurando um erro
+  que não existe. O valor sai medido, tributo a tributo, e só quando existe.
+- **O total da nota com os tributos novos passou a ser lido.** É o `vNFTot`,
+  campo à parte do total de sempre — não uma versão nova dele. Somar IBS, CBS e
+  IS ao total antigo teria a mesma cara e produziria um documento que a SEFAZ
+  recusa; ter os dois lado a lado é o que impede o engano.
 - **A tabela oficial passou a ter validade.** Ela mostra quantos dias tem, e
   depois de 180 dias avisa em toda apuração que pode ter sido revista, com o
   endereço para conferir. Uma tabela de dois anos responde exatamente como uma

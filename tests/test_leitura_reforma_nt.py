@@ -482,3 +482,47 @@ class TestMunicipioDoFatoGeradorDoIBS:
 
         assert documento.municipio_fg_ibs is None
         assert documento.municipio_codigo == "3550308"
+
+
+class TestTotalComOsTributosNovos:
+    """`vNFTot` (W60) é campo à parte do `vNF`, não uma versão nova dele.
+
+    A NT 2025.002 v1.51 mantém o `vNF` como sempre foi — a regra W16-10 do
+    MOC não mudou — e acrescenta o `vNFTot` ao lado. Somar IBS, CBS e IS ao
+    `vNF` teria exatamente a mesma cara e produziria um documento que a SEFAZ
+    recusa; ter os dois lado a lado é o que impede esse engano.
+    """
+
+    def _documento(self, **campos):
+        return AdaptadorNFe().normalizar(nfe_xml(**campos))
+
+    def test_o_vnf_nao_inclui_os_tributos_novos(self):
+        """Se um dia alguém somá-los ao `vNF`, este teste cai."""
+        documento = self._documento(itens=2)
+
+        novos = documento.valor_ibs + documento.valor_cbs + documento.valor_is
+
+        assert novos > 0, "a nota de teste precisa ter os tributos novos"
+        assert documento.valor_total == pytest.approx(2100.00)
+        assert documento.valor_total < documento.valor_total_com_reforma
+
+    def test_o_vnftot_e_lido_do_grupo_total(self):
+        """É filho de `total` (W01), irmão de `ICMSTot` — não está dentro dele.
+
+        Procurado no nó errado devolveria zero sem levantar erro, que é o
+        engano que a leitura da v1.50 nos custou nos grupos da Reforma.
+        """
+        documento = self._documento(itens=2)
+
+        assert documento.valor_total_com_reforma == pytest.approx(2140.00)
+        assert documento.valor_total_com_reforma == pytest.approx(
+            documento.valor_total + documento.valor_ibs + documento.valor_cbs + documento.valor_is
+        )
+
+    def test_nota_sem_os_grupos_da_reforma_fica_com_zero(self):
+        """O campo é opcional (0-1), e as regras dele são "implementação
+        futura" na própria NT: nota que não o traz não é nota defeituosa."""
+        documento = self._documento(com_reforma=False)
+
+        assert documento.valor_total_com_reforma == 0.0
+        assert documento.valor_total > 0.0

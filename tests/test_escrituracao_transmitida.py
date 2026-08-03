@@ -40,6 +40,7 @@ from src.escrituracoes import (
     GeradorEFDICMS,
     TransmissaoInvalida,
     arquivar,
+    cod_ver,
     marcar_transmitida,
     transmitidas_do_periodo,
 )
@@ -258,9 +259,16 @@ def test_a_finalidade_e_lida_do_arquivo_que_saiu(sessao, com_documento):
     marcar_transmitida(sessao, primeira)
     sessao.commit()
 
-    # Gerada como retificadora, mas o conteúdo diz original.
+    # Gerada como retificadora, mas o conteúdo diz original.  A versão do
+    # leiaute vem de `cod_ver`, e não escrita à mão: fixa, a substituição
+    # deixava de casar quando a versão mudava, e o teste passava a montar um
+    # cenário que não existia — sem acusar nada, porque quem falha depois é a
+    # asserção, e não a substituição.
     segunda = gerar_e_arquivar(sessao, com_documento, cod_fin="1")
-    segunda.conteudo = segunda.conteudo.replace("|0000|018|1|", "|0000|018|0|", 1)
+    versao = cod_ver(FIM)
+    antes = segunda.conteudo
+    segunda.conteudo = antes.replace(f"|0000|{versao}|1|", f"|0000|{versao}|0|", 1)
+    assert segunda.conteudo != antes, "o 0000 não foi adulterado; o cenário não existe"
     sessao.flush()
 
     with pytest.raises(TransmissaoInvalida, match="ORIGINAL"):
