@@ -1216,3 +1216,76 @@ class TestReferenciasDoArquivoPelaCLI:
         }
 
         assert citados and citados <= cadastrados
+
+
+# ── Fase 77 — o IND_PGTO, obrigatório e vazio, pela linha de comando ──────
+
+
+class TestIndicadorDePagamentoPelaCLI:
+    """O campo 13 do C100 é "O" na entrada e na saída, e saía em branco.
+
+    O Guia marca `IND_PGTO` como obrigatório nas duas colunas; o gerador
+    escrevia vazio, e obrigatório vazio o validador recusa. O dado sempre
+    esteve no XML, no grupo `pag/detPag/indPag` — só não era lido.
+
+    Quando o documento não traz o grupo — o que acontece, e acontece em todo
+    documento importado antes desta leitura existir —, sai `2` (outros), o
+    código que menos afirma, com aviso nomeando os documentos. É a mesma
+    decisão já tomada para o `IND_FRT`: dizer `0` seria declarar pagamento à
+    vista de uma nota que talvez seja a prazo, e afirmação errada num campo
+    que o validador aceita é o pior desfecho.
+    """
+
+    @staticmethod
+    def _ind_pgto(saida: Path) -> str:
+        from src.escrituracoes.leiaute import EFD_ICMS
+
+        for linha in saida.read_text("utf-8").splitlines():
+            campos = linha.split("|")
+            if len(campos) > 1 and campos[1] == "C100":
+                return campos[2:][EFD_ICMS["C100"].index("IND_PGTO")]
+        raise AssertionError(f"nenhum C100 em {saida.name}")
+
+    def _gerar(self, banco: str, tmp_path: Path, **nota) -> Path:
+        assert _importar(banco, _pasta_com_nota(tmp_path, **nota)) == 0
+        saida = tmp_path / "julho.txt"
+        assert (
+            main(
+                ["fiscal", "gerar", "--empresa", "1", "--de", "2026-07-01"]
+                + ["--ate", "2026-07-31", "--saida", str(saida), "--db", banco]
+            )
+            == 0
+        )
+        return saida
+
+    def test_o_indicador_do_xml_chega_ao_arquivo(self, banco_fiscal, tmp_path):
+        saida = self._gerar(banco_fiscal, tmp_path, ind_pag="1")
+
+        assert self._ind_pgto(saida) == "1"
+
+    def test_a_vista_tambem_atravessa(self, banco_fiscal, tmp_path):
+        """Um valor só provaria pouco: `0` é falsy, e é o de "à vista"."""
+        saida = self._gerar(banco_fiscal, tmp_path, ind_pag="0")
+
+        assert self._ind_pgto(saida) == "0"
+
+    def test_sem_o_grupo_pag_o_campo_nao_sai_vazio(self, banco_fiscal, tmp_path):
+        saida = self._gerar(banco_fiscal, tmp_path)
+
+        assert self._ind_pgto(saida) == "2"
+
+    def test_o_documento_sem_indicador_e_nomeado_no_aviso(self, banco_fiscal, tmp_path, capsys):
+        capsys.readouterr()
+
+        self._gerar(banco_fiscal, tmp_path, numero="777")
+
+        avisos = capsys.readouterr().out
+        assert "IND_PGTO" in avisos
+        assert "777" in avisos
+
+    def test_com_o_indicador_nao_ha_aviso(self, banco_fiscal, tmp_path, capsys):
+        capsys.readouterr()
+
+        self._gerar(banco_fiscal, tmp_path, ind_pag="1")
+
+        assert "IND_PGTO" not in capsys.readouterr().out

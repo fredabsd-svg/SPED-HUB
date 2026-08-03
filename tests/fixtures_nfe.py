@@ -33,6 +33,7 @@ def nfe_xml(
     is_especifico: bool = False,
     beneficios: bool = False,
     itens: int = 1,
+    ind_pag: str | None = None,
     mod_frete: str | None = None,
     valor_frete: float = 0.0,
     data_emissao: str = "2026-07-30",
@@ -74,6 +75,14 @@ def nfe_xml(
     # recebe de emissor que não preenche o frete, e é o caso que o gerador
     # precisa tratar sem inventar quem pagou.
     transporte = f"\n      <transp><modFrete>{mod_frete}</modFrete></transp>" if mod_frete else ""
+    # O grupo `pag` é opcional aqui pela mesma razão do `transp`: nota sem ele
+    # é o que se recebe, e é o caso em que o `IND_PGTO` não pode ser inventado.
+    pagamento = (
+        f"\n      <pag><detPag><indPag>{ind_pag}</indPag>"
+        "<tPag>01</tPag><vPag>1000.00</vPag></detPag></pag>"
+        if ind_pag
+        else ""
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe>
@@ -120,7 +129,7 @@ def nfe_xml(
           <vCOFINS>{76.00 * itens:.2f}</vCOFINS>
           <vNF>{total_prod + valor_frete + 50.00 * itens:.2f}</vNF>
         </ICMSTot>{reforma_tot}
-      </total>{transporte}
+      </total>{transporte}{pagamento}
     </infNFe>
   </NFe>
   <protNFe versao="4.00">

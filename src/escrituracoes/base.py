@@ -129,6 +129,12 @@ class ResultadoGeracao:
 MODALIDADES_DE_FRETE = {"0", "1", "2", "3", "4", "9"}
 SEM_FRETE = "9"
 
+# `IND_PGTO` do C100, obrigatório na entrada e na saída.  Desde 01/07/2012 o
+# Guia lê os códigos como 0 à vista, 1 a prazo e 2 outros; o 9 (sem pagamento)
+# segue entre os valores válidos por causa dos arquivos antigos.
+INDICADORES_DE_PAGAMENTO = {"0", "1", "2", "9"}
+PAGAMENTO_OUTROS = "2"
+
 
 class GeradorBase:
     """A mecânica de montar registros e fechar as contagens."""
@@ -151,6 +157,7 @@ class GeradorBase:
         """
         self._resultado = ResultadoGeracao(documentos_ids=documentos_ids)
         self._frete_sem_modalidade = []
+        self._pagamento_sem_indicador: list[str] = []
 
     def _ind_frt(self, cabecalho: dict) -> str:
         """O `IND_FRT` do C100 — do documento, não de dedução.
@@ -170,6 +177,35 @@ class GeradorBase:
             numero = texto(cabecalho.get("numero")) or "sem número"
             self._frete_sem_modalidade.append(numero)
         return SEM_FRETE
+
+    def _ind_pgto(self, cabecalho: dict) -> str:
+        """O `IND_PGTO` do C100 — pela mesma razão do `IND_FRT` acima.
+
+        O campo é obrigatório nas duas colunas do Guia, e saía vazio: o
+        validador recusa. Quando o documento não trouxe o `indPag`, sai `2`
+        (outros), que é o código que menos afirma — dizer `0` seria declarar
+        pagamento à vista de uma nota que talvez seja a prazo, e afirmação
+        errada num campo que o validador aceita é o pior desfecho.
+
+        O documento entra na lista de avisos, com número.
+        """
+        indicador = cabecalho.get("indicador_pagamento")
+        if indicador in INDICADORES_DE_PAGAMENTO:
+            return str(indicador)
+        numero = texto(cabecalho.get("numero")) or "sem número"
+        self._pagamento_sem_indicador.append(numero)
+        return PAGAMENTO_OUTROS
+
+    def _avisar_pagamento_sem_indicador(self) -> None:
+        """Um aviso por geração, com os documentos nomeados."""
+        if not self._pagamento_sem_indicador:
+            return
+        documentos = ", ".join(self._pagamento_sem_indicador)
+        self._resultado.avisos.append(
+            f"IND_PGTO saiu como 2 (outros) por o documento não trazer o indPag: "
+            f"{documentos}. São documentos importados antes de o campo existir — "
+            "reimporte o XML ou corrija o C100 à mão antes de transmitir"
+        )
 
     def _avisar_frete_sem_modalidade(self) -> None:
         """Um aviso por geração, com os documentos nomeados.

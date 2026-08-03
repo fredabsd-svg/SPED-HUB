@@ -211,6 +211,7 @@ class GeradorEFDICMS(GeradorBase):
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
         self._avisar_frete_sem_modalidade()
+        self._avisar_pagamento_sem_indicador()
         self._avisar_reforma_fora_do_arquivo(visoes)
         return self._resultado
 
@@ -421,7 +422,7 @@ class GeradorEFDICMS(GeradorBase):
             formatar_data(c["data_emissao"]),
             formatar_data(c["data_entrada_saida"] or c["data_emissao"]),
             formatar_valor(c["valor_total"]),
-            "",  # IND_PGTO
+            self._ind_pgto(c),
             formatar_valor(c["valor_desconto"]),
             "",  # VL_ABAT_NT
             formatar_valor(c["valor_produtos"]),
