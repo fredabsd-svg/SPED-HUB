@@ -138,10 +138,15 @@ class Espelho:
         linhas.append("")
         linhas.append(f"DOCUMENTOS ({len(self.documentos)})")
         for doc in self.documentos:
+            # Documento sem `C170` não é documento sem item: em NF-e de
+            # emissão própria o Guia manda apresentar só `C100` e `C190`.
+            # Imprimir "0 item(ns)" numa nota que tem itens faria quem lê
+            # procurar um defeito que não existe.
+            itens = f"{doc.itens} item(ns)" if doc.itens else "itens só no C190"
             linhas.append(
                 f"  {doc.sentido:7} mod {doc.modelo} sér {doc.serie or '-'} "
                 f"nº {doc.numero:<10} {doc.data}  {doc.participante:<18} "
-                f"{_moeda(doc.valor_documento):>14}  {doc.itens} item(ns)"
+                f"{_moeda(doc.valor_documento):>14}  {itens}"
             )
         if self.documentos:
             linhas.append("")
@@ -409,12 +414,31 @@ class _Leitor:
                 credito += valor
         return debito, credito
 
+    def _somar_icms_por_sentido(self) -> tuple[float, float]:
+        """O ICMS de cada documento pelo `C190`, não pelo `C170`.
+
+        É o que o Guia manda conferir: o `VL_TOT_DEBITOS` do E110 "deve ser
+        igual à soma dos VL_ICMS de todos os registros C190, C320, C390, [...]".
+
+        E é o único que sempre existe: em NF-e de emissão própria o arquivo
+        leva `C100` e `C190` e nenhum `C170`, então somar itens daria zero e
+        acusaria de errada uma apuração correta.
+        """
+        debito = credito = 0.0
+        for c100, _, analiticos in self._por_documento():
+            valor = sum(_valor(self.campo(a, "VL_ICMS")) for a in analiticos)
+            if self.campo(c100, "IND_OPER") == "1":
+                debito += valor
+            else:
+                credito += valor
+        return debito, credito
+
     def _apuracao_contra_os_documentos_icms(self) -> Conferencia:
         e110 = self.primeiro("E110")
         if e110 is None:
             return Conferencia(nome="a apuração bate com os documentos", ok=True)
 
-        debito, credito = self._somar_por_sentido("VL_ICMS")
+        debito, credito = self._somar_icms_por_sentido()
         problemas = []
         declarado_debito = _valor(self.campo(e110, "VL_TOT_DEBITOS"))
         declarado_credito = _valor(self.campo(e110, "VL_TOT_CREDITOS"))
