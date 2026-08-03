@@ -370,7 +370,7 @@ class TestArquivoSaiDoEfetivo:
 class TestBlocoE:
     def test_entrada_vira_credito(self, sessao, empresa, com_documento):
         campos = _primeiro(_linhas(_gerar(sessao, empresa)), "E110")
-        assert campos[0] == "", "sem débito: o documento é de entrada"
+        assert campos[0] == "0,00", "sem débito: o documento é de entrada"
         assert campos[4] == "360,00", "crédito: 2 itens × 180"
 
     def test_saida_vira_debito(self, sessao, empresa):
@@ -394,7 +394,7 @@ class TestBlocoE:
 
         campos = _primeiro(_linhas(_gerar(sessao, emitente)), "E110")
         assert campos[0] == "360,00", "débito"
-        assert campos[4] == "", "sem crédito"
+        assert campos[4] == "0,00", "sem crédito"
 
     def test_apuracao_sem_ajuste_diz_que_e_soma_direta(self, sessao, empresa, com_documento):
         """Silêncio aqui faria alguém transmitir apuração incompleta.

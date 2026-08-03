@@ -187,7 +187,7 @@ def test_e110_tem_o_deb_esp(sessao, empresa):
     assert len(e110.campos) == 14
     assert campo(resultado, "E110", "VL_TOT_CREDITOS", EFD_ICMS) == "180,00"
     assert campo(resultado, "E110", "VL_SLD_CREDOR_TRANSPORTAR", EFD_ICMS) == "180,00"
-    assert campo(resultado, "E110", "DEB_ESP", EFD_ICMS) == ""
+    assert campo(resultado, "E110", "DEB_ESP", EFD_ICMS) == "0,00"
 
 
 # ── O mecanismo que impede a volta ─────────────────────────────────────────

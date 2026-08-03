@@ -153,12 +153,20 @@ def test_o_sequencial_nao_e_conferido_contra_tabela_nenhuma():
 # ── A 4ª posição decide o destino ──────────────────────────────────────────
 
 
+# Guia Prático da EFD ICMS/IPI 3.2.2 (11/02/2026), validações dos campos do
+# E110.  O cabeçalho do E111 no mesmo Guia resume a lista: "discriminar todos
+# os ajustes lançados nos campos VL_TOT_AJ_DEBITOS, VL_ESTORNOS_CRED,
+# VL_TOT_AJ_CREDITOS, VL_ESTORNOS_DEB, VL_TOT_DED e DEB_ESP".
+#
+# Esta tabela já apontou para VL_AJ_DEBITOS (campo 03) e VL_AJ_CREDITOS
+# (campo 07), que são os ajustes decorrentes do documento fiscal — os
+# C197/D197, que este gerador não escreve.
 @pytest.mark.parametrize(
     ("codigo", "rotulo", "campo"),
     [
-        ("TO000001", "outros débitos", "VL_AJ_DEBITOS"),
+        ("TO000001", "outros débitos", "VL_TOT_AJ_DEBITOS"),
         ("TO010001", "estorno de créditos", "VL_ESTORNOS_CRED"),
-        ("TO020001", "outros créditos", "VL_AJ_CREDITOS"),
+        ("TO020001", "outros créditos", "VL_TOT_AJ_CREDITOS"),
         ("TO030001", "estorno de débitos", "VL_ESTORNOS_DEB"),
         ("TO040001", "deduções", "VL_TOT_DED"),
         ("TO050001", "débito especial", "DEB_ESP"),
@@ -166,6 +174,15 @@ def test_o_sequencial_nao_e_conferido_contra_tabela_nenhuma():
 )
 def test_cada_utilizacao_tem_o_seu_campo(codigo, rotulo, campo):
     assert utilizacao(codigo) == (rotulo, campo)
+
+
+def test_nenhum_ajuste_de_periodo_vai_para_campo_de_documento():
+    """Campos 03 e 07 do E110 são dos C197/D197, não dos E111."""
+    from src.escrituracoes.ajustes_apuracao import UTILIZACOES
+
+    destinos = {campo for _, campo in UTILIZACOES.values() if campo}
+
+    assert not destinos & {"VL_AJ_DEBITOS", "VL_AJ_CREDITOS"}
 
 
 def test_controle_extra_apuracao_nao_tem_campo(sessao):
@@ -181,7 +198,7 @@ def test_totais_ignoram_o_controle_extra_apuracao(sessao, empresa):
         ajustes_do_periodo(sessao, empresa_id=empresa.id, data_inicio=INICIO, data_fim=FIM)
     )
 
-    assert totais == {"VL_AJ_CREDITOS": 100.0}
+    assert totais == {"VL_TOT_AJ_CREDITOS": 100.0}
 
 
 def test_totais_ignoram_ajuste_de_outra_apuracao(sessao, empresa):
@@ -193,7 +210,7 @@ def test_totais_ignoram_ajuste_de_outra_apuracao(sessao, empresa):
         ajustes_do_periodo(sessao, empresa_id=empresa.id, data_inicio=INICIO, data_fim=FIM)
     )
 
-    assert totais == {"VL_AJ_CREDITOS": 100.0}
+    assert totais == {"VL_TOT_AJ_CREDITOS": 100.0}
 
 
 def test_ajustes_da_mesma_utilizacao_somam(sessao, empresa):
@@ -204,7 +221,7 @@ def test_ajustes_da_mesma_utilizacao_somam(sessao, empresa):
         ajustes_do_periodo(sessao, empresa_id=empresa.id, data_inicio=INICIO, data_fim=FIM)
     )
 
-    assert totais == {"VL_AJ_CREDITOS": 150.0}
+    assert totais == {"VL_TOT_AJ_CREDITOS": 150.0}
 
 
 # ── O sinal está no código ─────────────────────────────────────────────────
@@ -333,7 +350,7 @@ def test_outros_debitos_aumentam_o_imposto(sessao, com_saida):
 
     resultado = gerar(sessao, com_saida)
 
-    assert e110(resultado, "VL_AJ_DEBITOS") == "20,00"
+    assert e110(resultado, "VL_TOT_AJ_DEBITOS") == "20,00"
     assert e110(resultado, "VL_ICMS_RECOLHER") == "200,00", "180 + 20"
 
 
@@ -342,7 +359,7 @@ def test_outros_creditos_diminuem_o_imposto(sessao, com_saida):
 
     resultado = gerar(sessao, com_saida)
 
-    assert e110(resultado, "VL_AJ_CREDITOS") == "30,00"
+    assert e110(resultado, "VL_TOT_AJ_CREDITOS") == "30,00"
     assert e110(resultado, "VL_ICMS_RECOLHER") == "150,00", "180 − 30"
 
 
@@ -390,18 +407,24 @@ def test_credito_maior_que_debito_vira_saldo_credor(sessao, com_saida):
 
     resultado = gerar(sessao, com_saida)
 
-    assert e110(resultado, "VL_ICMS_RECOLHER") == ""
+    assert e110(resultado, "VL_ICMS_RECOLHER") == "0,00"
     assert e110(resultado, "VL_SLD_CREDOR_TRANSPORTAR") == "320,00"
 
 
 def test_os_ajustes_de_documento_seguem_vazios(sessao, com_saida):
-    """`VL_TOT_AJ_*` são do C197/D197, que nascem de uma nota — outro assunto."""
+    """`VL_AJ_DEBITOS` e `VL_AJ_CREDITOS` são do C197/D197 — outro assunto.
+
+    São os campos 03 e 07, e o Guia os descreve como "ajustes decorrentes do
+    documento fiscal". Este gerador não escreve C197/D197, então eles saem
+    zerados — e zerados, não vazios: são obrigatórios, e obrigatório vazio o
+    validador recusa.
+    """
     ajustar(sessao, com_saida, "TO000001", 20.0)
 
     resultado = gerar(sessao, com_saida)
 
-    assert e110(resultado, "VL_TOT_AJ_DEBITOS") == ""
-    assert e110(resultado, "VL_TOT_AJ_CREDITOS") == ""
+    assert e110(resultado, "VL_AJ_DEBITOS") == "0,00"
+    assert e110(resultado, "VL_AJ_CREDITOS") == "0,00"
 
 
 # ── Os avisos ──────────────────────────────────────────────────────────────

@@ -384,7 +384,7 @@ def test_os_ajustes_aparecem_com_o_proprio_nome(sessao, empresa):
     """É o que explica por que o imposto não é débito menos crédito."""
     uma_entrada_e_uma_saida(sessao, empresa)
     resultado = gerar_icms(sessao, empresa)
-    adulterar(resultado, "E110", "VL_AJ_CREDITOS", "300,00")
+    adulterar(resultado, "E110", "VL_TOT_AJ_CREDITOS", "300,00")
 
     lido = dict(espelho(resultado, tipo="efd_icms").apuracao)
 
@@ -427,11 +427,11 @@ def test_o_e110_que_nao_bate_com_os_e111_e_acusado(sessao, empresa):
     )
     sessao.commit()
     resultado = gerar_icms(sessao, empresa)
-    adulterar(resultado, "E110", "VL_AJ_CREDITOS", "999,00")
+    adulterar(resultado, "E110", "VL_TOT_AJ_CREDITOS", "999,00")
 
     achada = divergencia(espelho(resultado, tipo="efd_icms"), "batem com a soma dos E111")
 
-    assert "VL_AJ_CREDITOS" in achada.detalhe
+    assert "VL_TOT_AJ_CREDITOS" in achada.detalhe
     assert "999,00" in achada.detalhe and "100,00" in achada.detalhe
 
 
