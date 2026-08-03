@@ -60,6 +60,7 @@ As três camadas que a suíte separa:
 | `tabelas_ibscbs.conferir(item, data_emissao=, modelo=, valor=)` | Os problemas de classificação do item, em português. Lista vazia é "sem problema". |
 | `tabelas_ibscbs.conferir_valor(campo, valor)` | O mesmo sem documento nenhum — é o que serve para cadastrar regra. |
 | `tabelas_ibscbs.aliquotas_padrao(ano)` | As alíquotas do ano, ou `None` quando a legislação ainda não as fixou. |
+| `Tabelas.idade_em_dias(hoje=)` / `.envelhecida()` / `.aviso_de_idade()` | Quanto tempo tem a tabela, e a frase a mostrar quando ela passou de 180 dias. |
 | `tabelas_ibscbs.TabelaAusente` | O JSON gerado não está no lugar — instalação incompleta. |
 
 ## O que não faz
@@ -113,6 +114,16 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   classificação está inválida; qual seria a válida depende do enquadramento
   legal do item, que é decisão de quem escritura. Sugerir um código seria
   dar palpite com cara de resposta.
+- **A tabela vence, e o vencimento é verificado (REGRA 8).** Passados 180
+  dias da publicação, o CI fica vermelho e a apuração avisa em todo
+  resultado. Vermelho por calendário é intencional, como o carimbo de 90 dias
+  dos documentos de arquitetura: o defeito que ele acusa é o de ninguém ter
+  olhado. O prazo é o dobro da cadência observada — sete versões do IT entre
+  maio de 2025 e abril de 2026, no máximo quatro meses entre duas —, porque
+  pipeline que fica vermelho à toa ensina a ignorar o vermelho.
+- **Avisar não é travar.** Tabela velha ainda é melhor que tabela nenhuma, e
+  impedir o fechamento do mês por causa dela seria punir o escritório por um
+  problema que não é do mês dele.
 - **A data de publicação viaja com a tabela.** `sped-hub fiscal tabelas` a
   mostra, e ela entra no texto de cada apontamento. Tabela velha responde
   exatamente como tabela nova, e o erro só aparece na rejeição da SEFAZ, um

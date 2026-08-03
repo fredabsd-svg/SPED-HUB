@@ -695,3 +695,28 @@ class TestRegraComCodigoInventadoPelaCLI:
         with get_session(engine) as sessao:
             assert sessao.execute(select(RegraFiscal)).scalars().all() == []
         engine.dispose()
+
+
+# ── Fase 70 — a idade da tabela oficial pela linha de comando ──────────────
+
+
+class TestIdadeDaTabelaPelaCLI:
+    """Quantos dias tem a tabela deste sistema, sem abrir o repositório.
+
+    A data sozinha exige que quem lê faça a conta e saiba a cadência de
+    publicação do órgão. Nenhuma das duas coisas é razoável esperar de quem
+    está fechando o mês.
+    """
+
+    def test_a_idade_sai_junto_com_a_data(self, banco_fiscal, capsys):
+        assert main(["fiscal", "tabelas", "--db", banco_fiscal]) == 0
+
+        saida = capsys.readouterr().out
+        assert "publicada em 2026-06-22" in saida
+        assert "dias)" in saida
+
+    def test_a_tabela_de_hoje_nao_traz_atencao(self, banco_fiscal, capsys):
+        """Alerta que sai sempre é alerta que ninguém lê."""
+        main(["fiscal", "tabelas", "--db", banco_fiscal])
+
+        assert "ATENÇÃO" not in capsys.readouterr().out
