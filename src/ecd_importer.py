@@ -22,9 +22,11 @@ from src.db.models import (
     Aglutinacao,
     CentroCusto,
     ContaReferencial,
+    DemonstracaoContabil,
     Empresa,
     HistoricoPadrao,
     Lancamento,
+    LinhaDemonstracao,
     Partida,
     PlanoConta,
     SaldoPeriodico,
@@ -98,6 +100,7 @@ class ECDImportResult:
     partidas: int
     saldos_periodicos: int
     saldos_resultado: int
+    linhas_demonstracao: int
     total_registros: int
     hash_arquivo: str
     nome_arquivo: str
@@ -194,6 +197,72 @@ class ECDImportService:
             do_leiaute,
         )
 
+    # Campo do parser → coluna, por registro.  O que difere entre J100, J150 e
+    # J210 é só o que classifica a linha; o miolo é o mesmo nos três.
+    _CLASSIFICACAO_DA_LINHA = {
+        "J100": {"IND_GRP_BAL": "ind_grp_bal"},
+        "J150": {"NU_ORDEM": "nu_ordem", "IND_GRP_DRE": "ind_grp_dre"},
+        "J210": {"IND_TIP": "ind_tip"},
+    }
+
+    def _guardar_demonstracao(
+        self,
+        record: dict,
+        ecd_id: int,
+        demonstracoes: dict,
+        inicio: datetime.date,
+        fim: datetime.date,
+    ) -> None:
+        """O J005 abre a demonstração; J100, J150 e J210 são linhas dela.
+
+        As linhas herdam do J005 o período e o `ID_DEM` (ver `HERDA_DE` no
+        parser), e é por essa chave que cada uma acha a demonstração a que
+        pertence — não pela ordem de leitura, que um arquivo fora de ordem
+        quebraria em silêncio.
+        """
+        chave = (
+            _date(record.get("DT_INI"), inicio),
+            _date(record.get("DT_FIN"), fim),
+            str(record.get("ID_DEM") or "1"),
+        )
+        if record["_reg"] == "J005":
+            if chave in demonstracoes:
+                return
+            demonstracao = DemonstracaoContabil(
+                ecd_id=ecd_id,
+                dt_ini=chave[0],
+                dt_fin=chave[1],
+                id_dem=chave[2],
+                cab_dem=record.get("CAB_DEM") or None,
+            )
+            self.session.add(demonstracao)
+            demonstracoes[chave] = demonstracao
+            return
+
+        demonstracao = demonstracoes.get(chave)
+        if demonstracao is None:
+            raise ECDImportError(
+                f"{record['_reg']} sem J005 correspondente na linha {record.get('_linha')} "
+                f"(período {chave[0]} a {chave[1]}, demonstração {chave[2]})"
+            )
+
+        linha = LinhaDemonstracao(
+            registro=record["_reg"],
+            cod_agl=str(record.get("COD_AGL") or ""),
+            ind_cod_agl=record.get("IND_COD_AGL") or None,
+            nivel_agl=_optional_int(record.get("NIVEL_AGL")),
+            cod_agl_sup=record.get("COD_AGL_SUP") or None,
+            descricao=record.get("DESCR_COD_AGL") or None,
+            vl_cta_ini=record.get("VL_CTA_INI") or 0.0,
+            ind_dc_cta_ini=record.get("IND_DC_CTA_INI") or None,
+            vl_cta_fin=record.get("VL_CTA_FIN") or 0.0,
+            ind_dc_cta_fin=record.get("IND_DC_CTA_FIN") or None,
+        )
+        for campo, coluna in self._CLASSIFICACAO_DA_LINHA[record["_reg"]].items():
+            valor = record.get(campo)
+            setattr(linha, coluna, _optional_int(valor) if coluna == "nu_ordem" else valor or None)
+        demonstracao.linhas.append(linha)
+
     def importar(
         self,
         path: Path,
@@ -228,6 +297,7 @@ class ECDImportService:
         dt_ini: datetime.date | None = None
         dt_fin: datetime.date | None = None
         contas_pendentes: dict[str, PlanoConta] = {}
+        demonstracoes: dict[tuple, DemonstracaoContabil] = {}
         current_lancamento: tuple[tuple[str, datetime.date], Lancamento] | None = None
         counts: dict[str, int] = {}
         since_flush = 0
@@ -341,6 +411,10 @@ class ECDImportService:
                     "I200",
                     "I250",
                     "I355",
+                    "J005",
+                    "J100",
+                    "J150",
+                    "J210",
                 }:
                     continue
 
@@ -480,6 +554,10 @@ class ECDImportService:
                             )
                         partida.lancamento_id = launch_id
                         self.session.add(partida)
+                elif record_type in {"J005", "J100", "J150", "J210"}:
+                    self._guardar_demonstracao(
+                        record, current_ecd.id, demonstracoes, start_date, end_date
+                    )
                 elif record_type == "I355":
                     self.session.add(
                         SaldoResultado(
@@ -528,6 +606,7 @@ class ECDImportService:
                 partidas=counts.get("I250", 0),
                 saldos_periodicos=counts.get("I155", 0),
                 saldos_resultado=counts.get("I355", 0),
+                linhas_demonstracao=sum(counts.get(reg, 0) for reg in ("J100", "J150", "J210")),
                 total_registros=sum(counts.values()),
                 hash_arquivo=file_hash,
                 nome_arquivo=original_name,

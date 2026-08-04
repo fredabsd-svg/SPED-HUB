@@ -1289,3 +1289,138 @@ class TestIndicadorDePagamentoPelaCLI:
         self._gerar(banco_fiscal, tmp_path, ind_pag="1")
 
         assert "IND_PGTO" not in capsys.readouterr().out
+
+
+# ── Fase 78 — o balanço e a DRE publicados, pela linha de comando ─────────
+
+
+class TestDemonstracoesPublicadasPelaCLI:
+    """O bloco J entra no banco e é conferido contra a escrituração.
+
+    O `J100`, o `J150` e o `J210` trazem o balanço, a DRE e a DLPA/DMPL
+    **como a empresa as declarou**. Eram lidos pelo parser e descartados: o
+    programa guardava só o que ele mesmo recalcula dos saldos, o que é
+    guardar a nossa leitura no lugar do documento.
+
+    As duas conferências novas são as do próprio PGE do Sped Contábil,
+    transcritas do Manual do Leiaute 9: `REGRA_VALIDA_ATIVO_PASSIVO_FIN` e
+    `REGRA_VALIDA_SALDO_COM_DRE`.
+    """
+
+    ATIVO = "|J100|1|T|1||A|ATIVO|0,00|D|100000,00|D||"
+    PASSIVO = "|J100|2|T|1||P|PASSIVO|0,00|C|100000,00|C||"
+    DRE_DETALHE = "|J150|1|4.1|D|2|4|RECEITA DE VENDAS|0,00|C|200000,00|C|R||"
+
+    @staticmethod
+    def _linhas(j100_passivo: str, j150: str) -> list[str]:
+        return [
+            "|0000|LECD|01012023|31122023|EMPRESA TESTE|11111111000191|MG||3106200"
+            "||0|0|1|0||0|G||N|0||0||",
+            "|I001|0|",
+            "|I010|G|009|",
+            "|I050|01012023|01|A|2|4.1||Receita de Vendas|",
+            # O I052 é o que liga a conta ao código de aglutinação da DRE — é
+            # por ele que a REGRA_VALIDA_SALDO_COM_DRE compara.
+            "|I052||4.1|",
+            "|I350|31122023|",
+            "|I355|4.1||200000,00|C|",
+            "|I990|7|",
+            "|J001|0|",
+            "|J005|01012023|31122023|1|DEMONSTRACOES|",
+            TestDemonstracoesPublicadasPelaCLI.ATIVO,
+            j100_passivo,
+            j150,
+            "|J210|0|1.1|LUCROS ACUMULADOS|0,00|C|0,00|C||",
+            "|J990|6|",
+            "|9001|0|",
+            "|9999|16|",
+        ]
+
+    @pytest.fixture
+    def banco(self, tmp_path) -> str:
+        caminho = str(tmp_path / "blocoj.db")
+        engine = criar_engine(caminho)
+        init_db(engine)
+        engine.dispose()
+        return caminho
+
+    def _importar_ecd(self, banco: str, tmp_path: Path, **trocas) -> int:
+        linhas = self._linhas(
+            trocas.get("j100_passivo", self.PASSIVO),
+            trocas.get("j150", self.DRE_DETALHE),
+        )
+        arquivo = tmp_path / "ecd.txt"
+        arquivo.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+        return main(["importar-ecd", str(arquivo), "--db", banco])
+
+    def test_as_linhas_publicadas_entram_no_banco(self, banco, tmp_path):
+        from src.db.models import DemonstracaoContabil, LinhaDemonstracao
+
+        assert self._importar_ecd(banco, tmp_path) == 0
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            demonstracao = sessao.execute(select(DemonstracaoContabil)).scalars().one()
+            linhas = sessao.execute(select(LinhaDemonstracao)).scalars().all()
+        engine.dispose()
+
+        assert demonstracao.cab_dem == "DEMONSTRACOES"
+        assert {linha.registro for linha in linhas} == {"J100", "J150", "J210"}
+
+    def test_o_valor_do_balanco_vem_da_coluna_certa(self, banco, tmp_path):
+        """O `J100` teve o leiaute corrigido na fase 74; aqui ele atravessa."""
+        from src.db.models import LinhaDemonstracao
+
+        assert self._importar_ecd(banco, tmp_path) == 0
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            ativo = sessao.execute(
+                select(LinhaDemonstracao).where(LinhaDemonstracao.cod_agl == "1")
+            ).scalar_one()
+        engine.dispose()
+
+        assert (ativo.nivel_agl, ativo.ind_grp_bal) == (1, "A")
+        assert (ativo.vl_cta_fin, ativo.ind_dc_cta_fin) == (100000.00, "D")
+
+    def _validar(self, banco: str, capsys) -> str:
+        capsys.readouterr()
+        main(["validar", "--ecd", "1", "--db", banco])
+        return capsys.readouterr().out
+
+    def test_o_balanco_que_nao_fecha_e_acusado(self, banco, tmp_path, capsys):
+        assert (
+            self._importar_ecd(
+                banco,
+                tmp_path,
+                j100_passivo="|J100|2|T|1||P|PASSIVO|0,00|C|99000,00|C||",
+            )
+            == 0
+        )
+
+        assert "balanço publicado não fecha" in self._validar(banco, capsys)
+
+    def test_o_balanco_que_fecha_nao_e_acusado(self, banco, tmp_path, capsys):
+        assert self._importar_ecd(banco, tmp_path) == 0
+
+        assert "balanço publicado não fecha" not in self._validar(banco, capsys)
+
+    def test_a_dre_publicada_fora_do_saldo_escriturado_e_acusada(self, banco, tmp_path, capsys):
+        """O I355 diz 200.000,00 na conta 4.1; a DRE publica outro número."""
+        assert (
+            self._importar_ecd(
+                banco,
+                tmp_path,
+                j150="|J150|1|4.1|D|2|4|RECEITA DE VENDAS|0,00|C|180000,00|C|R||",
+            )
+            == 0
+        )
+
+        saida = self._validar(banco, capsys)
+        assert "DRE publicada" in saida
+        assert "180" in saida
+
+    def test_a_dre_que_bate_nao_e_acusada(self, banco, tmp_path, capsys):
+        assert self._importar_ecd(banco, tmp_path) == 0
+
+        assert "DRE publicada" not in self._validar(banco, capsys)

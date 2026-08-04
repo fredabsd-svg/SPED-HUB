@@ -35,6 +35,20 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **O balanço e a DRE publicados na ECD passaram a ser guardados.** O bloco J
+  traz as demonstrações **como a empresa as declarou** — e eram lidas e
+  jogadas fora: o programa guardava só o que ele recalcula a partir dos
+  saldos, que é guardar a nossa leitura no lugar do documento. Agora as duas
+  coisas convivem, que é o ponto de separar documento original de tratamento.
+- **Duas conferências novas, e são as do próprio Fisco.** O balanço publicado
+  tem de fechar (ativo = passivo + PL, pelas linhas de nível 1 do J100), e
+  cada linha de detalhe da DRE publicada tem de bater com os saldos que a
+  própria escrituração declara para as contas daquele código de aglutinação.
+  São `REGRA_VALIDA_ATIVO_PASSIVO_FIN` e `REGRA_VALIDA_SALDO_COM_DRE`,
+  transcritas do Manual do Leiaute 9. É a única conferência do conjunto que
+  compara **dois documentos** em vez de recomputar um: quando as duas não
+  batem, a empresa publicou uma demonstração que a escrituração dela não
+  sustenta — e é isso que um trabalho de revisão procura.
 - **A descrição dos registros do SPED passou a dizer contra qual versão do
   leiaute foi conferida.** Todos os registros que o sistema escreve foram
   comparados, campo a campo, com a Nota Técnica oficial — e batem. A partir de

@@ -64,18 +64,6 @@ O que falta:
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
 | Monofásico, diferimento, crédito presumido e split payment na Reforma | A apuração **mede e relata** esses valores, fora do total, e confere a classificação contra a tabela oficial (`dados/oficiais/`); o que falta é **consumi-los** — cada um exige decidir a que competência o valor pertence, e a tabela diz o enquadramento, não a apuração de cada regime | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
 
-## ECD
-
-Já existem a importação, o plano de contas, os lançamentos e partidas, os
-saldos periódicos e de resultado, os relatórios e as validações de
-integridade; ver [`status.md`](status.md).
-
-O que falta:
-
-| Item | Situação | Marcador de ausência |
-|---|---|---|
-| Importar o balanço e a DRE publicados (bloco J) | O `J100`, o `J150` e o `J210` trazem as demonstrações **como foram declaradas** — a camada "documento original" da contabilidade. Hoje são lidos pelo parser e descartados na importação: o programa recalcula a DRE a partir dos saldos (I355) e nunca a compara com a publicada. Guardá-las permitiria acusar a divergência entre o que se apurou e o que se declarou, que é o achado mais caro de um trabalho de revisão | `src.ecd_importer:ECDImportService.importar_bloco_j` |
-
 ## Dívida técnica conhecida
 
 | Item | Situação | Marcador de ausência |
