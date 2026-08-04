@@ -242,6 +242,7 @@ class ImportadorDeDocumentos:
             data_emissao=normalizado.data_emissao,
             data_entrada_saida=normalizado.data_entrada_saida,
             modalidade_frete=normalizado.modalidade_frete,
+            indicador_pagamento=normalizado.indicador_pagamento,
             valor_total=normalizado.valor_total,
             valor_produtos=normalizado.valor_produtos,
             valor_desconto=normalizado.valor_desconto,

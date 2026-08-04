@@ -305,6 +305,14 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **O indicador de pagamento saía em branco, e é obrigatório.** O `IND_PGTO`
+  do C100 é marcado "O" nas duas colunas do Guia — entrada e saída — e o
+  arquivo saía com ele vazio, o que faz o validador recusar. O dado sempre
+  esteve no XML, no grupo de pagamento da nota; só não era lido. Passou a ser.
+  Documento que não traz o grupo — inclusive todos os importados antes desta
+  leitura existir — sai com `2` (outros), o código que menos afirma, e o
+  número de cada um aparece no aviso da geração. Dizer "à vista" de uma nota
+  que talvez seja a prazo seria trocar um erro visível por um invisível.
 - **A EFD ICMS/IPI saía com itens onde o Guia não os admite.** Em NF-e de
   emissão própria — a maioria das saídas de qualquer empresa — o Guia manda
   apresentar *"somente os registros C100 e C190"*, e só admite o registro de

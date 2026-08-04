@@ -175,6 +175,7 @@ class DocumentoNormalizado:
     # é o `IND_FRT` do C100, com a mesma tabela de códigos, e sem ele o
     # registro sai com um campo a menos ou com um chute no lugar.
     modalidade_frete: str | None = None
+    indicador_pagamento: str | None = None
 
     valor_total: float = 0.0
     valor_produtos: float = 0.0
@@ -387,6 +388,7 @@ class AdaptadorNFe:
             data_emissao=_data(_texto(ide, "dhEmi") or _texto(ide, "dEmi")),
             data_entrada_saida=_data(_texto(ide, "dhSaiEnt") or _texto(ide, "dSaiEnt")),
             modalidade_frete=_texto(inf, "transp", "modFrete"),
+            indicador_pagamento=_texto(inf, "pag", "detPag", "indPag"),
             emitente_cnpj=_texto(emit, "CNPJ") or _texto(emit, "CPF"),
             emitente_nome=_texto(emit, "xNome"),
             emitente_ie=_texto(emit, "IE"),

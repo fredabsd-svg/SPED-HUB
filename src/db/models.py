@@ -791,6 +791,12 @@ class DocumentoFiscal(Base):
     # de inventar quem pagou o frete.
     modalidade_frete: Mapped[str | None] = mapped_column(String(1))
 
+    # `indPag` do grupo `pag/detPag` do XML — o mesmo código do `IND_PGTO` do
+    # C100, que é obrigatório nas entradas e nas saídas.  Nulo em documento
+    # importado antes de o campo existir, e aí o gerador avisa em vez de
+    # afirmar prazo de pagamento que ninguém declarou.
+    indicador_pagamento: Mapped[str | None] = mapped_column(String(1))
+
     # Totais, como declarados no documento
     valor_total: Mapped[float] = mapped_column(default=0.0)
     valor_produtos: Mapped[float] = mapped_column(default=0.0)
