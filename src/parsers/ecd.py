@@ -62,7 +62,8 @@ PAI_DE = {
     "J100": "J005",
     "J150": "J005",
     "J210": "J005",
-    "J215": "J005",
+    # O J215 detalha o fato contábil de uma linha do J210, não do J005.
+    "J215": "J210",
 }
 
 # Campos do pai que o filho herda
@@ -74,6 +75,11 @@ HERDA_DE = {
     "I157": ["DT_INI", "DT_FIN"],
     "I250": ["NUM_LCTO", "DT_LCTO"],
     "I355": ["DT_RES"],
+    # As linhas do bloco J herdam o período e a identificação do J005 — é o
+    # que permite ligar cada uma à demonstração a que pertence.
+    "J100": ["DT_INI", "DT_FIN", "ID_DEM"],
+    "J150": ["DT_INI", "DT_FIN", "ID_DEM"],
+    "J210": ["DT_INI", "DT_FIN", "ID_DEM"],
 }
 
 

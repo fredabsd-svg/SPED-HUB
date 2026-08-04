@@ -9,6 +9,15 @@ Validações:
 (f) Contas analíticas órfãs de sintética
 (g) Lançamentos em contas sintéticas
 (h) Ciclo na hierarquia do plano de contas
+(i) Balanço publicado fecha — ativo = passivo, no J100
+(j) DRE publicada × os saldos que a própria escrituração declara
+
+As duas últimas são as regras do PGE do Sped Contábil, transcritas do Manual
+do Leiaute 9 (Anexo ao ADE Cofis nº 01/2026): `REGRA_EXISTEM_2_NIVEIS_1`,
+`REGRA_VALIDA_ATIVO_PASSIVO_FIN` e `REGRA_VALIDA_SALDO_COM_DRE`.  Elas olham
+o bloco J — o balanço e a DRE **como a empresa os declarou** —, e é a única
+parte destas validações que confere documento contra documento em vez de
+recomputar.
 """
 
 from collections import defaultdict
@@ -18,7 +27,10 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
+    Aglutinacao,
+    DemonstracaoContabil,
     Lancamento,
+    LinhaDemonstracao,
     Partida,
     PlanoConta,
     SaldoPeriodico,
@@ -98,6 +110,8 @@ class ValidadorIntegridade:
         resultados.extend(self._validar_analiticas_orfas())
         resultados.extend(self._validar_lancamentos_sinteticas())
         resultados.extend(self._validar_hierarquia_ciclica())
+        resultados.extend(self._validar_balanco_publicado())
+        resultados.extend(self._validar_dre_publicada())
 
         from src.webhooks import emitir
 
@@ -374,6 +388,133 @@ class ValidadorIntegridade:
                 )
             )
 
+        return inconsistencias
+
+    def _linhas_publicadas(self, registro: str) -> list[LinhaDemonstracao]:
+        """As linhas de um registro do bloco J, de todas as demonstrações."""
+        return list(
+            self.session.execute(
+                select(LinhaDemonstracao)
+                .join(DemonstracaoContabil)
+                .where(
+                    DemonstracaoContabil.ecd_id == self.ecd_id,
+                    LinhaDemonstracao.registro == registro,
+                )
+            ).scalars()
+        )
+
+    def _validar_balanco_publicado(self) -> list[Inconsistencia]:
+        """(i) O balanço declarado fecha — `REGRA_VALIDA_ATIVO_PASSIVO_FIN`.
+
+        A validação (e) já confere ativo = passivo + PL, mas a partir dos
+        saldos que o programa soma. Esta olha o balanço **publicado**: se o
+        J100 não fecha, o que a empresa entregou não fecha, independentemente
+        do que os saldos digam.
+
+        Vem junto a `REGRA_EXISTEM_2_NIVEIS_1`: o manual exige exatamente
+        duas linhas de nível 1, uma de ativo e uma de passivo. Sem as duas
+        não há o que comparar, e a ausência é ela mesma o defeito.
+        """
+        linhas = [linha for linha in self._linhas_publicadas("J100") if linha.nivel_agl == 1]
+        if not linhas:
+            return []
+
+        por_grupo = defaultdict(float)
+        for linha in linhas:
+            por_grupo[linha.ind_grp_bal] += valor_sinalizado(
+                linha.vl_cta_fin, linha.ind_dc_cta_fin or "D"
+            )
+
+        if set(por_grupo) != {"A", "P"}:
+            return [
+                Inconsistencia(
+                    tipo="balanco_publicado_incompleto",
+                    severidade="erro",
+                    descricao=(
+                        "O balanço publicado (J100) não tem exatamente uma linha de nível 1 "
+                        f"de ativo e uma de passivo: encontrados {sorted(por_grupo)}"
+                    ),
+                    detalhes={"grupos": sorted(g for g in por_grupo if g)},
+                )
+            ]
+
+        ativo, passivo = por_grupo["A"], por_grupo["P"]
+        if abs(abs(ativo) - abs(passivo)) <= 0.01:
+            return []
+        return [
+            Inconsistencia(
+                tipo="balanco_publicado_nao_fecha",
+                severidade="erro",
+                descricao=(
+                    f"O balanço publicado não fecha: ativo = {abs(ativo):,.2f} "
+                    f"vs passivo + PL = {abs(passivo):,.2f}"
+                ),
+                detalhes={
+                    "ativo": round(abs(ativo), 2),
+                    "passivo": round(abs(passivo), 2),
+                    "diferenca": round(abs(ativo) - abs(passivo), 2),
+                },
+            )
+        ]
+
+    def _validar_dre_publicada(self) -> list[Inconsistencia]:
+        """(j) A DRE publicada × os saldos declarados — `REGRA_VALIDA_SALDO_COM_DRE`.
+
+        O manual manda comparar o valor de cada linha de **detalhe** da DRE
+        (`IND_COD_AGL` = "D") com o saldo das contas que o I052 aglutina
+        naquele mesmo código. Aqui a soma sai dos I355 — os saldos de
+        resultado antes do encerramento —, que é o que a escrituração
+        declara para essas contas.
+
+        É a única conferência do conjunto que compara **dois documentos** em
+        vez de recomputar um: se as duas não batem, a empresa publicou uma
+        DRE que a própria escrituração dela não sustenta.
+        """
+        detalhes = [
+            linha
+            for linha in self._linhas_publicadas("J150")
+            if (linha.ind_cod_agl or "").upper() == "D"
+        ]
+        if not detalhes:
+            return []
+
+        saldo_por_agl = defaultdict(float)
+        for saldo, cod_agl in self.session.execute(
+            select(SaldoResultado, Aglutinacao.cod_agl)
+            .join(PlanoConta, PlanoConta.cod_cta == SaldoResultado.cod_cta)
+            .join(Aglutinacao, Aglutinacao.plano_conta_id == PlanoConta.id)
+            .where(
+                SaldoResultado.ecd_id == self.ecd_id,
+                PlanoConta.ecd_id == self.ecd_id,
+            )
+        ).all():
+            saldo_por_agl[cod_agl] += valor_sinalizado(saldo.vl_sld_fin, saldo.ind_dc_fin)
+
+        inconsistencias = []
+        for linha in detalhes:
+            if linha.cod_agl not in saldo_por_agl:
+                continue
+            publicado = valor_sinalizado(linha.vl_cta_fin, linha.ind_dc_cta_fin or "D")
+            escriturado = saldo_por_agl[linha.cod_agl]
+            if abs(abs(publicado) - abs(escriturado)) <= 0.01:
+                continue
+            inconsistencias.append(
+                Inconsistencia(
+                    tipo="dre_publicada_divergente",
+                    severidade="alerta",
+                    descricao=(
+                        f"Linha {linha.cod_agl} da DRE publicada = {abs(publicado):,.2f} "
+                        f"vs saldos escriturados = {abs(escriturado):,.2f}"
+                    ),
+                    detalhes={
+                        "cod_agl": linha.cod_agl,
+                        "descricao": linha.descricao,
+                        "publicado": round(abs(publicado), 2),
+                        "escriturado": round(abs(escriturado), 2),
+                        "diferenca": round(abs(publicado) - abs(escriturado), 2),
+                    },
+                )
+            )
         return inconsistencias
 
     def _validar_analiticas_orfas(self) -> list[Inconsistencia]:

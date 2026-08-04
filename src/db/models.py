@@ -270,6 +270,9 @@ class ECD(Base):
     historicos_padrao: Mapped[list["HistoricoPadrao"]] = relationship(
         back_populates="ecd", cascade="all, delete-orphan"
     )
+    demonstracoes: Mapped[list["DemonstracaoContabil"]] = relationship(
+        back_populates="ecd", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         UniqueConstraint("empresa_id", "dt_ini", "dt_fin", name="uq_ecd_empresa_periodo"),
@@ -432,6 +435,76 @@ class SaldoResultado(Base):
     __table_args__ = (
         UniqueConstraint("ecd_id", "cod_cta", "cod_ccus", "dt_res", name="uq_saldo_resultado"),
     )
+
+
+# ── Demonstrações publicadas (bloco J) ─────────────────────────────────────
+#
+# O bloco J é a terceira camada da contabilidade, e a que faltava: o balanço e
+# a DRE **como a empresa os declarou**.  O que o programa recalcula a partir
+# dos saldos é outra coisa — e a diferença entre as duas é justamente o que um
+# trabalho de revisão procura.  Guardar só o recalculado é guardar a nossa
+# leitura no lugar do documento.
+
+
+class DemonstracaoContabil(Base):
+    """J005 — um conjunto de demonstrações de um período."""
+
+    __tablename__ = "demonstracoes_contabeis"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ecd_id: Mapped[int] = mapped_column(ForeignKey("ecds.id"), nullable=False, index=True)
+    dt_ini: Mapped[datetime.date] = mapped_column(nullable=False)
+    dt_fin: Mapped[datetime.date] = mapped_column(nullable=False)
+    # 1 = da própria pessoa jurídica; 2 = consolidada ou de outra PJ.
+    id_dem: Mapped[str] = mapped_column(String(2), nullable=False, default="1")
+    cab_dem: Mapped[str | None] = mapped_column(String(255))
+
+    ecd: Mapped["ECD"] = relationship(back_populates="demonstracoes")
+    linhas: Mapped[list["LinhaDemonstracao"]] = relationship(
+        back_populates="demonstracao", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("ecd_id", "dt_ini", "dt_fin", "id_dem", name="uq_demonstracao"),
+    )
+
+
+class LinhaDemonstracao(Base):
+    """Uma linha de J100 (balanço), J150 (DRE) ou J210 (DLPA/DMPL).
+
+    Os três compartilham o essencial — código de aglutinação, descrição e os
+    dois saldos com o seu indicador — e diferem no que classifica a linha:
+    `ind_grp_bal` no balanço, `nu_ordem` e `ind_grp_dre` na DRE, `ind_tip` na
+    DLPA/DMPL.  Uma tabela só, com `registro` dizendo qual é: são o mesmo
+    objeto contábil visto por três demonstrações.
+    """
+
+    __tablename__ = "linhas_demonstracao"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    demonstracao_id: Mapped[int] = mapped_column(
+        ForeignKey("demonstracoes_contabeis.id"), nullable=False, index=True
+    )
+    registro: Mapped[str] = mapped_column(String(4), nullable=False, index=True)
+
+    cod_agl: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    # T = totalizador, D = detalhe.  Ausente no J210, que não tem o campo.
+    ind_cod_agl: Mapped[str | None] = mapped_column(String(1))
+    nivel_agl: Mapped[int | None] = mapped_column()
+    cod_agl_sup: Mapped[str | None] = mapped_column(String(255))
+    descricao: Mapped[str | None] = mapped_column(String(255))
+
+    vl_cta_ini: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    ind_dc_cta_ini: Mapped[str | None] = mapped_column(String(1))
+    vl_cta_fin: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    ind_dc_cta_fin: Mapped[str | None] = mapped_column(String(1))
+
+    ind_grp_bal: Mapped[str | None] = mapped_column(String(1))  # J100: A / P
+    nu_ordem: Mapped[int | None] = mapped_column()  # J150
+    ind_grp_dre: Mapped[str | None] = mapped_column(String(1))  # J150: D / R
+    ind_tip: Mapped[str | None] = mapped_column(String(1))  # J210: 0 DLPA / 1 DMPL
+
+    demonstracao: Mapped["DemonstracaoContabil"] = relationship(back_populates="linhas")
 
 
 # ── Lançamentos ────────────────────────────────────────────────────────────
