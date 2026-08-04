@@ -9,6 +9,15 @@ interno da implementação.
 ## [Não publicado]
 
 ### Alterado
+- **Dois itens do roadmap foram corrigidos com o que o Guia Prático diz.** O
+  que trava a escrituração dos ajustes de documento (C197/D197) não é a falta
+  da estrutura do código — essa o Guia documenta —, e sim que a **tabela 5.3 é
+  publicada por cada estado**, não pela Receita: o validador confere o código
+  "de acordo com a Tabela da UF do informante do arquivo". O item passou a ser
+  declarado como bloqueio externo, com a razão certa. E o balanço e a DRE
+  publicados na ECD (bloco J) entraram na lista: são lidos e descartados hoje,
+  e guardá-los permitiria acusar a diferença entre o que a empresa apurou e o
+  que ela declarou.
 - **A leitura da NF-e foi conferida contra a versão 1.51 da Nota Técnica**
   (julho de 2026), publicada dois dias antes de os novos tributos passarem a
   ser exigidos. Ela altera regras de validação e antecipa o cronograma da que
