@@ -947,7 +947,7 @@ class TestLeiaute9DaECDPelaCLI:
                 select(Partida).join(Lancamento).where(Lancamento.num_lcto == "1000")
             ).scalar_one()
 
-            assert partida.num_arq == 123
+            assert partida.num_arq == "123"
 
     def test_o_saldo_de_resultado_vem_dos_campos_4_e_5(self, importado):
         """ "Campo 04 – VL_CTA", "Campo 05 – IND_DC" — não VL_SLD_FIN/IND_DC_FIN."""
@@ -1424,3 +1424,94 @@ class TestDemonstracoesPublicadasPelaCLI:
         assert self._importar_ecd(banco, tmp_path) == 0
 
         assert "DRE publicada" not in self._validar(banco, capsys)
+
+
+# ── Fase 79 — o CNPJ alfanumérico pela linha de comando ──────────────────
+
+
+class TestCnpjAlfanumericoPelaCLI:
+    """A empresa é criada a partir do CNPJ que vem no 0000 da ECD.
+
+    A normalização tirava "tudo que não é dígito". Num CNPJ alfanumérico —
+    em produção desde 31/07/2026 — isso não devolve um CNPJ errado: devolve
+    oito posições que, completadas, são a inscrição de **outra** pessoa
+    jurídica, com aparência perfeita. E a ECD é justamente o arquivo que
+    cria a empresa no banco.
+    """
+
+    CNPJ_NOVO = "12ABC34501DE35"  # o exemplo da cartilha da Receita
+
+    @pytest.fixture
+    def banco(self, tmp_path) -> str:
+        caminho = str(tmp_path / "alfa.db")
+        engine = criar_engine(caminho)
+        init_db(engine)
+        engine.dispose()
+        return caminho
+
+    def _arquivo(self, tmp_path: Path, cnpj: str) -> Path:
+        linhas = [
+            f"|0000|LECD|01012026|31122026|EMPRESA ALFA|{cnpj}|MG||3106200"
+            "||0|0|1|0||0|G||N|0||0||",
+            "|I001|0|",
+            "|I010|G|009|",
+            "|I050|01012026|01|A|2|1.01||Caixa|",
+            "|I990|4|",
+            "|9001|0|",
+            "|9999|7|",
+        ]
+        arquivo = tmp_path / "alfa.txt"
+        arquivo.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+        return arquivo
+
+    def test_a_empresa_entra_com_as_letras_do_cnpj(self, banco, tmp_path):
+        assert (
+            main(["importar-ecd", str(self._arquivo(tmp_path, self.CNPJ_NOVO)), "--db", banco]) == 0
+        )
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            empresa = sessao.execute(select(Empresa)).scalars().one()
+        engine.dispose()
+
+        assert empresa.cnpj == self.CNPJ_NOVO
+
+    def test_reimportar_acha_a_mesma_empresa(self, banco, tmp_path):
+        """Com as letras comidas, a segunda ECD criaria uma empresa nova."""
+        from src.ecd_importer import DuplicateECDImportError
+
+        arquivo = self._arquivo(tmp_path, self.CNPJ_NOVO)
+        assert main(["importar-ecd", str(arquivo), "--db", banco]) == 0
+        with pytest.raises(SystemExit):
+            main(["importar-ecd", str(arquivo), "--db", banco])
+        assert DuplicateECDImportError  # a recusa é por período repetido, não por CNPJ novo
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            assert len(sessao.execute(select(Empresa)).scalars().all()) == 1
+        engine.dispose()
+
+    def test_o_cnpj_numerico_continua_entrando(self, banco, tmp_path):
+        assert (
+            main(["importar-ecd", str(self._arquivo(tmp_path, "12345678000195")), "--db", banco])
+            == 0
+        )
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            assert sessao.execute(select(Empresa)).scalars().one().cnpj == "12345678000195"
+        engine.dispose()
+
+    def test_o_cnpj_pontuado_no_arquivo_e_normalizado(self, banco, tmp_path):
+        """Emissor que escreve o 0000 com máscara não pode criar outra empresa."""
+        assert (
+            main(
+                ["importar-ecd", str(self._arquivo(tmp_path, "12.ABC.345/01DE-35")), "--db", banco]
+            )
+            == 0
+        )
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            assert sessao.execute(select(Empresa)).scalars().one().cnpj == self.CNPJ_NOVO
+        engine.dispose()

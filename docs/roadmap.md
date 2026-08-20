@@ -64,6 +64,22 @@ O que falta:
 | Escrituração de CBS, IBS e IS em obrigação acessória | A apuração soma os tributos; nenhuma obrigação acessória os declara | `src.escrituracoes.reforma:GeradorObrigacaoIBSCBS` |
 | Monofásico, diferimento, crédito presumido e split payment na Reforma | A apuração **mede e relata** esses valores, fora do total, e confere a classificação contra a tabela oficial (`dados/oficiais/`); o que falta é **consumi-los** — cada um exige decidir a que competência o valor pertence, e a tabela diz o enquadramento, não a apuração de cada regime | `src.escrituracoes.reforma:ApuracaoIBSCBS.regimes_especiais` |
 
+## Importação fiscal automática
+
+Aceito do "Prompt Mestre — Plataforma de Importação Fiscal com ACBr Pro"
+(2026-08-19). A leitura completa daquele documento — o que entra, o que não
+entra e por quê — está em
+[`integracao-fiscal-automatica.md`](integracao-fiscal-automatica.md).
+
+| Item | Situação | Marcador de ausência |
+|---|---|---|
+| Certificado digital A1 guardado com segurança | Pré-requisito de qualquer consulta automática. Cifra autenticada para o PFX, senha cifrada à parte, chave mestra fora do banco, aviso de vencimento e bloqueio de certificado vencido | `src.certificados:CofreDeCertificados` |
+| Cursor de sincronização por NSU | Modelo, travamento por empresa e máquina de estados são construíveis sem depender de terceiro; só a chamada ao serviço não é | `src.integracoes.cursor:CursorDeSincronizacao` |
+| Consulta automática de NF-e por Distribuição de DF-e | O item de maior valor do documento de origem e o de mais dependências: certificado, biblioteca nativa, assinatura ACBr Pro e homologação | `externo` — depende de certificado A1 do escritório e de assinatura ACBr Pro, cujos binários não são redistribuíveis |
+| Matriz de capacidades por município/provedor de NFS-e | A §8.1 aplicada a integração: declarar o que foi homologado, contra o quê e quando, e mostrar "não suportado" em vez de deixar o usuário descobrir no fechamento | `src.integracoes.capacidades:MatrizDeCapacidades` |
+| Importação de ZIP com as proteções | Path traversal, zip bomb, limite por lote e relatório do lote | `src.uploads:extrair_zip` |
+| Taxonomia de erros de integração | Distinguir bloqueio fiscal de falha de rede muda o que o programa faz em seguida — insistir ou esperar | `src.integracoes.erros:CategoriaDeErro` |
+
 ## Dívida técnica conhecida
 
 | Item | Situação | Marcador de ausência |

@@ -328,6 +328,23 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **O CNPJ alfanumérico não era lido — e não dava erro.** A Receita implantou
+  o primeiro em **31 de julho de 2026**. No registro de abertura da ECD o
+  campo estava declarado como numérico, e um CNPJ com letras virava **nulo**:
+  a empresa perdia a identidade sem uma linha de erro. Mesmo o CNPJ numérico
+  saía do parser como `123456000199.0`, sem os zeros à esquerda — só voltava
+  ao normal porque o passo seguinte os recompunha. O manual da Receita
+  declara esse campo como texto desde sempre; era a nossa cópia que dizia
+  outra coisa.
+- **A normalização de CNPJ tirava "tudo que não é dígito".** Num CNPJ
+  alfanumérico isso não devolve um CNPJ errado: devolve o de **outra
+  empresa**, com aparência perfeita. Agora só a pontuação do formato sai.
+- **O CNPJ do formato novo passava inteiro para o log.** O sanitizador
+  procurava catorze algarismos, e o formato novo tem letras — nenhum era
+  mascarado. Passou a cobrir os dois formatos.
+- **O número do documento arquivado era guardado como inteiro.** O manual
+  define o campo como "número, código **ou caminho de localização**"; qualquer
+  conteúdo que não fosse só algarismos virava nulo, em silêncio.
 - **O indicador de pagamento saía em branco, e é obrigatório.** O `IND_PGTO`
   do C100 é marcado "O" nas duas colunas do Guia — entrada e saída — e o
   arquivo saía com ele vazio, o que faz o validador recusar. O dado sempre

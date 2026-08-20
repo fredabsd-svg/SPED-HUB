@@ -21,10 +21,20 @@ import re
 
 from src.settings import get_settings
 
-# CNPJ (14 dígitos, com ou sem pontuação) e CPF (11).  A raiz é mascarada e a
+# CNPJ (14 posições, com ou sem pontuação) e CPF (11).  A raiz é mascarada e a
 # cauda preservada: dá para casar a linha de log com o registro certo durante
 # uma investigação, sem que o documento completo fique gravado.
-_CNPJ = re.compile(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b")
+#
+# As doze primeiras posições aceitam letra desde o CNPJ alfanumérico (IN RFB
+# 2.229/2024, em produção desde 31/07/2026); os dois DV seguem numéricos.  Com
+# `\d` no lugar de `[0-9A-Z]`, todo CNPJ do formato novo passava batido pelo
+# sanitizador e ia inteiro para o log.
+#
+# Aceitar letra amplia o que casa, e algum identificador de catorze posições
+# terminado em dois algarismos pode ser mascarado sem ser CNPJ.  É a troca
+# certa: log mascarado demais se relê pela origem, log de menos não se
+# desfaz.
+_CNPJ = re.compile(r"\b[0-9A-Z]{2}\.?[0-9A-Z]{3}\.?[0-9A-Z]{3}/?[0-9A-Z]{4}-?\d{2}\b")
 _CPF = re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")
 _EMAIL = re.compile(r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
 # Tokens de sessão (128 hex) e API keys (prefixo spd_).
@@ -33,9 +43,14 @@ _API_KEY = re.compile(r"\bspd_[0-9a-f]{8,}\b")
 
 
 def _mascarar_cnpj(match: re.Match) -> str:
-    """``12.345.678/0001-95`` → ``**.***.***/0001-95`` (mantém filial e DV)."""
-    digitos = re.sub(r"\D", "", match.group(0))
-    return f"**.***.***/{digitos[8:12]}-{digitos[12:]}"
+    """``12.345.678/0001-95`` → ``**.***.***/0001-95`` (mantém filial e DV).
+
+    A limpeza tira só a pontuação, não "tudo que não é dígito": num CNPJ
+    alfanumérico o segundo caminho apagaria as letras e a cauda mostrada
+    seria a de outra inscrição.
+    """
+    posicoes = re.sub(r"[.\-/]", "", match.group(0))
+    return f"**.***.***/{posicoes[8:12]}-{posicoes[12:]}"
 
 
 def _mascarar_cpf(match: re.Match) -> str:

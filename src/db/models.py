@@ -544,7 +544,9 @@ class Partida(Base):
     cod_ccus: Mapped[str | None] = mapped_column(String(255))
     vl_dc: Mapped[float] = mapped_column(nullable=False, default=0.0)
     ind_dc: Mapped[str] = mapped_column(String(1), nullable=False)  # D/C
-    num_arq: Mapped[int | None] = mapped_column()
+    # "Número, Código ou caminho de localização dos documentos arquivados"
+    # — o manual declara o campo como texto, e caminho não cabe em inteiro.
+    num_arq: Mapped[str | None] = mapped_column(String(255))
     cod_hist_pad: Mapped[str | None] = mapped_column(String(255))
     hist: Mapped[str | None] = mapped_column(Text)
     cod_part: Mapped[str | None] = mapped_column(String(255))
