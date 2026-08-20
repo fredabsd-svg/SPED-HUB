@@ -1515,3 +1515,173 @@ class TestCnpjAlfanumericoPelaCLI:
         with get_session(engine) as sessao:
             assert sessao.execute(select(Empresa)).scalars().one().cnpj == self.CNPJ_NOVO
         engine.dispose()
+
+
+# ── Fase 80 — o cofre do certificado A1 pela linha de comando ─────────────
+
+
+class TestCofreDeCertificadosPelaCLI:
+    """Guardar o A1 de uma empresa e ver o que há no cofre, sem abri-lo.
+
+    O que estas asserções protegem não é a funcionalidade, é a promessa: o
+    PFX e a senha **não podem** estar legíveis no banco. Cifrar e depois
+    gravar o original ao lado seria funcionalmente idêntico e completamente
+    inútil, e nenhum teste de "guardou?" pegaria isso.
+    """
+
+    SENHA = "senha-do-pfx"
+
+    @pytest.fixture
+    def banco(self, tmp_path) -> str:
+        from src.db.models import Empresa as _Empresa
+
+        caminho = str(tmp_path / "cofre.db")
+        engine = criar_engine(caminho)
+        init_db(engine)
+        with get_session(engine) as sessao:
+            sessao.add(Escritorio(nome="Teste", slug="teste"))
+            sessao.commit()
+            sessao.add(
+                _Empresa(
+                    cnpj="12345678000195",
+                    nome="COMERCIO EXEMPLO LTDA",
+                    uf="SP",
+                    escritorio_id=1,
+                )
+            )
+            sessao.commit()
+        engine.dispose()
+        return caminho
+
+    @pytest.fixture
+    def com_chave(self, monkeypatch):
+        import base64
+
+        from src.settings import reset_settings_cache
+
+        monkeypatch.setenv(
+            "SPED_HUB_CERTIFICATE_MASTER_KEY", base64.b64encode(b"\x07" * 32).decode()
+        )
+        reset_settings_cache()
+        yield
+        reset_settings_cache()
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def pfx(cls) -> bytes:
+        """Gerado uma vez por classe: RSA de 2048 bits não é barato."""
+        from tests.fixtures_certificado import pfx_de_teste
+
+        return pfx_de_teste()
+
+    def _arquivo(self, tmp_path: Path, pfx: bytes) -> Path:
+        caminho = tmp_path / "empresa.pfx"
+        caminho.write_bytes(pfx)
+        return caminho
+
+    def _guardar(self, banco: str, tmp_path: Path, pfx: bytes, **extras) -> int:
+        return main(
+            ["certificado", "guardar", "--empresa", extras.get("empresa", "1")]
+            + ["--arquivo", str(self._arquivo(tmp_path, pfx))]
+            + ["--senha", extras.get("senha", self.SENHA), "--db", banco]
+        )
+
+    def test_o_certificado_entra_no_cofre(self, banco, tmp_path, pfx, com_chave):
+        from src.db.models import CertificadoDigital
+
+        assert self._guardar(banco, tmp_path, pfx) == 0
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            guardado = sessao.execute(select(CertificadoDigital)).scalars().one()
+        engine.dispose()
+
+        assert guardado.cnpj == "12345678000195"
+        assert "COMERCIO EXEMPLO LTDA" in guardado.titular
+
+    def test_o_pfx_e_a_senha_nao_ficam_legiveis_no_banco(self, banco, tmp_path, pfx, com_chave):
+        """A asserção que dá sentido ao resto."""
+        assert self._guardar(banco, tmp_path, pfx) == 0
+
+        bruto = Path(banco).read_bytes()
+
+        assert pfx not in bruto, "o PFX está no banco em claro"
+        assert self.SENHA.encode() not in bruto, "a senha está no banco em claro"
+
+    def test_o_cofre_reabre_o_que_guardou(self, banco, tmp_path, pfx, com_chave):
+        from src import certificados
+        from src.db.models import CertificadoDigital
+
+        assert self._guardar(banco, tmp_path, pfx) == 0
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            guardado = sessao.execute(select(CertificadoDigital)).scalars().one()
+            envelope_pfx, envelope_senha = guardado.envelope_pfx, guardado.envelope_senha
+        engine.dispose()
+
+        assert certificados.abrir(envelope_pfx) == pfx
+        assert certificados.abrir(envelope_senha) == self.SENHA.encode()
+
+    def test_sem_a_chave_mestra_o_comando_recusa(self, banco, tmp_path, pfx, monkeypatch, caplog):
+        from src.settings import reset_settings_cache
+
+        monkeypatch.setenv("SPED_HUB_CERTIFICATE_MASTER_KEY", "")
+        reset_settings_cache()
+
+        assert self._guardar(banco, tmp_path, pfx) == 1
+        assert "MASTER_KEY" in caplog.text
+
+    def test_senha_errada_e_recusada_antes_de_guardar(self, banco, tmp_path, pfx, com_chave):
+        from src.db.models import CertificadoDigital
+
+        assert self._guardar(banco, tmp_path, pfx, senha="nao-e-essa") == 1
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            assert sessao.execute(select(CertificadoDigital)).scalars().all() == []
+        engine.dispose()
+
+    def test_certificado_de_outro_cnpj_e_recusado(self, banco, tmp_path, com_chave, caplog):
+        """Assinar com o certificado errado faz o Fisco recusar tudo."""
+        from tests.fixtures_certificado import pfx_de_teste
+
+        de_outra = pfx_de_teste(cnpj="98765432000198", nome="OUTRA EMPRESA LTDA")
+
+        from src.db.models import CertificadoDigital
+
+        assert self._guardar(banco, tmp_path, de_outra) == 1
+        # A cauda distingue um CNPJ do outro, e aparece tanto no texto cru
+        # quanto no mascarado.  Se o mascaramento em si fosse conferido aqui,
+        # o teste dependeria de `configurar_logging` ter rodado antes — o que
+        # muda com a ordem da suíte.  O sanitizador é conferido onde ele é
+        # montado de propósito: `tests/test_cnpj.py::TestLogNaoVazaOCnpjNovo`.
+        assert "0001-98" in caplog.text and "0001-95" in caplog.text
+
+        engine = criar_engine(banco)
+        with get_session(engine) as sessao:
+            assert sessao.execute(select(CertificadoDigital)).scalars().all() == []
+        engine.dispose()
+
+    def test_a_listagem_mostra_a_validade_sem_abrir_o_cofre(
+        self, banco, tmp_path, pfx, com_chave, capsys
+    ):
+        assert self._guardar(banco, tmp_path, pfx) == 0
+        capsys.readouterr()
+
+        assert main(["certificado", "listar", "--db", banco]) == 0
+
+        saida = capsys.readouterr().out
+        assert "12.345.678/0001-95" in saida
+        assert self.SENHA not in saida
+
+    def test_certificado_vencendo_aparece_com_aviso(self, banco, tmp_path, com_chave, capsys):
+        from tests.fixtures_certificado import pfx_de_teste
+
+        quase = pfx_de_teste(dias_de_validade=10)
+        assert self._guardar(banco, tmp_path, quase) == 0
+        capsys.readouterr()
+
+        main(["certificado", "listar", "--db", banco])
+
+        assert "vence em" in capsys.readouterr().out

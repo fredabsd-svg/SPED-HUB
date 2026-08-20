@@ -687,6 +687,125 @@ def cmd_usuario(args):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def cmd_certificado(args):
+    """Guarda e mostra o certificado A1 de uma empresa.
+
+    A senha é pedida sem eco quando não vem por argumento: senha em linha de
+    comando fica no histórico do shell e no `ps` de quem estiver na máquina.
+    """
+    import getpass
+
+    from sqlalchemy.orm import Session
+
+    from src import certificados
+    from src.cnpj import formatar as formatar_cnpj
+    from src.db.models import CertificadoDigital, Empresa
+
+    engine = criar_engine(args.db) if args.db else criar_engine()
+    try:
+        with Session(engine) as sessao:
+            if args.acao == "listar":
+                return _listar_certificados(sessao, args)
+
+            empresa = sessao.get(Empresa, args.empresa)
+            if empresa is None:
+                logger.error("Empresa %s não encontrada.", args.empresa)
+                return 1
+
+            caminho = Path(args.arquivo)
+            if not caminho.is_file():
+                logger.error("Arquivo não encontrado: %s", caminho)
+                return 1
+
+            senha = args.senha or getpass.getpass("Senha do certificado: ")
+            pfx = caminho.read_bytes()
+            try:
+                dados = certificados.ler(pfx, senha)
+            except certificados.CertificadoIlegivel as erro:
+                # Sem `exception`: o traceback da biblioteca traz o caminho do
+                # arquivo e não ajuda quem só digitou a senha errada.
+                logger.error("%s", erro)
+                return 1
+
+            if dados.cnpj and empresa.cnpj and dados.cnpj != empresa.cnpj:
+                logger.error(
+                    "O certificado é de %s e a empresa %s é %s. Guardar o "
+                    "certificado errado faz o Fisco recusar tudo o que for "
+                    "assinado com ele.",
+                    formatar_cnpj(dados.cnpj),
+                    empresa.id,
+                    formatar_cnpj(empresa.cnpj),
+                )
+                return 1
+
+            try:
+                guardado = CertificadoDigital(
+                    empresa_id=empresa.id,
+                    envelope_pfx=certificados.guardar(pfx).serializar(),
+                    envelope_senha=certificados.guardar(senha).serializar(),
+                    titular=dados.titular[:255],
+                    emissor=dados.emissor[:255],
+                    valido_de=dados.valido_de,
+                    valido_ate=dados.valido_ate,
+                    fingerprint=dados.fingerprint,
+                    cnpj=dados.cnpj,
+                )
+            except certificados.CofreIndisponivel as erro:
+                logger.error("%s", erro)
+                return 1
+
+            sessao.add(guardado)
+            sessao.commit()
+            logger.info(
+                "Certificado de %s guardado (empresa %s), válido até %s.",
+                dados.titular,
+                empresa.id,
+                f"{dados.valido_ate:%d/%m/%Y}",
+            )
+            if aviso := dados.aviso_de_vencimento():
+                logger.warning("%s", aviso)
+            return 0
+    finally:
+        engine.dispose()
+
+
+def _listar_certificados(sessao, args) -> int:
+    """O que há no cofre — sem abrir o cofre."""
+    from sqlalchemy import select
+
+    from src import certificados
+    from src.cnpj import formatar as formatar_cnpj
+    from src.db.models import CertificadoDigital
+
+    consulta = select(CertificadoDigital).order_by(CertificadoDigital.valido_ate)
+    if args.empresa:
+        consulta = consulta.where(CertificadoDigital.empresa_id == args.empresa)
+    guardados = sessao.execute(consulta).scalars().all()
+    if not guardados:
+        print("Nenhum certificado guardado.")
+        return 0
+
+    print(f"\n{'ID':>4}  {'Empresa':>7}  {'CNPJ':20} {'Validade':12} {'Dias':>5}  Titular")
+    for c in guardados:
+        dados = certificados.DadosDoCertificado(
+            titular=c.titular,
+            emissor=c.emissor,
+            valido_de=c.valido_de,
+            valido_ate=c.valido_ate,
+            fingerprint=c.fingerprint,
+            cnpj=c.cnpj,
+        )
+        dias = dados.dias_para_vencer()
+        print(
+            f"{c.id:>4}  {c.empresa_id:>7}  {formatar_cnpj(c.cnpj):20} "
+            f"{c.valido_ate:%d/%m/%Y}   {dias:>5}  {c.titular[:48]}"
+        )
+        if aviso := dados.aviso_de_vencimento():
+            print(f"        ⚠  {aviso}")
+    print()
+    return 0
+
+
 def cmd_migrar_dados(args):
     """Copia o conteúdo de um banco para outro (SQLite → PostgreSQL)."""
     from src.db.migrations import (
@@ -851,6 +970,16 @@ def main(argv: list[str] | None = None) -> int:
     p_usr.add_argument("--escritorio", type=int, help="ID do escritório dono")
     p_usr.add_argument("--db", default=None, help="Banco (URL ou caminho SQLite)")
 
+    p_cert = sub.add_parser("certificado", help="Guardar e listar certificados A1")
+    p_cert.add_argument("acao", choices=["guardar", "listar"], help="guardar | listar")
+    p_cert.add_argument("--empresa", type=int, help="ID da empresa dona do certificado")
+    p_cert.add_argument("--arquivo", help="Caminho do PFX/P12 (obrigatório em `guardar`)")
+    p_cert.add_argument(
+        "--senha",
+        help="Senha do PFX; sem ela, é pedida sem eco no terminal",
+    )
+    p_cert.add_argument("--db", default=None, help="Banco (URL ou caminho SQLite)")
+
     # fiscal
     cli_fiscal.registrar(sub)
 
@@ -874,6 +1003,11 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_migrar_dados(args)
     elif args.comando == "usuario":
         return cmd_usuario(args)
+    elif args.comando == "certificado":
+        if args.acao == "guardar" and not (args.empresa and args.arquivo):
+            logger.error("`certificado guardar` exige --empresa e --arquivo.")
+            return 1
+        return cmd_certificado(args)
     elif args.comando == "fiscal":
         if erro := cli_fiscal.conferir_argumentos(args):
             print(erro)

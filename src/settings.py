@@ -94,6 +94,17 @@ class Settings:
     # necessidade real de assinatura global — não confie nela como proteção.
     secret_key: str = "change-me-in-production"
 
+    # Chave mestra do cofre de certificados, em base64 de 32 bytes.  Fica
+    # FORA do banco de propósito: cifrar o PFX com uma chave guardada ao lado
+    # dele protege contra quase nada — quem lê o banco lê os dois.
+    #
+    # Vazia por padrão, e o cofre recusa operar assim em vez de inventar uma
+    # chave: cifra com chave previsível dá a aparência de proteção sem a
+    # proteção, que é pior do que não cifrar.
+    #
+    # Gerar com:  openssl rand -base64 32
+    certificate_master_key: str = ""
+
     # Banco de dados
     database_url: str = "sqlite:///./sped_hub.db"
     database_echo: bool = False
@@ -233,6 +244,7 @@ class Settings:
 _ENV_TO_FIELD: Mapping[str, str] = {
     "SPED_HUB_ENV": "env",
     "SPED_HUB_SECRET_KEY": "secret_key",
+    "SPED_HUB_CERTIFICATE_MASTER_KEY": "certificate_master_key",
     "DATABASE_URL": "database_url",
     "SPED_HUB_DB_ECHO": "database_echo",
     "SPED_HUB_LOG_LEVEL": "log_level",
