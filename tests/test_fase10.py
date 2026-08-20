@@ -166,7 +166,7 @@ def db_comparar():
                 ),
                 "vl_lcto": r.get("VL_LCTO", 0.0) or 0.0,
                 "ind_lcto": r.get("IND_LCTO", "N"),
-                "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
+                "num_arq": r.get("NUM_ARQ") or None,
             }
         )
     repo.inserir_lancamentos(ecd.id, lancs)
@@ -185,7 +185,7 @@ def db_comparar():
                 "cod_ccus": r.get("COD_CCUS", ""),
                 "vl_dc": r.get("VL_DC", 0.0) or 0.0,
                 "ind_dc": r.get("IND_DC", "D"),
-                "num_arq": int(r.get("NUM_ARQ", 0)) if r.get("NUM_ARQ") else None,
+                "num_arq": r.get("NUM_ARQ") or None,
                 "cod_hist_pad": r.get("COD_HIST_PAD", ""),
                 "hist": r.get("HIST", ""),
                 "cod_part": r.get("COD_PART", ""),

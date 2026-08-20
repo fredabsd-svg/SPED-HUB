@@ -14,6 +14,19 @@
 # cria via registro I020 quando IDENT_MF do 0000 é "S".  Como o parser lê por
 # posição e esses campos vêm no fim da linha, ignorá-los é correto.
 
+# O `tipo` diz ao parser **como ler** o campo, e nem sempre coincide com o que
+# o manual declara.  Nos três casos abaixo a divergência é deliberada, porque
+# ler como número perderia o valor:
+#
+#   0000/17 TIP_ECD          manual N, aqui C — indicador de uma posição
+#   0000/21 IND_CENTRALIZADA manual N, aqui C — idem
+#   J210/02 IND_TIP          manual N, aqui C — idem
+#
+# São indicadores de um caractere cujo conteúdo é "0" ou "1": lidos como
+# número viram `0.0` e `1.0`, e quem os compara com "0" passa a errar sempre.
+# Qualquer outra divergência de tipo é defeito, e `tests/test_cnpj.py` cobra
+# esta lista para que uma nova não entre em silêncio.
+
 versao: "9"
 ano_base: 2020
 conferido_contra: "Manual do Leiaute 9 da ECD — Anexo ao ADE Cofis nº 01/2026 (janeiro de 2026)"
@@ -33,7 +46,7 @@ registros:
       - { nome: DT_INI, tipo: N, tamanho: 8, obrigatorio: true, posicao: 3 }
       - { nome: DT_FIN, tipo: N, tamanho: 8, obrigatorio: true, posicao: 4 }
       - { nome: NOME, tipo: C, tamanho: 150, obrigatorio: true, posicao: 5 }
-      - { nome: CNPJ, tipo: N, tamanho: 14, obrigatorio: true, posicao: 6 }
+      - { nome: CNPJ, tipo: C, tamanho: 14, obrigatorio: true, posicao: 6 }
       - { nome: UF, tipo: C, tamanho: 2, obrigatorio: true, posicao: 7 }
       - { nome: IE, tipo: C, tamanho: 14, obrigatorio: false, posicao: 8 }
       - { nome: COD_MUN, tipo: N, tamanho: 7, obrigatorio: true, posicao: 9 }
@@ -45,7 +58,7 @@ registros:
       - { nome: COD_HASH_SUB, tipo: C, tamanho: 40, obrigatorio: false, posicao: 15 }
       - { nome: IND_GRANDE_PORTE, tipo: N, tamanho: 1, obrigatorio: true, posicao: 16 }
       - { nome: TIP_ECD, tipo: C, tamanho: 1, obrigatorio: true, posicao: 17 }
-      - { nome: COD_SCP, tipo: N, tamanho: 14, obrigatorio: false, posicao: 18 }
+      - { nome: COD_SCP, tipo: C, tamanho: 14, obrigatorio: false, posicao: 18 }
       - { nome: IDENT_MF, tipo: C, tamanho: 1, obrigatorio: true, posicao: 19 }
       - { nome: IND_ESC_CONS, tipo: C, tamanho: 1, obrigatorio: true, posicao: 20 }
       - { nome: IND_CENTRALIZADA, tipo: C, tamanho: 1, obrigatorio: false, posicao: 21 }
@@ -227,7 +240,7 @@ registros:
       - { nome: COD_CCUS, tipo: C, tamanho: 255, obrigatorio: false, posicao: 3 }
       - { nome: VL_DC, tipo: N, tamanho: 19, obrigatorio: true, posicao: 4 }
       - { nome: IND_DC, tipo: C, tamanho: 1, obrigatorio: true, posicao: 5 }
-      - { nome: NUM_ARQ, tipo: N, tamanho: 10, obrigatorio: false, posicao: 6 }
+      - { nome: NUM_ARQ, tipo: C, tamanho: 255, obrigatorio: false, posicao: 6 }
       - { nome: COD_HIST_PAD, tipo: C, tamanho: 255, obrigatorio: false, posicao: 7 }
       - { nome: HIST, tipo: C, tamanho: 255, obrigatorio: false, posicao: 8 }
       - { nome: COD_PART, tipo: C, tamanho: 255, obrigatorio: false, posicao: 9 }

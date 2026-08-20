@@ -17,6 +17,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.cnpj import normalizar as normalizar_cnpj
 from src.db.models import (
     ECD,
     Aglutinacao,
@@ -315,7 +316,10 @@ class ECDImportService:
             if header_0000 is None:
                 raise ECDImportError("Arquivo não contém registro 0000")
 
-            cnpj = _digits(header_0000.get("CNPJ"), 14)
+            # `_digits` comeria as letras: num CNPJ alfanumérico isso não
+            # devolve um CNPJ errado, devolve o de outra empresa, com aparência
+            # perfeita.  A ECD é o arquivo que **cria** a empresa no banco.
+            cnpj = normalizar_cnpj(header_0000.get("CNPJ"))
             company_query = select(Empresa).where(Empresa.cnpj == cnpj)
             if escritorio_id is None:
                 company_query = company_query.where(Empresa.escritorio_id.is_(None))
@@ -528,7 +532,7 @@ class ECDImportService:
                         cod_ccus=record.get("COD_CCUS") or None,
                         vl_dc=record.get("VL_DC") or 0.0,
                         ind_dc=record.get("IND_DC") or "D",
-                        num_arq=_optional_int(record.get("NUM_ARQ")),
+                        num_arq=record.get("NUM_ARQ") or None,
                         cod_hist_pad=record.get("COD_HIST_PAD") or None,
                         hist=record.get("HIST") or None,
                         cod_part=record.get("COD_PART") or None,

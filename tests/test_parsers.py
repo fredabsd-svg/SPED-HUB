@@ -38,7 +38,11 @@ class TestParser:
         r0000 = [r for r in registros if r["_reg"] == "0000"]
         assert len(r0000) == 1
         assert r0000[0]["NOME"] == "EMPRESA EXEMPLO LTDA"
-        assert r0000[0]["CNPJ"] == 123456000199.0
+        # O manual declara o CNPJ do 0000 como "C 014", e é texto mesmo: com
+        # `tipo: N` o parser devolvia `123456000199.0` — sem os dois zeros à
+        # esquerda que estão no arquivo, e `None` para CNPJ alfanumérico.
+        # Esta asserção cravava o valor já estragado.
+        assert r0000[0]["CNPJ"] == "00123456000199"
 
     def test_registro_i010(self):
         parser = ECDParser()
