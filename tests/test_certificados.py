@@ -41,6 +41,39 @@ def pfx() -> bytes:
     return pfx_de_teste()
 
 
+class TestAFixtureNaoDependeDeOrdem:
+    """`pkcs12` é submódulo de `serialization`, não atributo.
+
+    Sem import explícito, `serialization.pkcs12` só resolve se algo já o
+    tiver importado no mesmo processo. Aqui, `rsa` e `x509` acabam
+    importando-o de forma transitiva antes da chamada; no Python 3.12 do CI,
+    com `cryptography` mais nova, não importam — e a fixture quebrou lá
+    depois de passar em toda a suíte local.
+
+    A conferência é do código-fonte de propósito. Um teste de comportamento
+    passaria neste ambiente com e sem o defeito, que é o mesmo que não
+    testar; a linha de import ou está lá ou não está.
+    """
+
+    def test_a_fixture_importa_o_submodulo_explicitamente(self):
+        from pathlib import Path
+
+        fonte = Path("tests/fixtures_certificado.py").read_text(encoding="utf-8")
+
+        assert "from cryptography.hazmat.primitives.serialization import pkcs12" in fonte
+        assert (
+            "serialization.pkcs12" not in fonte
+        ), "acesso por atributo depende de outro módulo ter importado antes"
+
+    def test_o_modulo_do_cofre_tambem(self):
+        from pathlib import Path
+
+        fonte = Path("src/certificados.py").read_text(encoding="utf-8")
+
+        assert "import Encoding, pkcs12" in fonte
+        assert "serialization.pkcs12" not in fonte
+
+
 class TestOCofreSemChave:
     """Sem a chave mestra o cofre para, em vez de inventar uma."""
 

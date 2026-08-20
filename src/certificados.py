@@ -37,7 +37,7 @@ import re
 from dataclasses import dataclass
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.hazmat.primitives.serialization import Encoding, pkcs12
 
 from src.settings import get_settings
 
@@ -201,8 +201,6 @@ def ler(pfx: bytes, senha: str) -> DadosDoCertificado:
     entre "o arquivo está corrompido" e "digitaram a senha errada", e quem
     cadastra precisa saber qual dos dois.
     """
-    from cryptography.hazmat.primitives.serialization import pkcs12
-
     try:
         _, certificado, _ = pkcs12.load_key_and_certificates(
             pfx, senha.encode("utf-8") if senha else None

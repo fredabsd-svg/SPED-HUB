@@ -12,6 +12,11 @@ import datetime
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+
+# `pkcs12` é submódulo, não atributo: sem este import ele só existe se
+# algum outro módulo já o tiver importado no mesmo processo.  Foi o que
+# escondeu o defeito aqui e o mostrou no CI, com outra ordem de coleta.
+from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import NameOID
 
 SENHA_PADRAO = "senha-do-pfx"
@@ -49,7 +54,7 @@ def pfx_de_teste(
         .not_valid_after(agora + datetime.timedelta(days=dias_de_validade))
         .sign(chave, hashes.SHA256())
     )
-    return serialization.pkcs12.serialize_key_and_certificates(
+    return pkcs12.serialize_key_and_certificates(
         b"teste",
         chave,
         certificado,
