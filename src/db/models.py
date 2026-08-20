@@ -437,6 +437,52 @@ class SaldoResultado(Base):
     )
 
 
+# ── Certificado digital ────────────────────────────────────────────────────
+
+
+class CertificadoDigital(Base):
+    """O certificado A1 de uma empresa, cifrado.
+
+    Duas colunas de envelope, não uma: o PFX e a senha são segredos com vidas
+    diferentes, e um vazamento parcial não deve entregar o par.  Nenhuma das
+    duas é legível sem a chave mestra, que vive fora do banco.
+
+    Os campos abaixo dos envelopes são só os públicos do certificado — os
+    mesmos que qualquer navegador exibe.  Existem para responder "está
+    vencendo?" e "é da empresa certa?" sem abrir o cofre.
+    """
+
+    __tablename__ = "certificados_digitais"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_id: Mapped[int] = mapped_column(ForeignKey("empresas.id"), nullable=False, index=True)
+
+    envelope_pfx: Mapped[str] = mapped_column(Text, nullable=False)
+    envelope_senha: Mapped[str] = mapped_column(Text, nullable=False)
+
+    titular: Mapped[str] = mapped_column(String(255), nullable=False)
+    emissor: Mapped[str] = mapped_column(String(255), nullable=False)
+    valido_de: Mapped[datetime.date] = mapped_column(nullable=False)
+    valido_ate: Mapped[datetime.date] = mapped_column(nullable=False, index=True)
+    # SHA-256 do certificado em DER — identifica o arquivo sem guardá-lo.
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # CNPJ lido do titular; texto, e alfanumérico desde 31/07/2026.
+    cnpj: Mapped[str | None] = mapped_column(String(14), index=True)
+
+    criado_em: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=lambda: datetime.datetime.now(datetime.UTC)
+    )
+    substituido_em: Mapped[datetime.datetime | None] = mapped_column(DateTime)
+
+    empresa: Mapped["Empresa"] = relationship()
+
+    __table_args__ = (
+        # O mesmo arquivo pode ser recadastrado depois de substituído, mas não
+        # duas vezes ativo para a mesma empresa.
+        UniqueConstraint("empresa_id", "fingerprint", name="uq_certificado_empresa"),
+    )
+
+
 # ── Demonstrações publicadas (bloco J) ─────────────────────────────────────
 #
 # O bloco J é a terceira camada da contabilidade, e a que faltava: o balanço e

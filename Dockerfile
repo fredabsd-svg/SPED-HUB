@@ -19,7 +19,7 @@ RUN poetry config virtualenvs.create false \
         "openpyxl>=3.1" \
         "weasyprint>=60" "pyyaml>=6.0" "python-dateutil>=2.8" "unidecode>=1.3" \
         "python-multipart>=0.0.9" "uvicorn>=0.30" "strawberry-graphql>=0.200" \
-        "redis>=5.0" "playwright>=1.40"
+        "redis>=5.0" "playwright>=1.40" "cryptography>=41.0"
 
 FROM python:3.11-slim AS runtime
 

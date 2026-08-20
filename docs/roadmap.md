@@ -73,7 +73,7 @@ entra e por quê — está em
 
 | Item | Situação | Marcador de ausência |
 |---|---|---|
-| Certificado digital A1 guardado com segurança | Pré-requisito de qualquer consulta automática. Cifra autenticada para o PFX, senha cifrada à parte, chave mestra fora do banco, aviso de vencimento e bloqueio de certificado vencido | `src.certificados:CofreDeCertificados` |
+| Rotação da chave mestra do cofre | O envelope já carrega a versão da chave; falta o comando que relê tudo com a chave nova. Sem ele, trocar a chave torna os envelopes ilegíveis | `src.certificados:rotacionar` |
 | Cursor de sincronização por NSU | Modelo, travamento por empresa e máquina de estados são construíveis sem depender de terceiro; só a chamada ao serviço não é | `src.integracoes.cursor:CursorDeSincronizacao` |
 | Consulta automática de NF-e por Distribuição de DF-e | O item de maior valor do documento de origem e o de mais dependências: certificado, biblioteca nativa, assinatura ACBr Pro e homologação | `externo` — depende de certificado A1 do escritório e de assinatura ACBr Pro, cujos binários não são redistribuíveis |
 | Matriz de capacidades por município/provedor de NFS-e | A §8.1 aplicada a integração: declarar o que foi homologado, contra o quê e quando, e mostrar "não suportado" em vez de deixar o usuário descobrir no fechamento | `src.integracoes.capacidades:MatrizDeCapacidades` |

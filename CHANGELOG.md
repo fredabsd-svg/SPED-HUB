@@ -35,6 +35,19 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **O certificado A1 da empresa passou a ser guardado, cifrado.** É o
+  pré-requisito de qualquer consulta automática a webservice fiscal, e o dado
+  mais sensível que o sistema chega a tocar: com o arquivo e a senha, quem os
+  tiver assina documento fiscal como a empresa. O arquivo e a senha vão em
+  envelopes separados, com cifra autenticada, e a chave mestra vive fora do
+  banco — cifrar com uma chave guardada ao lado do texto cifrado protege
+  contra quase nada. Sem a chave no ambiente o cofre **recusa operar** em vez
+  de cair numa chave padrão: aparência de proteção é pior que nenhuma, porque
+  ninguém vai atrás.
+- **`sped-hub certificado guardar` e `listar`.** A senha é pedida sem eco
+  quando não vem por argumento. Guardar recusa o certificado de outro CNPJ —
+  assinar com o errado faz o Fisco recusar tudo — e a listagem mostra validade
+  e aviso de vencimento sem abrir o cofre, aos 60, 30, 15 e 7 dias.
 - **O balanço e a DRE publicados na ECD passaram a ser guardados.** O bloco J
   traz as demonstrações **como a empresa as declarou** — e eram lidas e
   jogadas fora: o programa guardava só o que ele recalcula a partir dos
