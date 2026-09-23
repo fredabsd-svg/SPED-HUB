@@ -430,9 +430,9 @@ class TestTemplatesFase11:
         templates_to_check = ["base.html", "comparar.html", "layout.html"]
         for tpl_name in templates_to_check:
             template = raiz / tpl_name
-            assert 'include "partials/navigation.html"' in template.read_text(), (
-                f"{tpl_name} não inclui a navegação compartilhada"
-            )
+            assert (
+                'include "partials/navigation.html"' in template.read_text()
+            ), f"{tpl_name} não inclui a navegação compartilhada"
 
         navigation = raiz / "partials" / "navigation.html"
         assert "/webhooks" in navigation.read_text()
