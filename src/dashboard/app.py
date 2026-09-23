@@ -2361,7 +2361,9 @@ async def classificar_exportar_csv(
 
     async def exportar_linhas():
         saida = io.StringIO(newline="")
-        escritor = csv.writer(saida, delimiter=";", quoting=csv.QUOTE_ALL, lineterminator="\r\n")
+        escritor = csv.writer(
+            saida, delimiter=";", quoting=csv.QUOTE_ALL, lineterminator="\r\n"
+        )
         try:
             escritor.writerow(
                 [
@@ -2387,18 +2389,28 @@ async def classificar_exportar_csv(
                     await asyncio.sleep(0)
                     continue
                 documento = proposta["documento"]
-                emissao = documento.data_emissao.isoformat() if documento.data_emissao else ""
+                emissao = (
+                    documento.data_emissao.isoformat() if documento.data_emissao else ""
+                )
                 for sugestao in proposta["resultado"].sugestoes:
-                    impacto = fmt_moeda(sugestao.impacto) if sugestao.impacto is not None else "—"
+                    impacto = (
+                        fmt_moeda(sugestao.impacto)
+                        if sugestao.impacto is not None
+                        else "—"
+                    )
                     modelo = (
-                        ItemDocumentoFiscal if sugestao.item_id is not None else DocumentoFiscal
+                        ItemDocumentoFiscal
+                        if sugestao.item_id is not None
+                        else DocumentoFiscal
                     )
                     coluna_textual = _coluna_fiscal_e_texto(modelo, sugestao.campo)
-                    anterior_textual = coluna_textual and _planilha_pode_converter_texto(
-                        sugestao.valor_anterior
+                    anterior_textual = (
+                        coluna_textual
+                        and _planilha_pode_converter_texto(sugestao.valor_anterior)
                     )
-                    sugerido_textual = coluna_textual and _planilha_pode_converter_texto(
-                        sugestao.valor_sugerido
+                    sugerido_textual = (
+                        coluna_textual
+                        and _planilha_pode_converter_texto(sugestao.valor_sugerido)
                     )
                     escritor.writerow(
                         (
@@ -2433,7 +2445,9 @@ async def classificar_exportar_csv(
         exportar_linhas(),
         media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": 'attachment; filename="sped-hub-propostas-classificacao.csv"',
+            "Content-Disposition": (
+                'attachment; filename="sped-hub-propostas-classificacao.csv"'
+            ),
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
         },

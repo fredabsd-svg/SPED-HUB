@@ -45,6 +45,12 @@
         botao.addEventListener("click", function () { abrir(botao); });
     });
 
+    dialog.addEventListener("keydown", function (evento) {
+        if (evento.key !== "Escape") return;
+        evento.preventDefault();
+        dialog.close();
+    });
+
     document.addEventListener("keydown", function (evento) {
         if ((evento.ctrlKey || evento.metaKey) && evento.key.toLowerCase() === "k") {
             const alvo = evento.target;

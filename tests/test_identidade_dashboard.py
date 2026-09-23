@@ -110,7 +110,10 @@ class TestGraficosAcessiveis:
         ]
 
         for pagina in paginas:
-            assert 'name="robots" content="noindex, nofollow"' in pagina.read_text("utf-8")
+            assert (
+                'name="robots" content="noindex, nofollow"'
+                in pagina.read_text("utf-8")
+            )
 
 
 class TestNavbarAnonima:
