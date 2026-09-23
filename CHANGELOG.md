@@ -9,6 +9,11 @@ interno da implementação.
 ## [Não publicado]
 
 ### Alterado
+- **A importação de ECD agora mostra o andamento até terminar.** A tela envia
+  o arquivo para processamento em segundo plano, informa o progresso e deixa
+  claro quando a escrituração foi gravada ou quando houve um erro. As abas e a
+  área de seleção ocupam a largura disponível; o nome do arquivo não fica por
+  cima do controle.
 - **A navegação agora acompanha o fluxo de trabalho.** As telas ficaram
   agrupadas por tarefa, os atalhos de administração aparecem apenas para
   administradores, e o menu funciona em telas estreitas. `Ctrl+K`/`Cmd+K`

@@ -18,7 +18,7 @@ vem de `reports/`.
 |---|---|
 | Autenticação | `/login`, `/register`, `POST /api/login`, `POST /api/register`, `/logout` |
 | Páginas | `/`, `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/classificar/exportar.csv`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
-| Upload | `POST /api/upload` (ECD, importa), `/api/upload-efd`, `/api/upload-ecf` (só resumo), `/api/upload-async` + `/api/jobs/*` |
+| Upload | `POST /api/upload` (ECD síncrona, compatibilidade), `/api/upload-async` + `/api/jobs/*` (importação com progresso usada pela tela), `/api/upload-efd`, `/api/upload-ecf` (só resumo) |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
 | Exportação | `/api/export/pdf`, `/xlsx`, `/multi-formato` (ZIP), `/lote` |
 | Administração (admin) | `/api/audit/*`, `/api/email/*`, `/api/worker/status`, `/api/monitoring/*`, `/api/health/full` |
@@ -176,6 +176,12 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   usuários (event loop único).
 - **O banco vem de `database_reference()`** e é relido a cada uso — antes só
   `SPED_HUB_DB` era lido e `DATABASE_URL` era ignorada em silêncio.
+- **A tela de upload usa a importação assíncrona para ECD.** O arquivo é validado
+  antes de ser salvo, processado fora do event loop e acompanhado por
+  `GET /api/jobs/{id}`. O resultado mostra quantas contas, lançamentos e
+  partidas foram importadas; falhas e cancelamentos também aparecem no painel
+  de status da página. Os painéis ECD, EFD e ECF ficam fora do flex da barra de
+  abas, para que a área de seleção preserve sua largura.
 - As APIs externas (`/api/v1`, `/api/v2/graphql`) têm autenticação própria
   por API Key — o middleware do dashboard as ignora de propósito.
 
