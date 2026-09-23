@@ -203,8 +203,10 @@ class TestLerOPfx:
 
 class TestAvisoDeVencimento:
     @staticmethod
-    def _dados(dias: int) -> certificados.DadosDoCertificado:
-        hoje = datetime.date(2026, 8, 20)
+    def _dados(
+        dias: int, hoje: datetime.date | None = None
+    ) -> certificados.DadosDoCertificado:
+        hoje = hoje or datetime.date.today()
         return certificados.DadosDoCertificado(
             titular="COMERCIO EXEMPLO LTDA",
             emissor="ICP-Brasil",
@@ -214,7 +216,7 @@ class TestAvisoDeVencimento:
             cnpj=CNPJ_DO_TITULAR,
         )
 
-    HOJE = datetime.date(2026, 8, 20)
+    HOJE = datetime.date.today()
 
     @pytest.mark.parametrize("dias", [90, 61])
     def test_com_folga_nao_avisa(self, dias):
@@ -233,5 +235,6 @@ class TestAvisoDeVencimento:
         assert aviso and "venceu há 3" in aviso
 
     def test_vencido_e_reconhecido(self):
-        assert self._dados(-1).vencido is True
-        assert self._dados(1).vencido is False
+        hoje = datetime.date.today()
+        assert self._dados(-1, hoje).vencido is True
+        assert self._dados(1, hoje).vencido is False
