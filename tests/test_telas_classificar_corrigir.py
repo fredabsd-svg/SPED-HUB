@@ -22,6 +22,9 @@ parte destes testes está:
 
 from __future__ import annotations
 
+import csv
+import io
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -161,14 +164,20 @@ def _ajustes(referencia, **filtros) -> list[AjusteFiscal]:
         return list(sessao.execute(consulta).scalars().all())
 
 
-def _regra(referencia, empresa_id):
+def _regra(
+    referencia,
+    empresa_id,
+    *,
+    nome="NCM 2203 é entrada interestadual",
+    cfop="2102",
+):
     """Uma regra que propõe CFOP 2102 para todo item com NCM 2203."""
     with get_session(criar_engine(url=referencia)) as sessao:
         criar_regra(
             sessao,
-            nome="NCM 2203 é entrada interestadual",
+            nome=nome,
             condicoes=[{"campo": "ncm", "operador": "igual", "valor": "22030000"}],
-            acoes=[{"campo": "cfop", "valor": "2102"}],
+            acoes=[{"campo": "cfop", "valor": cfop}],
             empresa_id=empresa_id,
         )
         sessao.commit()
@@ -254,6 +263,163 @@ class TestClassificarNaoGravaSozinho:
         html = _texto(cenario["cliente"].get(f"/fiscal/classificar?empresa={cenario['empresa_a']}"))
 
         assert "Nenhuma regra propõe nada" in html
+
+    def test_tela_oferece_csv_com_os_filtros_do_recorte(self, cenario):
+        _regra(cenario["referencia"], cenario["empresa_a"])
+
+        html = _texto(
+            cenario["cliente"].get(
+                f"/fiscal/classificar?empresa={cenario['empresa_a']}&de=2026-07-30"
+                "&ate=2026-07-30&obrigacao=efd_icms"
+            )
+        )
+
+        assert (
+            f'href="/fiscal/classificar/exportar.csv?empresa={cenario["empresa_a"]}'
+            "&amp;de=2026-07-30&amp;ate=2026-07-30&amp;obrigacao=efd_icms"
+        ) in html
+
+
+class TestExportarClassificacaoCSV:
+    """CSV de conferência repete as propostas e não grava alterações."""
+
+    def test_exporta_propostas_com_filtros_e_acentos_sem_gravar(self, cenario):
+        _regra(cenario["referencia"], cenario["empresa_a"])
+
+        resposta = cenario["cliente"].get(
+            f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}"
+            "&de=2026-07-30&ate=2026-07-30&obrigacao=efd_icms"
+        )
+
+        assert resposta.status_code == 200
+        assert resposta.headers["content-type"] == "text/csv; charset=utf-8"
+        assert resposta.headers["content-disposition"].endswith(
+            'filename="sped-hub-propostas-classificacao.csv"'
+        )
+        assert resposta.headers["cache-control"] == "private, no-store"
+        assert resposta.content.startswith(b"\xef\xbb\xbf")
+        linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
+
+        assert linhas[0] == [
+            "Empresa",
+            "CNPJ",
+            "Emissão",
+            "Documento",
+            "Item",
+            "Campo",
+            "Valor atual",
+            "Valor proposto",
+            "Regra",
+            "Justificativa",
+            "Impacto",
+        ]
+        assert len(linhas) == 3
+        assert all(len(linha) == len(linhas[0]) for linha in linhas)
+        assert linhas[1][0] == "CLIENTE DO A"
+        assert linhas[1][2] == "2026-07-30"
+        assert linhas[1][8] == "NCM 2203 é entrada interestadual"
+        assert _ajustes(cenario["referencia"]) == [], "exportar aplicou uma proposta"
+
+    def test_exporta_somente_o_intervalo_solicitado(self, cenario):
+        _regra(cenario["referencia"], cenario["empresa_a"])
+
+        resposta = cenario["cliente"].get(
+            f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}"
+            "&de=2026-07-31"
+        )
+        linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
+
+        assert resposta.status_code == 200
+        assert len(linhas) == 1, "exportou propostas fora do período"
+        assert _ajustes(cenario["referencia"]) == []
+
+    def test_preserva_identificadores_e_codigos_com_zero_inicial(self, cenario):
+        _regra(cenario["referencia"], cenario["empresa_a"], cfop="0123")
+        with get_session(criar_engine(url=cenario["referencia"])) as sessao:
+            empresa = sessao.get(Empresa, cenario["empresa_a"])
+            documento = sessao.get(DocumentoFiscal, cenario["documento_a"])
+            empresa.cnpj = "01234567890123"
+            documento.numero = "00042"
+            sessao.commit()
+
+        resposta = cenario["cliente"].get(
+            f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}"
+        )
+        linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
+
+        assert resposta.status_code == 200
+        assert linhas[1][1] == "\t01234567890123"
+        assert linhas[1][3] == "\t00042"
+        assert linhas[1][7] == "\t0123"
+        assert _ajustes(cenario["referencia"]) == []
+
+    def test_neutraliza_nome_de_regra_que_parece_formula(self, cenario):
+        _regra(
+            cenario["referencia"],
+            cenario["empresa_a"],
+            nome='=HYPERLINK("https://exemplo.test";"abrir")',
+        )
+
+        resposta = cenario["cliente"].get(
+            f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}"
+        )
+        linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
+
+        assert resposta.status_code == 200
+        assert linhas[1][8].startswith("\t="), "a planilha pode executar o nome da regra"
+        assert len(linhas[1]) == len(linhas[0]), "aspas ou separadores criaram uma coluna"
+
+    def test_nao_exporta_empresa_de_outro_escritorio(self, cenario):
+        resposta = cenario["cliente"].get(
+            f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_b']}"
+        )
+
+        assert resposta.status_code == 404
+        assert "text/csv" not in resposta.headers.get("content-type", "")
+
+    def test_exige_login(self, cenario):
+        from fastapi.testclient import TestClient
+
+        cliente_anonimo = TestClient(cenario["app"], follow_redirects=False)
+        resposta = cliente_anonimo.get(
+            f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}"
+        )
+
+        assert resposta.status_code == 302
+        assert resposta.headers["location"] == "/login"
+
+    @pytest.mark.parametrize(
+        "valor",
+        (
+            "=1+1",
+            "+1+1",
+            "-1+1",
+            "@SUM(A1:A2)",
+            "＝1+1",
+            "＋1+1",
+            "－1+1",
+            "＠SUM(A1:A2)",
+            "\t=1+1",
+            "  =1+1",
+            "\ufeff=1+1",
+            "\u00a0=1+1",
+        ),
+    )
+    def test_protege_prefixos_que_planilhas_podem_interpretar(self, valor):
+        from src.dashboard.app import _celula_csv_segura
+
+        assert _celula_csv_segura(valor).startswith("\t"), valor
+
+    def test_preserva_negativo_numerico_sem_aceitar_formula(self):
+        from src.dashboard.app import _celula_csv_segura
+
+        assert _celula_csv_segura("-123,45") == "-123,45"
+        assert _celula_csv_segura("-1+1").startswith("\t-")
+
+    def test_forca_identificador_com_zero_inicial_como_texto(self):
+        from src.dashboard.app import _celula_csv_segura
+
+        assert _celula_csv_segura("01234567", forcar_texto=True) == "\t01234567"
 
 
 class TestOTotalVistoEConferido:

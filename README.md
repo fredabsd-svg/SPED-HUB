@@ -14,6 +14,8 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 ### Dashboard Web (`sped-hub-dashboard`)
 - **FastAPI + Jinja2 + HTMX + Alpine.js + Chart.js**
 - **Autenticação** — Login/registro com PBKDF2, sessões por token, middleware de proteção
+- **Acesso rápido** — Busque telas por nome com `Ctrl+K` ou `Cmd+K` e navegue por teclado
+- **Classificação fiscal revisável** — Veja propostas das regras antes de aplicar e baixe o recorte filtrado em CSV
 - **Dashboard com KPIs** — Ativo Total, PL, Endividamento, Resultado, Margem, Lançamentos
 - **Gráficos interativos** — Evolução Patrimonial, Composição do Ativo, DRE Waterfall, DFC, Comparativo entre Empresas, Evolução Multi-Período
 - **Upload multi-formato** — ECD, EFD-Contribuições (PIS/COFINS) e ECF (IRPJ/CSLL) com drag & drop
@@ -37,6 +39,7 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 - **Deploy produção** — nginx + SSL (Let's Encrypt) + docker-compose pronto
 - **Navegação entre múltiplas ECDs** importadas
 - **Design responsivo** com tema profissional
+- **Área privada protegida contra indexação** e navegação agrupada por tarefa
 - **Sem dependência de CDN** — htmx, Alpine, Chart.js e SortableJS são
   servidos pela própria aplicação em `/static/vendor/`
 - **Configuração por ambiente** — Toda a aplicação lê de `src/settings.py` (`DATABASE_URL`, SMTP, Redis, uploads, etc.)
@@ -59,9 +62,9 @@ Plataforma multiempresa de conformidade fiscal para escritórios contábeis. Imp
 pip install -e ".[dev]"
 ```
 
-> **Versão atual:** 0.17.0 — identidade "Tinta & Latão" nos relatórios e no
-> dashboard, PDF do balancete, recusa de hierarquia cíclica na importação e
-> documentação de módulo completa (Fases 18–25).
+> **Versão atual:** 0.19.0 — central fiscal com classificação revisável,
+> escrituração arquivada e certificado A1 cifrado; interface responsiva com
+> acesso rápido por teclado.
 
 ### Docker
 ```bash

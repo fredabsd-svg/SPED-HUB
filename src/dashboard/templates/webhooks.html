@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
     <title>Webhooks — SPED-HUB</title>
     <script src="/static/vendor/alpine-3.14.1.min.js" defer></script>
     <script src="/static/vendor/chart-4.4.4.umd.min.js"></script>
@@ -180,23 +181,16 @@
         .tab:hover { color: var(--primary); }
         .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
     </style>
+    <link rel="stylesheet" href="/static/app-shell.css">
+    <script defer src="/static/quick-access.js"></script>
 </head>
 <body>
-    <div class="navbar">
-        <h1>🔔 SPED-HUB — Webhooks</h1>
-        <nav>
-            <a href="/">Dashboard</a>
-            <a href="/upload">Upload</a>
-            <a href="/comparar">Comparar</a>
-            <a href="/layout">Layout</a>
-            <a href="/api-keys">API Keys</a>
-            <a href="/webhooks" class="active">Webhooks</a>
-            <a href="/logout">Sair</a>
-        </nav>
-    </div>
+    <a class="skip-link" href="#page-content">Pular para o conteúdo</a>
+    {% include "partials/navigation.html" %}
+    {% include "partials/quick_access.html" %}
 
-    <div class="container" x-data="webhookDashboard()" x-init="init()">
-        <h2 class="page-title">Dashboard de Webhooks</h2>
+    <main class="container" id="page-content" tabindex="-1" x-data="webhookDashboard()" x-init="init()">
+        <h1 class="page-title">Dashboard de Webhooks</h1>
         <p class="page-subtitle">Monitore as integrações com sistemas de terceiros em tempo real.</p>
 
         <!-- Stats -->
@@ -329,7 +323,7 @@
                 </table>
             </template>
         </div>
-    </div>
+    </main>
 
     <script>
         function webhookDashboard() {

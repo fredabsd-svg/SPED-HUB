@@ -2,8 +2,8 @@
 {% block title %}Classificar — SPED-HUB{% endblock %}
 
 {% block content %}
-<div style="max-width:1100px;margin:0 auto;">
-    <h2 style="font-size:1.25rem;margin-bottom:8px;">🏷️ Classificação fiscal</h2>
+<div class="page-shell page-shell-wide">
+    <h1 class="page-title">Classificação fiscal</h1>
     <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
         O que as regras cadastradas propõem para o recorte. Isto é uma <strong>proposta</strong>:
         nada é gravado até que você aplique, e o que for aplicado sai num lote que se desfaz
@@ -123,6 +123,14 @@
     </div>
 
     {% if total_sugestoes %}
+    <div class="classification-actions">
+        <a class="btn btn-outline"
+           href="/fiscal/classificar/exportar.csv?empresa={{ empresa.id }}&amp;de={{ de }}&amp;ate={{ ate }}&amp;obrigacao={{ obrigacao }}"
+           download aria-label="Baixar as {{ total_sugestoes }} propostas de classificação em CSV">
+            Baixar CSV de revisão
+        </a>
+        <span>Repete este recorte e não aplica as sugestões.</span>
+    </div>
     <form method="post" action="/fiscal/classificar" data-secao="aplicar">
         <input type="hidden" name="empresa" value="{{ empresa.id }}">
         <input type="hidden" name="de" value="{{ de }}">

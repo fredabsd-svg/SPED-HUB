@@ -17,7 +17,7 @@ vem de `reports/`.
 | Grupo | Rotas |
 |---|---|
 | Autenticação | `/login`, `/register`, `POST /api/login`, `POST /api/register`, `/logout` |
-| Páginas | `/`, `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
+| Páginas | `/`, `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/classificar/exportar.csv`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
 | Upload | `POST /api/upload` (ECD, importa), `/api/upload-efd`, `/api/upload-ecf` (só resumo), `/api/upload-async` + `/api/jobs/*` |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
 | Exportação | `/api/export/pdf`, `/xlsx`, `/multi-formato` (ZIP), `/lote` |
@@ -75,6 +75,21 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   re-simula e compara: divergiu, nada é gravado. Entre ver e confirmar cabe uma
   importação ou outra pessoa corrigindo, e o lote reversível não ajuda quem não
   percebeu que aprovou trinta e gravou trezentas.
+- **A exportação das propostas de classificação repete a consulta da tela.**
+  `/fiscal/classificar/exportar.csv` exige sessão, resolve a empresa por
+  `_empresa_do_usuario` e reaplica o mesmo intervalo e obrigação com
+  `MotorDeClassificacao`, percorrendo os documentos em lotes. Ela só consulta:
+  não chama `confirmar` nem cria ajuste.
+  O CSV usa UTF-8 com BOM, ponto e vírgula e células citadas. Texto que começa
+  com prefixo interpretável como fórmula recebe uma tabulação dentro da
+  célula e perde os espaços iniciais, para reduzir execução acidental ao abrir
+  em planilha; números simples negativos e positivos mantêm o valor numérico.
+  CNPJ, número do documento e códigos fiscais textuais que a planilha poderia
+  converter também recebem uma tabulação para preservar zeros à esquerda e
+  códigos parecidos com datas. A tabulação faz parte do valor bruto do CSV;
+  este arquivo é para revisão humana, não para reimportação automática. A
+  geração percorre documentos em lotes de 100 e transmite as linhas aos
+  poucos, sem montar o CSV inteiro em memória.
 - **A tela do documento mostra as três camadas separadas, e não só o valor
   final.** Mostrar só o efetivo faria a tela desmentir o modelo de dados: o
   sistema guarda as três porque a resposta a uma intimação depende de saber
@@ -131,6 +146,22 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   fallback que impede a senha de ir para a URL se o script não carregar.
 - **Assets vendorizados, nunca CDN**: sem acesso externo a aplicação
   degradava em silêncio e cada página carregava versão diferente.
+- **A área autenticada não deve aparecer em buscadores.** `base.html` e as
+  quatro páginas independentes declaram `noindex, nofollow`, inclusive login
+  e cadastro. A navegação comum vem de `partials/navigation.html`; a busca de
+  telas vem de `partials/quick_access.html`, `static/quick-access.js` e
+  `static/app-shell.css`. `Ctrl+K`/`Cmd+K` abre o diálogo, busca sem
+  diferenciar acentos, permite navegação por setas e devolve o foco ao fechar.
+  A ordem de menu e a visibilidade administrativa ficam no template; o
+  servidor continua responsável por autorizar cada rota.
+- **Cada gráfico do painel oferece os próprios valores em tabela.** Evolução,
+  composição, DRE e comparativo renderizam os dados usados no gráfico em uma
+  tabela que pode ser aberta; a tabela da DFC é preenchida pela mesma resposta
+  que desenha o gráfico, usando `textContent` para inserir rótulos com segurança.
+- **Os controles de navegação e foco pertencem ao shell comum.** O CSS do
+  shell ajusta os grupos em telas estreitas, oferece foco visível e respeita
+  `prefers-reduced-motion`; as páginas independentes o carregam junto da
+  navegação para manter os mesmos estados de interação.
 - **Identidade "Tinta & Latão"**, a mesma dos relatórios exportados: paleta
   em `--primary`/`--accent`, títulos em Source Serif 4, corpo em Source
   Sans 3. As fontes em `static/fonts/` são **cópias** das dos relatórios —
@@ -155,6 +186,7 @@ pytest tests/test_fase13.py tests/test_fase14.py tests/test_fase16.py -q
 pytest tests/test_hardening.py tests/test_vendor_assets.py -q
 pytest tests/test_hierarquia_ciclica.py -q       # trava de ciclo
 pytest tests/test_fase7.py tests/test_fase10.py -q   # DashboardService
+pytest tests/test_telas_classificar_corrigir.py tests/test_identidade_dashboard.py -q
 ```
 
 Navegador de verdade: `pytest -m e2e` (`tests/test_e2e_playwright.py`, sobe
