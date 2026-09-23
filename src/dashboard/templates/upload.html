@@ -1,26 +1,82 @@
 {% extends "base.html" %}
 {% block title %}Upload — SPED-HUB{% endblock %}
 
+{% block head %}
+<style>
+    .upload-page { width: min(100%, 720px); margin: 0 auto; }
+    .upload-page .tabs { margin-bottom: 20px; }
+    .upload-page .tab-btn { min-height: 44px; }
+    .upload-page .upload-zone {
+        position: relative;
+        display: grid;
+        width: 100%;
+        min-height: 190px;
+        box-sizing: border-box;
+        align-content: center;
+        justify-items: center;
+        gap: 8px;
+        padding: 28px 22px;
+    }
+    .upload-page .upload-zone:focus-within {
+        outline: 3px solid var(--accent);
+        outline-offset: 3px;
+    }
+    .upload-page .upload-zone input.upload-file-input {
+        display: block !important;
+    }
+    .upload-page .upload-icon { margin: 0 0 4px; }
+    .upload-page .upload-text { max-width: 100%; line-height: 1.5; }
+    .upload-page .file-name {
+        min-height: 20px;
+        margin: 12px 0;
+        overflow-wrap: anywhere;
+        color: var(--gray-600);
+        font-size: .875rem;
+        text-align: center;
+    }
+    .upload-page .upload-progress {
+        width: 100%;
+        height: 12px;
+        accent-color: var(--primary);
+    }
+    .upload-page .upload-progress[hidden],
+    .upload-page [hidden] { display: none !important; }
+    .upload-page .upload-status { margin-top: 24px; }
+    .upload-page .upload-status-message { margin: 0 0 10px; }
+    @media (max-width: 560px) {
+        .upload-page .tab-btn { flex: 1 1 auto; padding-inline: 12px; }
+        .upload-page .upload-zone { min-height: 168px; padding: 24px 16px; }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div style="max-width:720px;margin:0 auto;">
+<div class="upload-page">
     <h1 class="page-title">Importar arquivos SPED</h1>
     <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
         Faça upload de arquivos ECD, EFD-Contribuições ou ECF para processar e visualizar os dados.
     </p>
 
     <!-- ── Tabs de formato ── -->
-    <div class="tabs" x-data="{ formato: 'ecd' }" style="margin-bottom:20px;">
-        <button class="tab-btn" :class="{ active: formato === 'ecd' }" @click="formato = 'ecd'">📗 ECD</button>
-        <button class="tab-btn" :class="{ active: formato === 'efd' }" @click="formato = 'efd'">📘 EFD-Contribuições</button>
-        <button class="tab-btn" :class="{ active: formato === 'ecf' }" @click="formato = 'ecf'">📙 ECF</button>
+    <div x-data="{ formato: 'ecd' }">
+        <div class="tabs" role="tablist" aria-label="Tipo de arquivo SPED">
+            <button type="button" class="tab-btn" id="tab-ecd" role="tab" aria-controls="panel-ecd"
+                    :aria-selected="formato === 'ecd'" :class="{ active: formato === 'ecd' }"
+                    @click="formato = 'ecd'">📗 ECD</button>
+            <button type="button" class="tab-btn" id="tab-efd" role="tab" aria-controls="panel-efd"
+                    :aria-selected="formato === 'efd'" :class="{ active: formato === 'efd' }"
+                    @click="formato = 'efd'">📘 EFD-Contribuições</button>
+            <button type="button" class="tab-btn" id="tab-ecf" role="tab" aria-controls="panel-ecf"
+                    :aria-selected="formato === 'ecf'" :class="{ active: formato === 'ecf' }"
+                    @click="formato = 'ecf'">📙 ECF</button>
+        </div>
 
         <!-- ECD -->
-        <div class="tab-content" :class="{ active: formato === 'ecd' }" style="width:100%;">
+        <div class="tab-content active" id="panel-ecd" role="tabpanel" aria-labelledby="tab-ecd"
+             :class="{ active: formato === 'ecd' }">
             <form id="upload-ecd"
-                  hx-encoding="multipart/form-data"
-                  hx-post="/api/upload"
-                  hx-target="#upload-result"
-                  hx-swap="innerHTML">
+                  action="/api/upload-async" method="post" enctype="multipart/form-data"
+                  aria-describedby="upload-help">
                 <label class="upload-zone" id="drop-ecd"
                        x-data="{ dragging: false }"
                        @dragover.prevent="dragging = true"
@@ -31,21 +87,29 @@
                     <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo ECD aqui</div>
                     <div class="upload-hint">Formatos: .txt, .ecd — Leiaute 9</div>
                     <input type="file" id="file-ecd" name="file" accept=".txt,.ecd"
+                           class="upload-file-input sr-only"
                            @change="const name = $el.files[0]?.name; if(name) { document.getElementById('file-name-ecd').textContent = name; document.getElementById('btn-ecd').disabled = false; }">
                 </label>
-                <div id="file-name-ecd" style="text-align:center;margin:12px 0;font-size:.875rem;color:var(--gray-600);"></div>
+                <div id="file-name-ecd" class="file-name" aria-live="polite"></div>
+                <p id="upload-help" class="text-muted" style="margin:0 0 12px;font-size:.8rem;text-align:center;">
+                    O arquivo é validado e importado sem bloquear a tela.
+                </p>
                 <div style="text-align:center;">
                     <button type="submit" id="btn-ecd" class="btn btn-primary" disabled
-                            hx-indicator="#upload-spinner">
-                        <span class="htmx-indicator" id="upload-spinner"><span class="spinner"></span></span>
+                            data-upload-submit>
+                        <span class="spinner" data-upload-spinner hidden aria-hidden="true"></span>
                         🚀 Processar ECD
+                    </button>
+                    <button type="button" class="btn btn-outline" data-upload-cancel hidden>
+                        Cancelar importação
                     </button>
                 </div>
             </form>
         </div>
 
         <!-- EFD -->
-        <div class="tab-content" :class="{ active: formato === 'efd' }" style="width:100%;">
+        <div class="tab-content" id="panel-efd" role="tabpanel" aria-labelledby="tab-efd"
+             :class="{ active: formato === 'efd' }">
             <form id="upload-efd"
                   hx-encoding="multipart/form-data"
                   hx-post="/api/upload-efd"
@@ -61,9 +125,10 @@
                     <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo EFD aqui</div>
                     <div class="upload-hint">Formatos: .txt, .efd — EFD-Contribuições (PIS/COFINS)</div>
                     <input type="file" id="file-efd" name="file" accept=".txt,.efd"
+                           class="upload-file-input sr-only"
                            @change="const name = $el.files[0]?.name; if(name) { document.getElementById('file-name-efd').textContent = name; document.getElementById('btn-efd').disabled = false; }">
                 </label>
-                <div id="file-name-efd" style="text-align:center;margin:12px 0;font-size:.875rem;color:var(--gray-600);"></div>
+                <div id="file-name-efd" class="file-name" aria-live="polite"></div>
                 <div style="text-align:center;">
                     <button type="submit" id="btn-efd" class="btn btn-primary" disabled
                             hx-indicator="#upload-spinner-efd">
@@ -75,7 +140,8 @@
         </div>
 
         <!-- ECF -->
-        <div class="tab-content" :class="{ active: formato === 'ecf' }" style="width:100%;">
+        <div class="tab-content" id="panel-ecf" role="tabpanel" aria-labelledby="tab-ecf"
+             :class="{ active: formato === 'ecf' }">
             <form id="upload-ecf"
                   hx-encoding="multipart/form-data"
                   hx-post="/api/upload-ecf"
@@ -91,9 +157,10 @@
                     <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo ECF aqui</div>
                     <div class="upload-hint">Formatos: .txt, .ecf — ECF (IRPJ/CSLL)</div>
                     <input type="file" id="file-ecf" name="file" accept=".txt,.ecf"
+                           class="upload-file-input sr-only"
                            @change="const name = $el.files[0]?.name; if(name) { document.getElementById('file-name-ecf').textContent = name; document.getElementById('btn-ecf').disabled = false; }">
                 </label>
-                <div id="file-name-ecf" style="text-align:center;margin:12px 0;font-size:.875rem;color:var(--gray-600);"></div>
+                <div id="file-name-ecf" class="file-name" aria-live="polite"></div>
                 <div style="text-align:center;">
                     <button type="submit" id="btn-ecf" class="btn btn-primary" disabled
                             hx-indicator="#upload-spinner-ecf">
@@ -105,8 +172,7 @@
         </div>
     </div>
 
-    <!-- ── Resultado ── -->
-    <div id="upload-result" style="margin-top:24px;"></div>
+    <div id="upload-result" class="upload-status" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <!-- ── Instruções ── -->
     <div class="card" style="margin-top:32px;">
@@ -118,4 +184,8 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/upload.js" defer></script>
 {% endblock %}
