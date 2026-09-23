@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="description" content="Área privada de gestão contábil e conformidade fiscal do escritório.">
     <title>{% block title %}SPED-HUB{% endblock %}</title>
     <script src="/static/vendor/htmx-1.9.12.min.js"></script>
     <script defer src="/static/vendor/alpine-3.14.1.min.js"></script>
@@ -45,7 +47,7 @@
             --gray-100: #F3F4F6;
             --gray-200: #E5E7EB;
             --gray-300: #D1D5DB;
-            --gray-400: #9CA3AF;
+            --gray-400: #667085;
             --gray-500: #6B7280;
             --gray-600: #4B5563;
             --gray-700: #374151;
@@ -330,43 +332,16 @@
             margin-top: 32px;
         }
     </style>
+    <link rel="stylesheet" href="/static/app-shell.css">
+    <script defer src="/static/quick-access.js"></script>
     {% block head %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar">
-        <a href="/" class="navbar-brand">SPED<span>-HUB</span></a>
-        <ul class="navbar-nav">
-            {# Sem usuário (login/registro), nenhum link de navegação:
-               anônimo só ganharia redirects de volta para o /login. #}
-            {% if usuario %}
-            <li><a href="/" class="{% if current_page == 'dashboard' %}active{% endif %}">📊 Dashboard</a></li>
-            <li><a href="/upload" class="{% if current_page == 'upload' %}active{% endif %}">📤 Upload</a></li>
-            <li><a href="/fiscal/importar" class="{% if current_page == 'importar' %}active{% endif %}">📥 Importar</a></li>
-            <li><a href="/fiscal/documentos" class="{% if current_page == 'documentos' %}active{% endif %}">📄 Documentos</a></li>
-            <li><a href="/fiscal/classificar" class="{% if current_page == 'classificar' %}active{% endif %}">🏷️ Classificar</a></li>
-            <li><a href="/fiscal/corrigir" class="{% if current_page == 'corrigir' %}active{% endif %}">✏️ Corrigir</a></li>
-            <li><a href="/fiscal/gerar" class="{% if current_page == 'gerar' %}active{% endif %}">📦 Gerar</a></li>
-            <li><a href="/fiscal/cadastro" class="{% if current_page == 'cadastro_fiscal' %}active{% endif %}">🏛️ Cadastro fiscal</a></li>
-            <li><a href="/comparar" class="{% if current_page == 'comparar' %}active{% endif %}">📊 Comparar</a></li>
-            <li><a href="/layout" class="{% if current_page == 'layout' %}active{% endif %}">⚙️ Layout</a></li>
-            {# As quatro abaixo exigem administrador. Mostrá-las a quem não é
-               oferece um caminho que só devolve 403 — e o 403 não explica que
-               o problema é o perfil, não a página. O monitoramento já era
-               escondido; as outras três não eram, sem que a diferença tivesse
-               razão. #}
-            {% if usuario.admin %}
-            <li><a href="/api-keys" class="{% if current_page == 'api_keys' %}active{% endif %}">🔑 API Keys</a></li>
-            <li><a href="/webhooks" class="{% if current_page == 'webhooks' %}active{% endif %}">🔔 Webhooks</a></li>
-            <li><a href="/auditoria" class="{% if current_page == 'auditoria' %}active{% endif %}">📋 Auditoria</a></li>
-            <li><a href="/monitoring" class="{% if current_page == 'monitoring' %}active{% endif %}">📡 Monitoramento</a></li>
-            {% endif %}
-            <li><span class="navbar-user">{{ usuario.nome }}</span></li>
-            <li><a href="/logout">🚪 Sair</a></li>
-            {% endif %}
-        </ul>
-    </nav>
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
+    {% include "partials/navigation.html" %}
+    {% include "partials/quick_access.html" %}
 
-    <main class="main-content">
+    <main class="main-content" id="main-content" tabindex="-1">
         {% block content %}{% endblock %}
     </main>
 

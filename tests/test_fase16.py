@@ -206,8 +206,8 @@ class TestMonitoringTemplate:
     def test_template_and_nav_exist(self):
         root = Path(__file__).parent.parent
         template = root / "src/dashboard/templates/monitoring.html"
-        base = root / "src/dashboard/templates/base.html"
+        navigation = root / "src/dashboard/templates/partials/navigation.html"
 
         assert template.exists()
         assert "/api/monitoring/summary" in template.read_text()
-        assert "/monitoring" in base.read_text()
+        assert "/monitoring" in navigation.read_text()

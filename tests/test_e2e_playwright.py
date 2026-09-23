@@ -388,6 +388,53 @@ class TestE2ELogin:
             browser.close()
 
 
+class TestE2ENavegacao:
+    """Navegação rápida e responsiva para o uso diário."""
+
+    def test_atalho_busca_filtra_e_devolve_o_foco(self, live_server, contador):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 800})
+            page = context.new_page()
+            _entrar(page, live_server, contador)
+
+            dica = page.evaluate(
+                "/Mac|iPhone|iPad|iPod/.test(navigator.platform || '') ? '⌘ K' : 'Ctrl K'"
+            )
+            expect(page.locator("[data-shortcut-hint]")).to_have_text(dica)
+            page.locator("[data-quick-open]").focus()
+            page.keyboard.press("Control+k")
+
+            dialog = page.locator("#quick-access")
+            expect(dialog).to_be_visible()
+            expect(page.locator("#quick-access-filter")).to_be_focused()
+            page.locator("#quick-access-filter").fill("classificacao")
+            expect(page.locator("#quick-access a[href='/fiscal/classificar']")).to_be_visible()
+            expect(page.locator("[data-quick-empty]")).to_be_hidden()
+
+            page.keyboard.press("Escape")
+            expect(dialog).to_be_hidden()
+            expect(page.locator("[data-quick-open]")).to_be_focused()
+            browser.close()
+
+    def test_menu_fiscal_nao_transborda_em_tela_movel(self, live_server, contador):
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            context = browser.new_context(viewport={"width": 390, "height": 844})
+            page = context.new_page()
+            _entrar(page, live_server, contador)
+
+            assert page.evaluate(
+                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+            ), "a página cria rolagem horizontal no celular"
+            page.locator(".nav-group summary").filter(has_text="Fiscal").click()
+            expect(page.get_by_role("link", name="Importar documentos")).to_be_visible()
+            expect(page.locator('meta[name="robots"]')).to_have_attribute(
+                "content", "noindex, nofollow"
+            )
+            browser.close()
+
+
 class TestE2EUpload:
     """Testes de upload com browser real."""
 

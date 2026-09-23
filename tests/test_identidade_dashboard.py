@@ -94,6 +94,24 @@ class TestPaletaUnica:
         assert not fora, f"páginas fora da paleta da identidade: {fora}"
 
 
+class TestGraficosAcessiveis:
+    def test_graficos_tambem_expoem_os_valores_em_tabelas(self):
+        dashboard = (TEMPLATES / "dashboard.html").read_text("utf-8")
+
+        assert dashboard.count('class="chart-data-details"') == 5
+        assert 'data-chart-data="dfc"' in dashboard
+        assert '<th scope="col">Ativo total</th>' in dashboard
+        assert '<th scope="col">Resultado</th>' in dashboard
+
+    def test_paginas_da_area_privada_nao_sao_indexadas(self):
+        paginas = [TEMPLATES / "base.html"] + [
+            TEMPLATES / f"{nome}.html" for nome in ("webhooks", "comparar", "layout", "api_keys")
+        ]
+
+        for pagina in paginas:
+            assert 'name="robots" content="noindex, nofollow"' in pagina.read_text("utf-8")
+
+
 class TestNavbarAnonima:
     """Tela de login não mostra navegação de área logada.
 
@@ -118,10 +136,23 @@ class TestNavbarAnonima:
                 rotulo not in html
             ), f"tela de login expõe o link '{rotulo}' para visitante anônimo"
         assert "SPED" in html, "a marca sumiu junto — o condicional cortou demais"
+        assert 'name="robots" content="noindex, nofollow"' in html
 
     def test_register_sem_links_de_navegacao(self):
         html = self._cliente().get("/register").text
         assert "Auditoria" not in html and "Webhooks" not in html
+
+    def test_navegacao_oculta_rotas_de_admin_para_usuario_comum(self):
+        from types import SimpleNamespace
+
+        from src.dashboard.app import jinja_env
+
+        contexto = {"usuario": SimpleNamespace(admin=False, nome="Contadora")}
+        html = jinja_env.get_template("partials/navigation.html").render(**contexto)
+        html += jinja_env.get_template("partials/quick_access.html").render(**contexto)
+
+        for endereco in ("/api-keys", "/webhooks", "/auditoria", "/monitoring"):
+            assert endereco not in html, f"usuário sem permissão recebeu {endereco}"
 
     def test_pagina_logada_mostra_navegacao(self, tmp_path, monkeypatch):
         """O outro lado: logado, a navegação inteira volta."""
@@ -151,5 +182,13 @@ class TestNavbarAnonima:
         html = cliente.get("/").text
         # Links que todo usuário logado vê, mais um de administrador — este
         # usuário é o primeiro do banco, e o sistema o promove.
-        for rotulo in ("Dashboard", "Upload", "Documentos", "Auditoria", "Sair"):
-            assert rotulo in html, f"logado e sem o link '{rotulo}' na navegação"
+        for endereco, rotulo in (
+            ('href="/"', "Painel"),
+            ('href="/upload"', "Importar ECD"),
+            ('href="/fiscal/documentos"', "Documentos fiscais"),
+            ('href="/auditoria"', "Auditoria"),
+            ('href="/logout"', "Sair"),
+        ):
+            assert endereco in html, f"logado e sem a rota {endereco} na navegação"
+            assert rotulo in html, f"logado e sem o rótulo '{rotulo}' na navegação"
+        assert 'name="robots" content="noindex, nofollow"' in html

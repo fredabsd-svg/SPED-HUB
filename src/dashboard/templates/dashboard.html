@@ -3,22 +3,25 @@
 
 {% block content %}
 {% if not data %}
-<div class="empty-state">
-    <div class="empty-state-icon">📂</div>
-    <h3>Nenhuma ECD importada</h3>
+<section class="empty-state dashboard-empty" aria-labelledby="dashboard-empty-title">
+    <div class="empty-state-icon" aria-hidden="true">▤</div>
+    <p class="dashboard-eyebrow">PAINEL CONTÁBIL</p>
+    <h1 id="dashboard-empty-title">Seu painel começa com uma ECD</h1>
     <p>Importe um arquivo ECD para visualizar o dashboard com KPIs, gráficos e demonstrações contábeis interativas.</p>
-    <a href="/upload" class="btn btn-primary">📤 Importar ECD</a>
-</div>
+    <a href="/upload" class="btn btn-primary">Importar ECD</a>
+</section>
 {% else %}
 
 <!-- ── Header ── -->
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;">
+<header class="dashboard-hero">
     <div>
-        <h2 style="font-size:1.25rem;color:var(--gray-800);">{{ data.empresa_nome }}</h2>
-        <p style="font-size:.8rem;color:var(--gray-500);">CNPJ: {{ data.empresa_cnpj }} • Período: {{ data.periodo }}</p>
+        <p class="dashboard-eyebrow">VISÃO CONTÁBIL</p>
+        <h1>{{ data.empresa_nome }}</h1>
+        <p class="dashboard-meta">CNPJ {{ data.empresa_cnpj }} <span aria-hidden="true">·</span> Período {{ data.periodo }}</p>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;">
+    <div class="dashboard-controls">
         <select class="form-select" id="ecd-selector"
+                aria-label="Escolher empresa e período contábil"
                 hx-get="/api/kpis"
                 hx-target="#dashboard-content"
                 hx-trigger="change"
@@ -29,9 +32,9 @@
             </option>
             {% endfor %}
         </select>
-        <a href="/upload" class="btn btn-outline btn-sm">+ Nova ECD</a>
+        <a href="/upload" class="btn btn-outline btn-sm">Nova ECD</a>
     </div>
-</div>
+</header>
 
 <!-- ── Dashboard Content ── -->
 <div id="dashboard-content">
@@ -40,32 +43,142 @@
     <!-- ── Gráficos ── -->
     <div class="charts-grid">
         <div class="card">
-            <div class="card-header">📈 Evolução Patrimonial</div>
-            <div class="card-body"><canvas id="chart-evolucao" height="280"></canvas></div>
+            <h2 class="card-header" id="chart-evolucao-title">Evolução patrimonial</h2>
+            <div class="card-body">
+                <canvas id="chart-evolucao" height="280" role="img"
+                        aria-label="Evolução do ativo total e do passivo mais patrimônio líquido"></canvas>
+                <p class="chart-caption">Ativo total comparado ao passivo e patrimônio líquido no período.</p>
+                {% if evolucao and evolucao.labels %}
+                <details class="chart-data-details">
+                    <summary>Consultar valores em tabela</summary>
+                    <div class="chart-data-scroll">
+                        <table class="chart-data-table">
+                            <caption class="sr-only">Valores da evolução patrimonial por período</caption>
+                            <thead><tr><th scope="col">Período</th><th scope="col">Ativo total</th><th scope="col">Passivo + PL</th></tr></thead>
+                            <tbody>
+                                {% for periodo in evolucao.labels %}
+                                <tr>
+                                    <th scope="row">{{ periodo }}</th>
+                                    <td>{{ fmt_moeda(evolucao.ativo[loop.index0]) }}</td>
+                                    <td>{{ fmt_moeda(evolucao.passivo_pl[loop.index0]) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+                {% endif %}
+            </div>
         </div>
         <div class="card">
-            <div class="card-header">🍩 Composição do Ativo</div>
-            <div class="card-body"><canvas id="chart-composicao" height="280"></canvas></div>
+            <h2 class="card-header" id="chart-composicao-title">Composição do ativo</h2>
+            <div class="card-body">
+                <canvas id="chart-composicao" height="280" role="img"
+                        aria-label="Composição dos grupos que formam o ativo da empresa"></canvas>
+                <p class="chart-caption">Participação de cada grupo no ativo total.</p>
+                {% if composicao and composicao.labels %}
+                <details class="chart-data-details">
+                    <summary>Consultar valores em tabela</summary>
+                    <div class="chart-data-scroll">
+                        <table class="chart-data-table">
+                            <caption class="sr-only">Valores dos grupos que compõem o ativo</caption>
+                            <thead><tr><th scope="col">Grupo</th><th scope="col">Valor</th></tr></thead>
+                            <tbody>
+                                {% for indice in range(composicao.labels|length) %}
+                                <tr>
+                                    <th scope="row">{{ composicao.labels[indice] }}</th>
+                                    <td>{{ fmt_moeda(composicao.valores[indice]) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+                {% endif %}
+            </div>
         </div>
     </div>
 
     <!-- ── DRE Waterfall ── -->
     <div class="card" style="margin-bottom:24px;">
-        <div class="card-header">🏔️ DRE — Demonstração do Resultado</div>
-        <div class="card-body"><canvas id="chart-dre" height="200"></canvas></div>
+        <h2 class="card-header" id="chart-dre-title">DRE · Demonstração do Resultado</h2>
+        <div class="card-body">
+            <canvas id="chart-dre" height="200" role="img"
+                    aria-label="Valores das etapas da Demonstração do Resultado do Exercício"></canvas>
+            <p class="chart-caption">Valores por etapa da DRE para a escrituração selecionada.</p>
+            {% if dre_waterfall and dre_waterfall.labels %}
+            <details class="chart-data-details">
+                <summary>Consultar valores em tabela</summary>
+                <div class="chart-data-scroll">
+                    <table class="chart-data-table">
+                        <caption class="sr-only">Valores da Demonstração do Resultado por etapa</caption>
+                        <thead><tr><th scope="col">Etapa</th><th scope="col">Valor</th></tr></thead>
+                        <tbody>
+                            {% for etapa in dre_waterfall.labels %}
+                            <tr>
+                                <th scope="row">{{ etapa }}</th>
+                                <td>{{ fmt_moeda(dre_waterfall.valores[loop.index0]) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+            {% endif %}
+        </div>
     </div>
 
     <!-- ── DFC ── -->
     <div class="card" style="margin-bottom:24px;">
-        <div class="card-header">💵 DFC — Fluxos de Caixa</div>
-        <div class="card-body"><canvas id="chart-dfc" height="200"></canvas></div>
+        <h2 class="card-header" id="chart-dfc-title">DFC · Fluxos de caixa</h2>
+        <div class="card-body">
+            <canvas id="chart-dfc" height="200" role="img"
+                    aria-label="Fluxos de caixa por atividade operacional, investimento e financiamento"></canvas>
+            <p class="chart-caption">Fluxos operacionais, de investimento e de financiamento.</p>
+            <details class="chart-data-details">
+                <summary>Consultar valores em tabela</summary>
+                <div class="chart-data-scroll">
+                    <table class="chart-data-table">
+                        <caption class="sr-only">Valores da Demonstração dos Fluxos de Caixa por etapa</caption>
+                        <thead><tr><th scope="col">Etapa</th><th scope="col">Valor</th></tr></thead>
+                        <tbody data-chart-data="dfc"></tbody>
+                    </table>
+                    <p class="chart-data-status" role="status" aria-live="polite" data-chart-data-status>
+                        Os valores serão exibidos aqui quando carregarem.
+                    </p>
+                </div>
+            </details>
+        </div>
     </div>
 
     <!-- ── Comparativo entre Empresas ── -->
     {% if comparativo %}
     <div class="card" style="margin-bottom:24px;">
-        <div class="card-header">🔄 Comparativo entre Empresas</div>
-        <div class="card-body"><canvas id="chart-comparativo" height="250"></canvas></div>
+        <h2 class="card-header" id="chart-comparativo-title">Comparativo entre empresas</h2>
+        <div class="card-body">
+            <canvas id="chart-comparativo" height="250" role="img"
+                    aria-label="Comparativo de ativo total, patrimônio líquido e resultado entre empresas"></canvas>
+            <p class="chart-caption">Ativo, patrimônio líquido e resultado das empresas selecionadas.</p>
+            <details class="chart-data-details">
+                <summary>Consultar valores em tabela</summary>
+                <div class="chart-data-scroll">
+                    <table class="chart-data-table">
+                        <caption class="sr-only">Ativo, patrimônio líquido e resultado por empresa e período</caption>
+                        <thead><tr><th scope="col">Empresa e período</th><th scope="col">Ativo</th><th scope="col">Patrimônio líquido</th><th scope="col">Resultado</th></tr></thead>
+                        <tbody>
+                            {% for rotulo in comparativo.labels %}
+                            <tr>
+                                <th scope="row">{{ rotulo }}</th>
+                                <td>{{ fmt_moeda(comparativo.ativos[loop.index0]) }}</td>
+                                <td>{{ fmt_moeda(comparativo.pls[loop.index0]) }}</td>
+                                <td>{{ fmt_moeda(comparativo.resultados[loop.index0]) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        </div>
     </div>
     {% endif %}
 
@@ -237,7 +350,7 @@
     const ctx = document.getElementById('chart-dre');
     if (!ctx) return;
     const backgrounds = dre.valores.map((v, i) => {
-        if (dre.labels[i].startsWith('= ')) return 'rgba(11,79,108,.3)';
+        if (dre.labels[i].startsWith('= ')) return 'rgba(12,58,48,.32)';
         return v >= 0 ? '#16A34A' : '#DC2626';
     });
     new Chart(ctx, {
@@ -256,12 +369,30 @@
     fetch('/api/graficos?ecd_id={{ ecd_ativo }}')
         .then(r => r.json())
         .then(data => {
-            if (!data.dfc || !data.dfc.labels || data.dfc.labels.length === 0) return;
+            const tabela = document.querySelector('[data-chart-data="dfc"]');
+            const estado = document.querySelector('[data-chart-data-status]');
+            if (!data.dfc || !data.dfc.labels || data.dfc.labels.length === 0) {
+                if (estado) estado.textContent = 'Não há valores de fluxo de caixa para este gráfico.';
+                return;
+            }
+            const moeda = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+            data.dfc.labels.forEach((rotulo, indice) => {
+                if (!tabela) return;
+                const linha = document.createElement('tr');
+                const etapa = document.createElement('th');
+                etapa.scope = 'row';
+                etapa.textContent = rotulo;
+                const valor = document.createElement('td');
+                valor.textContent = moeda.format(data.dfc.valores[indice] || 0);
+                linha.append(etapa, valor);
+                tabela.append(linha);
+            });
+            if (estado) estado.textContent = 'Valores atualizados.';
             const ctx = document.getElementById('chart-dfc');
             if (!ctx) return;
             const backgrounds = data.dfc.valores.map((v, i) => {
                 const label = data.dfc.labels[i];
-                if (label.startsWith('= ')) return 'rgba(11,79,108,.3)';
+                if (label.startsWith('= ')) return 'rgba(12,58,48,.32)';
                 if (label.startsWith('Fluxo')) return '#0C3A30';
                 return v >= 0 ? '#16A34A' : '#DC2626';
             });
@@ -274,6 +405,10 @@
                     scales: { y: { ticks: { callback: v => 'R$ ' + (v/1000).toFixed(0) + 'k' } }, x: { ticks: { maxRotation: 45, font: { size: 9 } } } }
                 }
             });
+        })
+        .catch(() => {
+            const estado = document.querySelector('[data-chart-data-status]');
+            if (estado) estado.textContent = 'Não foi possível carregar os valores do fluxo de caixa.';
         });
 })();
 

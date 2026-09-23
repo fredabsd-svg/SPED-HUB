@@ -1,0 +1,41 @@
+{% if usuario %}
+<dialog class="quick-dialog" id="quick-access" aria-labelledby="quick-access-title"
+        aria-describedby="quick-access-help" data-quick-dialog>
+    <div class="quick-dialog-heading">
+        <div>
+            <p class="quick-eyebrow">SPED-HUB</p>
+            <h2 id="quick-access-title">Para onde vamos?</h2>
+        </div>
+        <form method="dialog">
+            <button type="submit" class="quick-close" aria-label="Fechar acesso rápido">Fechar</button>
+        </form>
+    </div>
+
+    <label class="sr-only" for="quick-access-filter">Buscar tela ou ação</label>
+    <input class="quick-filter" id="quick-access-filter" type="search"
+           placeholder="Buscar por tela ou ação..." autocomplete="off"
+           data-quick-filter>
+
+    <ul class="quick-list" aria-label="Telas e ações" data-quick-list>
+        <li data-quick-entry><a href="/" data-quick-link><span>Painel contábil</span><small>Indicadores e relatórios</small></a></li>
+        <li data-quick-entry><a href="/upload" data-quick-link><span>Importar ECD</span><small>Enviar escrituração contábil</small></a></li>
+        <li data-quick-entry><a href="/comparar" data-quick-link><span>Comparar exercícios</span><small>Colocar ECDs lado a lado</small></a></li>
+        <li data-quick-entry><a href="/fiscal/importar" data-quick-link><span>Importar documentos fiscais</span><small>Adicionar XML de NF-e e NFC-e</small></a></li>
+        <li data-quick-entry><a href="/fiscal/documentos" data-quick-link><span>Documentos fiscais</span><small>Consultar notas e itens</small></a></li>
+        <li data-quick-entry><a href="/fiscal/classificar" data-quick-link><span>Classificação fiscal</span><small>Revisar propostas das regras</small></a></li>
+        <li data-quick-entry><a href="/fiscal/corrigir" data-quick-link><span>Corrigir documentos</span><small>Simular ajustes em lote</small></a></li>
+        <li data-quick-entry><a href="/fiscal/gerar" data-quick-link><span>Gerar escrituração</span><small>Conferir o espelho e arquivar</small></a></li>
+        <li data-quick-entry><a href="/fiscal/cadastro" data-quick-link><span>Cadastro fiscal</span><small>Configurar dados das empresas</small></a></li>
+        <li data-quick-entry><a href="/layout" data-quick-link><span>Layouts de relatório</span><small>Configurar leiautes contábeis</small></a></li>
+        {% if usuario.admin %}
+        <li data-quick-entry><a href="/api-keys" data-quick-link><span>Chaves de API</span><small>Gerenciar integrações</small></a></li>
+        <li data-quick-entry><a href="/webhooks" data-quick-link><span>Webhooks</span><small>Acompanhar entregas</small></a></li>
+        <li data-quick-entry><a href="/auditoria" data-quick-link><span>Auditoria</span><small>Consultar ações e acessos</small></a></li>
+        <li data-quick-entry><a href="/monitoring" data-quick-link><span>Monitoramento</span><small>Verificar a saúde do sistema</small></a></li>
+        {% endif %}
+    </ul>
+    <p class="quick-empty" data-quick-empty hidden>Nenhuma tela encontrada.</p>
+    <p class="quick-status sr-only" role="status" aria-live="polite" data-quick-status></p>
+    <p class="quick-help" id="quick-access-help">Digite para filtrar. Use Tab para percorrer os resultados. Esc fecha esta janela.</p>
+</dialog>
+{% endif %}

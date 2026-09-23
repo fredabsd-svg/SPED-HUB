@@ -425,13 +425,17 @@ class TestTemplatesFase11:
         assert "drag-handle" in content
 
     def test_navbar_tem_webhooks(self):
-        """Verifica que os templates com navbar própria têm link para Webhooks."""
-        # dashboard.html e upload.html estendem base.html — verificar base.html + templates standalone
+        """Verifica o link na nav compartilhada usada pelas telas principais."""
+        raiz = Path(__file__).parent.parent / "src" / "dashboard" / "templates"
         templates_to_check = ["base.html", "comparar.html", "layout.html"]
         for tpl_name in templates_to_check:
-            template = Path(__file__).parent.parent / "src" / "dashboard" / "templates" / tpl_name
-            content = template.read_text()
-            assert "/webhooks" in content, f"{tpl_name} não tem link para /webhooks"
+            template = raiz / tpl_name
+            assert (
+                'include "partials/navigation.html"' in template.read_text()
+            ), f"{tpl_name} não inclui a navegação compartilhada"
+
+        navigation = raiz / "partials" / "navigation.html"
+        assert "/webhooks" in navigation.read_text()
 
 
 # ── Testes: Webhook Service — Eventos ────────────────────────────────────────

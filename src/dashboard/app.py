@@ -19,6 +19,8 @@ Rotas:
   GET  /api/dfc             — DFC (HTMX partial)
   GET  /api/export/pdf      — Exporta relatório para PDF
   GET  /api/export/xlsx     — Exporta relatório para XLSX
+  GET  /fiscal/classificar/exportar.csv
+       — Exporta propostas para revisão
   GET  /api/ecds            — Lista ECDs disponíveis
   GET  /api/filtros/aplicar — Aplica filtros e retorna dados filtrados
 
@@ -38,20 +40,28 @@ API REST v1 (autenticação por X-API-Key):
 """
 
 import asyncio
+import csv
 import datetime
 import io
 import logging
 import pathlib
+import re
 import sys
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from sqlalchemy import select
+from sqlalchemy import String, select
 from sqlalchemy.orm import selectinload
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -74,6 +84,7 @@ from src.db.models import (
     DocumentoFiscal,
     Empresa,
     Escrituracao,
+    ItemDocumentoFiscal,
     criar_engine,
     get_session,
     init_db,
@@ -2243,6 +2254,190 @@ def _classificacao(session, empresa, de, ate, obrigacao):
         if resultado.sugestoes or resultado.conflitos:
             propostas.append({"documento": documento, "resultado": resultado})
     return propostas
+
+
+def _classificacao_em_lotes(session, empresa, de, ate, obrigacao, tamanho_lote=100):
+    """Percorre propostas em lotes para não carregar todo o histórico na memória."""
+    inicio, fim = _data_opcional(de), _data_opcional(ate)
+    motor = MotorDeClassificacao(session, obrigacao=obrigacao or None)
+    ultimo_id = None
+
+    while True:
+        consulta = (
+            select(DocumentoFiscal)
+            .options(selectinload(DocumentoFiscal.itens))
+            .where(DocumentoFiscal.empresa_id == empresa.id)
+        )
+        if inicio:
+            consulta = consulta.where(DocumentoFiscal.data_emissao >= inicio)
+        if fim:
+            consulta = consulta.where(DocumentoFiscal.data_emissao <= fim)
+        if ultimo_id is not None:
+            consulta = consulta.where(DocumentoFiscal.id > ultimo_id)
+
+        documentos = (
+            session.execute(consulta.order_by(DocumentoFiscal.id).limit(tamanho_lote))
+            .scalars()
+            .unique()
+            .all()
+        )
+        if not documentos:
+            return
+
+        ultimo_id = documentos[-1].id
+        for documento in documentos:
+            resultado = motor.avaliar(documento)
+            if resultado.sugestoes or resultado.conflitos:
+                yield {"documento": documento, "resultado": resultado}
+        yield None
+
+
+def _celula_csv_segura(valor, *, forcar_texto=False) -> str:
+    """Evita que texto exportado seja interpretado como fórmula de planilha.
+
+    O CSV serve para revisão humana. Campos iniciados por prefixos de fórmula
+    recebem uma tabulação dentro da célula citada; isso altera o valor bruto,
+    mas reduz o risco ao abrir e salvar o arquivo no Excel.
+    """
+    texto = "" if valor is None else str(valor)
+    sem_espacos = texto.lstrip().lstrip("\ufeff").lstrip()
+    prefixos_de_formula = ("=", "+", "-", "@", "＝", "＋", "－", "＠")
+    comeca_com_controle = texto.startswith(("\t", "\r", "\n"))
+    numero_simples = re.fullmatch(r"[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)", sem_espacos)
+    if numero_simples and not forcar_texto:
+        return sem_espacos
+    if sem_espacos.startswith(prefixos_de_formula):
+        return "\t" + sem_espacos
+    if comeca_com_controle:
+        return "\t" + texto
+    if forcar_texto and texto:
+        return "\t" + texto
+    return texto
+
+
+def _planilha_pode_converter_texto(valor) -> bool:
+    """Identifica texto que Excel tende a reinterpretar ao abrir CSV."""
+    if not isinstance(valor, str):
+        return False
+    texto = valor.strip()
+    formatos = (
+        r"\d+",
+        r"[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)[eE][+-]?\d+",
+        r"\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?",
+    )
+    return any(re.fullmatch(formato, texto) for formato in formatos)
+
+
+def _coluna_fiscal_e_texto(modelo, campo) -> bool:
+    coluna = modelo.__table__.columns.get(campo)
+    return coluna is not None and isinstance(coluna.type, String)
+
+
+@app.get("/fiscal/classificar/exportar.csv")
+async def classificar_exportar_csv(
+    request: Request,
+    empresa: int = Query(...),
+    de: str | None = Query(default=None),
+    ate: str | None = Query(default=None),
+    obrigacao: str | None = Query(default=None),
+):
+    """Exporta para conferência as propostas visíveis, sem gravar alterações."""
+    usuario = await get_usuario_atual(request)
+    if not usuario:
+        return RedirectResponse(url="/login", status_code=302)
+
+    session = get_session(_get_engine())
+    try:
+        alvo = _empresa_do_usuario(session, usuario, empresa)
+        if alvo is None:
+            raise HTTPException(status_code=404, detail="Empresa não encontrada.")
+        _data_opcional(de)
+        _data_opcional(ate)
+    except Exception:
+        session.close()
+        raise
+
+    async def exportar_linhas():
+        saida = io.StringIO(newline="")
+        escritor = csv.writer(saida, delimiter=";", quoting=csv.QUOTE_ALL, lineterminator="\r\n")
+        try:
+            escritor.writerow(
+                [
+                    "Empresa",
+                    "CNPJ",
+                    "Emissão",
+                    "Documento",
+                    "Item",
+                    "Campo",
+                    "Valor atual",
+                    "Valor proposto",
+                    "Regra",
+                    "Justificativa",
+                    "Impacto",
+                ]
+            )
+            yield "\ufeff" + saida.getvalue()
+            saida.seek(0)
+            saida.truncate(0)
+
+            for proposta in _classificacao_em_lotes(session, alvo, de, ate, obrigacao):
+                if proposta is None:
+                    await asyncio.sleep(0)
+                    continue
+                documento = proposta["documento"]
+                emissao = documento.data_emissao.isoformat() if documento.data_emissao else ""
+                for sugestao in proposta["resultado"].sugestoes:
+                    impacto = fmt_moeda(sugestao.impacto) if sugestao.impacto is not None else "—"
+                    modelo = (
+                        ItemDocumentoFiscal if sugestao.item_id is not None else DocumentoFiscal
+                    )
+                    coluna_textual = _coluna_fiscal_e_texto(modelo, sugestao.campo)
+                    anterior_textual = coluna_textual and _planilha_pode_converter_texto(
+                        sugestao.valor_anterior
+                    )
+                    sugerido_textual = coluna_textual and _planilha_pode_converter_texto(
+                        sugestao.valor_sugerido
+                    )
+                    escritor.writerow(
+                        (
+                            _celula_csv_segura(alvo.nome),
+                            _celula_csv_segura(alvo.cnpj, forcar_texto=True),
+                            _celula_csv_segura(emissao),
+                            _celula_csv_segura(documento.numero, forcar_texto=True),
+                            _celula_csv_segura(sugestao.numero_item or "cabeçalho"),
+                            _celula_csv_segura(sugestao.campo),
+                            _celula_csv_segura(
+                                (
+                                    sugestao.valor_anterior
+                                    if sugestao.valor_anterior is not None
+                                    else "—"
+                                ),
+                                forcar_texto=anterior_textual,
+                            ),
+                            _celula_csv_segura(
+                                sugestao.valor_sugerido,
+                                forcar_texto=sugerido_textual,
+                            ),
+                            _celula_csv_segura(sugestao.regra_nome),
+                            _celula_csv_segura(sugestao.justificativa),
+                            _celula_csv_segura(impacto),
+                        )
+                    )
+                    yield saida.getvalue()
+                    saida.seek(0)
+                    saida.truncate(0)
+        finally:
+            session.close()
+
+    return StreamingResponse(
+        exportar_linhas(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": ('attachment; filename="sped-hub-propostas-classificacao.csv"'),
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 def _pagina_classificar(session, usuario, request, **contexto):

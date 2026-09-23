@@ -9,6 +9,22 @@ interno da implementação.
 ## [Não publicado]
 
 ### Alterado
+- **A navegação agora acompanha o fluxo de trabalho.** As telas ficaram
+  agrupadas por tarefa, os atalhos de administração aparecem apenas para
+  administradores, e o menu funciona em telas estreitas. `Ctrl+K`/`Cmd+K`
+  abre uma busca por telas com suporte a teclado e retorno de foco.
+- **A área do escritório instrui mecanismos de busca a não indexá-la.** O
+  painel é uma interface privada, então suas telas usam `noindex, nofollow`;
+  páginas sem autenticação também recebem a diretiva.
+- **A identidade visual passou a ser compartilhada nas telas legadas.**
+  Comparação, layout, chaves de API e webhooks usam a mesma navegação, foco
+  visível e tratamento responsivo.
+- **Os gráficos do painel ganharam tabelas com os mesmos valores.** Cada
+  gráfico tem uma alternativa que pode ser aberta junto ao resumo visual;
+  títulos e legendas também entram na hierarquia semântica da página.
+- **A exportação fiscal preserva identificadores no Excel.** CNPJ, número de
+  documento e códigos textuais que pareçam números são marcados como texto
+  para não perder zeros à esquerda ao abrir o CSV.
 - **Dois itens do roadmap foram corrigidos com o que o Guia Prático diz.** O
   que trava a escrituração dos ajustes de documento (C197/D197) não é a falta
   da estrutura do código — essa o Guia documenta —, e sim que a **tabela 5.3 é
@@ -35,6 +51,11 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **As propostas de classificação fiscal podem ser baixadas em CSV.** O
+  arquivo repete empresa, período e obrigação escolhidos na tela, traz regra,
+  justificativa e impacto, e continua sendo apenas para revisão: baixar não
+  aplica nem grava sugestões. Valores que parecem fórmulas recebem proteção
+  para abertura em planilhas.
 - **O certificado A1 da empresa passou a ser guardado, cifrado.** É o
   pré-requisito de qualquer consulta automática a webservice fiscal, e o dado
   mais sensível que o sistema chega a tocar: com o arquivo e a senha, quem os

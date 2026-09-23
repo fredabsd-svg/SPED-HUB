@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
     <title>API Keys — SPED-HUB</title>
     <script src="/static/vendor/alpine-3.14.1.min.js" defer></script>
     <style>
@@ -203,23 +204,16 @@
             transition: all 0.3s;
         }
     </style>
+    <link rel="stylesheet" href="/static/app-shell.css">
+    <script defer src="/static/quick-access.js"></script>
 </head>
 <body>
-    <div class="navbar">
-        <h1>🔑 SPED-HUB — API Keys</h1>
-        <nav>
-            <a href="/">Dashboard</a>
-            <a href="/upload">Upload</a>
-            <a href="/comparar">Comparar</a>
-            <a href="/layout">Layout</a>
-            <a href="/webhooks">Webhooks</a>
-            <a href="/api-keys" class="active">API Keys</a>
-            <a href="/logout">Sair</a>
-        </nav>
-    </div>
+    <a class="skip-link" href="#page-content">Pular para o conteúdo</a>
+    {% include "partials/navigation.html" %}
+    {% include "partials/quick_access.html" %}
 
-    <div class="container" x-data="apiKeysApp()" x-init="loadKeys()">
-        <h2 class="page-title">Gerenciamento de API Keys</h2>
+    <main class="container" id="page-content" tabindex="-1" x-data="apiKeysApp()" x-init="loadKeys()">
+        <h1 class="page-title">Gerenciamento de API Keys</h1>
         <p class="page-subtitle">Crie e gerencie chaves de API para integração com sistemas externos. A chave completa é exibida apenas uma vez.</p>
 
         <!-- Nova chave gerada -->
@@ -315,7 +309,7 @@
 
         <!-- Toast -->
         <div class="toast" x-show="toastVisivel" x-transition x-text="toastMsg" @click="toastVisivel = false"></div>
-    </div>
+    </main>
 
     <script>
         function apiKeysApp() {

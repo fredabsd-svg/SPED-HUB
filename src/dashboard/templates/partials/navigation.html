@@ -1,0 +1,53 @@
+<header class="navbar">
+    <a href="/" class="navbar-brand" aria-label="SPED-HUB — início">SPED<span>-HUB</span></a>
+
+    {% if usuario %}
+    <nav class="navbar-nav" aria-label="Navegação principal">
+        <a href="/" class="nav-link{% if current_page == 'dashboard' %} is-active{% endif %}"
+           {% if current_page == 'dashboard' %}aria-current="page"{% endif %}>Painel</a>
+
+        <details class="nav-group{% if current_page in ['upload', 'comparar'] %} is-active{% endif %}">
+            <summary>Análises</summary>
+            <div class="nav-group-menu">
+                <a href="/upload"{% if current_page == 'upload' %} aria-current="page"{% endif %}>Importar ECD</a>
+                <a href="/comparar"{% if current_page == 'comparar' %} aria-current="page"{% endif %}>Comparar exercícios</a>
+            </div>
+        </details>
+
+        <details class="nav-group{% if current_page in ['importar', 'documentos', 'classificar', 'corrigir', 'gerar', 'cadastro_fiscal'] %} is-active{% endif %}">
+            <summary>Fiscal</summary>
+            <div class="nav-group-menu">
+                <a href="/fiscal/importar"{% if current_page == 'importar' %} aria-current="page"{% endif %}>Importar documentos</a>
+                <a href="/fiscal/documentos"{% if current_page == 'documentos' %} aria-current="page"{% endif %}>Documentos fiscais</a>
+                <a href="/fiscal/classificar"{% if current_page == 'classificar' %} aria-current="page"{% endif %}>Classificar documentos</a>
+                <a href="/fiscal/corrigir"{% if current_page == 'corrigir' %} aria-current="page"{% endif %}>Corrigir documentos</a>
+                <a href="/fiscal/gerar"{% if current_page == 'gerar' %} aria-current="page"{% endif %}>Gerar escrituração</a>
+                <a href="/fiscal/cadastro"{% if current_page == 'cadastro_fiscal' %} aria-current="page"{% endif %}>Cadastro fiscal</a>
+            </div>
+        </details>
+
+        <details class="nav-group{% if current_page == 'layout' or (usuario.admin and current_page in ['api_keys', 'webhooks', 'auditoria', 'monitoring']) %} is-active{% endif %}">
+            <summary>Sistema</summary>
+            <div class="nav-group-menu">
+                <a href="/layout"{% if current_page == 'layout' %} aria-current="page"{% endif %}>Layouts</a>
+                {% if usuario.admin %}
+                <a href="/api-keys"{% if current_page == 'api_keys' %} aria-current="page"{% endif %}>Chaves de API</a>
+                <a href="/webhooks"{% if current_page == 'webhooks' %} aria-current="page"{% endif %}>Webhooks</a>
+                <a href="/auditoria"{% if current_page == 'auditoria' %} aria-current="page"{% endif %}>Auditoria</a>
+                <a href="/monitoring"{% if current_page == 'monitoring' %} aria-current="page"{% endif %}>Monitoramento</a>
+                {% endif %}
+            </div>
+        </details>
+    </nav>
+
+    <div class="navbar-actions">
+        <button type="button" class="quick-trigger" data-quick-open
+                aria-controls="quick-access" aria-haspopup="dialog"
+                aria-keyshortcuts="Control+K Meta+K">
+            <span>Acesso rápido</span><kbd data-shortcut-hint>Ctrl K</kbd>
+        </button>
+        <span class="navbar-user" title="{{ usuario.nome }}">{{ usuario.nome }}</span>
+        <a class="nav-link nav-logout" href="/logout">Sair</a>
+    </div>
+    {% endif %}
+</header>
