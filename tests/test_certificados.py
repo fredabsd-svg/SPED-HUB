@@ -203,9 +203,7 @@ class TestLerOPfx:
 
 class TestAvisoDeVencimento:
     @staticmethod
-    def _dados(
-        dias: int, hoje: datetime.date | None = None
-    ) -> certificados.DadosDoCertificado:
+    def _dados(dias: int, hoje: datetime.date | None = None) -> certificados.DadosDoCertificado:
         hoje = hoje or datetime.date.today()
         return certificados.DadosDoCertificado(
             titular="COMERCIO EXEMPLO LTDA",
