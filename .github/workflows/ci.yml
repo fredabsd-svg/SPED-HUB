@@ -37,9 +37,6 @@ jobs:
       - name: Lint with ruff
         run: ruff check src/ tests/
 
-      - name: Show Black formatting diff (temporary diagnostic)
-        run: black --diff src/dashboard/app.py tests/test_identidade_dashboard.py tests/test_telas_classificar_corrigir.py || true
-
       - name: Check formatting with black
         run: black --check src/ tests/
 

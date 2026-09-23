@@ -298,9 +298,7 @@ class TestExportarClassificacaoCSV:
         )
         assert resposta.headers["cache-control"] == "private, no-store"
         assert resposta.content.startswith(b"\xef\xbb\xbf")
-        linhas = list(
-            csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";")
-        )
+        linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
 
         assert linhas[0] == [
             "Empresa",
@@ -326,12 +324,9 @@ class TestExportarClassificacaoCSV:
         _regra(cenario["referencia"], cenario["empresa_a"])
 
         resposta = cenario["cliente"].get(
-            f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}"
-            "&de=2026-07-31"
+            f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}" "&de=2026-07-31"
         )
-        linhas = list(
-            csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";")
-        )
+        linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
 
         assert resposta.status_code == 200
         assert len(linhas) == 1, "exportou propostas fora do período"
@@ -349,9 +344,7 @@ class TestExportarClassificacaoCSV:
         resposta = cenario["cliente"].get(
             f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}"
         )
-        linhas = list(
-            csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";")
-        )
+        linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
 
         assert resposta.status_code == 200
         assert linhas[1][1] == "\t01234567890123"
@@ -369,17 +362,11 @@ class TestExportarClassificacaoCSV:
         resposta = cenario["cliente"].get(
             f"/fiscal/classificar/exportar.csv?empresa={cenario['empresa_a']}"
         )
-        linhas = list(
-            csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";")
-        )
+        linhas = list(csv.reader(io.StringIO(resposta.content.decode("utf-8-sig")), delimiter=";"))
 
         assert resposta.status_code == 200
-        assert linhas[1][8].startswith("\t="), (
-            "a planilha pode executar o nome da regra"
-        )
-        assert len(linhas[1]) == len(linhas[0]), (
-            "aspas ou separadores criaram uma coluna"
-        )
+        assert linhas[1][8].startswith("\t="), "a planilha pode executar o nome da regra"
+        assert len(linhas[1]) == len(linhas[0]), "aspas ou separadores criaram uma coluna"
 
     def test_nao_exporta_empresa_de_outro_escritorio(self, cenario):
         resposta = cenario["cliente"].get(

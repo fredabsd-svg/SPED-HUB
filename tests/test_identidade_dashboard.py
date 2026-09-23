@@ -105,15 +105,11 @@ class TestGraficosAcessiveis:
 
     def test_paginas_da_area_privada_nao_sao_indexadas(self):
         paginas = [TEMPLATES / "base.html"] + [
-            TEMPLATES / f"{nome}.html"
-            for nome in ("webhooks", "comparar", "layout", "api_keys")
+            TEMPLATES / f"{nome}.html" for nome in ("webhooks", "comparar", "layout", "api_keys")
         ]
 
         for pagina in paginas:
-            assert (
-                'name="robots" content="noindex, nofollow"'
-                in pagina.read_text("utf-8")
-            )
+            assert 'name="robots" content="noindex, nofollow"' in pagina.read_text("utf-8")
 
 
 class TestNavbarAnonima:
