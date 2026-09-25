@@ -1143,3 +1143,22 @@ tbody tr:hover td { background: var(--brand-25); }
         transition-duration: .01ms !important;
     }
 }
+
+/* ── Relatórios: detalhes, notas, DFC e assinaturas ──────────────────── */
+
+.row-detail td { color: var(--n-500); font-size: var(--fs-xs); }
+.row-detail td:first-child { padding-left: var(--s-8); }
+.row-grupo td { color: var(--n-500); font-style: italic; padding-left: var(--s-4); }
+.nota-relatorio { margin: var(--s-3) 0 0; color: var(--n-500); font-size: var(--fs-xs); line-height: 1.5; }
+
+.dfc-resumo { display: flex; flex-wrap: wrap; gap: var(--s-3); margin-top: var(--s-4); }
+.dfc-resumo-item { padding: var(--s-3) var(--s-4); border-radius: var(--r-md); background: var(--brand-25); }
+.dfc-resumo-total { background: var(--brand-800); color: var(--n-0); }
+.dfc-resumo-rotulo { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+.dfc-resumo-valor { font-size: var(--fs-lg); font-weight: 700; }
+
+.assinaturas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s-4); }
+.assinaturas-grid fieldset { margin: 0; padding: var(--s-3) var(--s-4); border: 1px solid var(--n-200); border-radius: var(--r-md); }
+.assinaturas-grid legend { padding: 0 var(--s-1); font-size: var(--fs-sm); font-weight: 600; color: var(--n-900); }
+.assinaturas-grid label { display: block; margin: var(--s-2) 0 var(--s-1); font-size: var(--fs-xs); color: var(--n-600); }
+.assinaturas-grid input { width: 100%; }

@@ -32,6 +32,11 @@ Consumido por: `cli`, `watchdog`, `worker_runner` e `dashboard.app`.
 
 ## Decisões não óbvias e armadilhas
 
+- **J930 (signatários) entra em `signatarios`** — nome, CPF/CNPJ como
+  texto (o CPF pode começar com zero), qualificação, código, CRC e UF do CRC,
+  indicador de responsável legal. E-mail e telefone não são guardados: não
+  têm uso aqui. ECD importada antes da migração `b182f5a414b4` fica sem
+  signatários até ser importada de novo.
 - **A importação é uma transação só.** Interrupção reverte tudo (§6.1). Uma
   ECD pela metade é pior que nenhuma: o balanço não fecha e nada indica que
   faltam lançamentos. Por isso não existe retomada por offset.

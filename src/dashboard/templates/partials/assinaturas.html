@@ -1,0 +1,31 @@
+<!-- Assinaturas dos relatórios (HTMX partial) -->
+<form class="assinaturas-form" hx-post="/api/assinaturas?ecd_id={{ ecd_id }}" hx-target="this" hx-swap="outerHTML">
+    <p class="text-muted" style="margin:0 0 var(--s-3);font-size:var(--fs-sm);">
+        Os PDFs do balanço, da DRE, da DFC, dos índices e do balancete saem com estas duas assinaturas.
+    </p>
+    {% if salvo %}<div class="alert alert-success">Responsável salvo. As próximas exportações já saem com a assinatura.</div>{% endif %}
+    {% if erro %}<div class="alert alert-error">{{ erro }}</div>{% endif %}
+    <div class="assinaturas-grid">
+        <fieldset>
+            <legend>Contador (do J930 da ECD)</legend>
+            {% if contador.nome %}
+            <p style="margin:0;"><strong>{{ contador.nome }}</strong></p>
+            <p class="text-muted" style="margin:0;font-size:var(--fs-sm);">{{ contador.cargo }}{% if contador.documento %} · {{ contador.documento }}{% endif %}</p>
+            {% else %}
+            <p class="text-muted" style="margin:0;font-size:var(--fs-sm);">A ECD não traz o contador no J930: a linha sai em branco para assinar à mão.</p>
+            {% endif %}
+        </fieldset>
+        <fieldset>
+            <legend>Sócio / responsável legal</legend>
+            <label for="resp-nome">Nome</label>
+            <input id="resp-nome" name="nome" type="text" value="{{ empresa.responsavel_nome or '' }}" placeholder="Nome de quem assina pela empresa" maxlength="150">
+            <label for="resp-cpf">CPF</label>
+            <input id="resp-cpf" name="cpf" type="text" inputmode="numeric" value="{{ cpf_formatado }}" placeholder="000.000.000-00" maxlength="14">
+            <label for="resp-qualificacao">Qualificação</label>
+            <input id="resp-qualificacao" name="qualificacao" type="text" value="{{ empresa.responsavel_qualificacao or '' }}" placeholder="Sócio administrador" maxlength="60">
+        </fieldset>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:var(--s-3);">
+        <button type="submit" class="btn btn-primary btn-sm">Salvar assinatura</button>
+    </div>
+</form>

@@ -18,7 +18,7 @@ from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
     fmt_moeda,
-    saldo_por_natureza,
+    fmt_saldo_dc,
 )
 from src.reports.saldos import TOLERANCIA, consolidar
 
@@ -127,10 +127,10 @@ class Balancete:
                 "nivel": ln.nivel,
                 "cod_nat": ln.cod_nat,
                 "ind_cta": ln.ind_cta,
-                "saldo_inicial": fmt_moeda(saldo_por_natureza(ln.saldo_inicial, ln.cod_nat)),
+                "saldo_inicial": fmt_saldo_dc(ln.saldo_inicial),
                 "debitos": fmt_moeda(ln.debitos),
                 "creditos": fmt_moeda(ln.creditos),
-                "saldo_final": fmt_moeda(saldo_por_natureza(ln.saldo_final, ln.cod_nat)),
+                "saldo_final": fmt_saldo_dc(ln.saldo_final),
                 "divergencia": fmt_moeda(ln.divergencia) if ln.tem_divergencia else "–",
             }
             for ln in linhas

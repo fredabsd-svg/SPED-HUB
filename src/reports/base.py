@@ -79,6 +79,19 @@ def fmt_moeda(valor: float) -> str:
     return s
 
 
+def fmt_saldo_dc(valor: float) -> str:
+    """Saldo sinalizado (devedor +, credor −) como no balancete: "1.234,56 D".
+
+    O balancete mostra o saldo com o indicador de natureza, não com sinal:
+    "(1.234,56)" num passivo não diz se a conta está credora (o normal) ou
+    devedora. Saldo que arredonda para zero sai "0,00", sem indicador.
+    """
+    texto = fmt_moeda(abs(valor))
+    if texto == "0,00":
+        return texto
+    return f"{texto} {'D' if valor > 0 else 'C'}"
+
+
 def fmt_data(data: datetime.date) -> str:
     """Formata data em pt-BR: DD/MM/AAAA."""
     return data.strftime("%d/%m/%Y")
@@ -90,6 +103,8 @@ def fmt_data_hora(dt: datetime.datetime) -> str:
 
 
 # ── Contexto de Relatório ──────────────────────────────────────────────────
+
+SEM_FILTROS = "Nenhum filtro aplicado"
 
 
 @dataclass
@@ -106,6 +121,17 @@ class ReportContext:
     hash_ecd: str = ""
     total_paginas: int = 1
     pagina_atual: int = 1
+
+    @property
+    def tem_filtros(self) -> bool:
+        """Há filtro aplicado — só então o relatório mostra o bloco "Filtros".
+
+        Os templates comparavam com "Nenhum filtro aplicado", e o contexto
+        montado pelo painel chegava com a descrição vazia: o PDF saía com o
+        rótulo FILTROS e nada embaixo.
+        """
+        descricao = (self.filtros_descricao or "").strip()
+        return bool(descricao) and descricao != SEM_FILTROS
 
     def to_dict(self) -> dict:
         return self.__dict__

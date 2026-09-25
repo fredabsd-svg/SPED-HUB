@@ -1,0 +1,47 @@
+<!-- Balancete de verificação (HTMX partial) -->
+{% if conferencia.contas_com_divergencia %}
+<div class="alert alert-error">{{ conferencia.contas_com_divergencia }} conta(s) em que saldo inicial + débitos − créditos não dá o saldo final declarado no I155 (soma das diferenças: {{ fmt_moeda(conferencia.soma_divergencias) }}). Estão marcadas na coluna Conf.</div>
+{% endif %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Conta</th>
+                <th>Descrição</th>
+                <th class="text-right">Saldo inicial</th>
+                <th class="text-right">Débitos</th>
+                <th class="text-right">Créditos</th>
+                <th class="text-right">Saldo final</th>
+                <th class="text-center">Conf.</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for linha in linhas %}
+            <tr>
+                <td class="font-mono" style="padding-left:{{ linha.nivel * 14 + 12 }}px;">{{ linha.cod_cta }}</td>
+                <td>{% if linha.ind_cta == 'S' %}<strong>{{ linha.nome_cta }}</strong>{% else %}{{ linha.nome_cta }}{% endif %}</td>
+                <td class="text-right font-mono">{{ fmt_saldo_dc(linha.saldo_inicial) }}</td>
+                <td class="text-right font-mono">{{ fmt_moeda(linha.debitos) }}</td>
+                <td class="text-right font-mono">{{ fmt_moeda(linha.creditos) }}</td>
+                <td class="text-right font-mono">{{ fmt_saldo_dc(linha.saldo_final) }}</td>
+                <td class="text-center">
+                    {% if linha.tem_divergencia %}<span class="badge badge-danger" title="SI + D − C ≠ SF">{{ fmt_moeda(linha.divergencia) }}</span>{% else %}<span class="text-muted">✓</span>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="row-total">
+                <td colspan="2" class="text-right">Totais</td>
+                <td class="text-right font-mono">{{ fmt_saldo_dc(totais.saldo_inicial) }}</td>
+                <td class="text-right font-mono">{{ fmt_moeda(totais.debitos) }}</td>
+                <td class="text-right font-mono">{{ fmt_moeda(totais.creditos) }}</td>
+                <td class="text-right font-mono">{{ fmt_saldo_dc(totais.saldo_final) }}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+<p class="nota-relatorio">
+    {{ conferencia.total_contas }} contas com saldo ou movimento. Saldos com o indicador D (devedor) ou C (credor); total de débitos igual ao de créditos quando a escrituração fecha. Conferência SI + D − C = SF: {{ conferencia.status }}.
+</p>

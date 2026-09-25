@@ -46,13 +46,23 @@ Cada item abaixo tem teste passando; a evidência de cada fase está em
 - Importação do leiaute 9 em fluxo, com memória constante e conferência do
   leiaute linha a linha; a importação interrompida é revertida inteira.
 - Balancete, Razão, Balanço Patrimonial (visão hierárquica e de publicação,
-  J100/J150), DRE, DFC e Livro Diário, com coluna do exercício anterior.
+  J100/J150), DRE e Livro Diário, com coluna do exercício anterior — tirada da
+  própria ECD (saldo de abertura, DRE publicada) quando a do ano anterior não
+  foi importada. A DRE classifica cada conta pelo plano referencial e pelo
+  grupo (CMV, despesas financeiras, outras receitas).
+- DFC pelos métodos direto e indireto, calculada lançamento a lançamento: só
+  entra o que passou pelo caixa e pelos bancos; transferência entre contas da
+  própria empresa e transação sem caixa ficam fora.
+- Índices de habilitação econômico-financeira para licitação (Lei
+  14.133/2021, art. 69) e relatório do plano de contas.
+- Demonstrações com linha de assinatura do contador (lido da ECD) e do sócio.
 - Notas explicativas automáticas e validações de integridade contábil,
   incluindo a recusa de plano de contas com hierarquia cíclica.
 - Filtros combináveis por natureza, nível, período, conta, histórico e valor,
   com visões salvas.
 - Exportação em PDF (identidade "Tinta & Latão", com cor e logo do escritório
-  pela linha de comando) e XLSX; ZIP com PDF, XLSX e CSV; exportação em lote.
+  pela linha de comando), XLSX e TXT; ZIP com PDF, XLSX e CSV; exportação em
+  lote.
 - Leitura dos resumos da EFD-Contribuições e da ECF.
 
 ### Central fiscal
@@ -252,7 +262,7 @@ src/
 ├── ecd_importer.py          importação da ECD em fluxo, transacional
 ├── db/                      modelos SQLAlchemy, repositório e migrações
 ├── filters/                 motor de filtros dos relatórios
-├── reports/                 balancete, razão, balanço, DRE, DFC, diário e exportação
+├── reports/                 balancete, razão, balanço, DRE, DFC, índices, plano, diário e exportação
 ├── validators/              validações de integridade contábil
 ├── documentos/              Central fiscal: importação, classificação e correção de notas
 ├── escrituracoes/           geração, espelho e arquivo da EFD ICMS/IPI e da EFD-Contribuições

@@ -634,6 +634,35 @@ class TestE2EPainelRevisado:
             assert Path(caminho).read_bytes()[:5] == b"%PDF-", "o download não é um PDF"
             browser.close()
 
+    def test_abas_de_indices_plano_dfc_e_assinaturas(self, live_server, contador, tmp_path):
+        """As abas novas (balancete, índices, plano de contas), os dois métodos
+        da DFC e o painel de assinaturas, com o contador lido do J930."""
+        from tests.fixtures.ecd_demonstracoes import CONTADORA, gerar_ecd_demonstracoes
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+            _entrar(page, live_server, contador)
+            arquivo = gerar_ecd_demonstracoes(tmp_path / "demonstracoes.txt")
+            ecd_id = _enviar_ecd(context, live_server, arquivo)
+
+            page.goto(f"{live_server}/?ecd_id={ecd_id}")
+            page.get_by_role("button", name="Assinaturas").click()
+            expect(page.locator("#painel-assinaturas")).to_contain_text(CONTADORA, timeout=15_000)
+
+            page.get_by_role("tab", name="Balancete").click()
+            expect(page.locator("#tab-balancete")).to_contain_text("10.040,00 D")
+            page.get_by_role("tab", name="Índices").click()
+            expect(page.locator("#tab-indices")).to_contain_text("Liquidez Geral (LG)")
+            page.get_by_role("tab", name="Plano de contas").click()
+            expect(page.locator("#tab-plano")).to_contain_text("BANCO ALFA")
+            page.get_by_role("tab", name="DFC").click()
+            expect(page.locator("#tab-dfc")).to_contain_text("Recebimentos de clientes")
+            page.get_by_role("button", name="Método indireto").click()
+            expect(page.locator("#tab-dfc")).to_contain_text("(Aumento) redução em clientes")
+            browser.close()
+
     def test_monitoramento_consulta_o_resumo_uma_vez(self, live_server, contador):
         """`x-init="init()"` repetia o `init()` que o `x-data` já chama: dois
         laços de 15 s consultando o servidor, e o primeiro nunca era parado."""

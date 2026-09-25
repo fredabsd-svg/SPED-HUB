@@ -21,7 +21,7 @@
     <dt>Total Créditos</dt>
     <dd>{{ fmt_moeda(totais.total_creditos) }}</dd>
   </div>
-  {% if ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  {% if ctx.tem_filtros %}
   <div>
     <dt>Filtros</dt>
     <dd>{{ ctx.filtros_descricao }}</dd>

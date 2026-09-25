@@ -26,6 +26,14 @@
 # número viram `0.0` e `1.0`, e quem os compara com "0" passa a errar sempre.
 # Qualquer outra divergência de tipo é defeito, e `tests/test_cnpj.py` cobra
 # esta lista para que uma nova não entre em silêncio.
+#
+# O J930 (signatários) entrou depois, e a ordem dos campos dele foi conferida
+# contra uma ECD de 2025 validada e transmitida pelo PVA — não contra o manual.
+# Dois campos são lidos como texto qualquer que seja o tipo do manual:
+#
+#   J930/03 IDENT_CPF_CNPJ   — CPF pode começar com zero ("01234567890"); como número
+#                              perderia o dígito e viraria outro documento
+#   J930/11 DT_CRC           — data DDMMAAAA, que como número perde o zero do dia
 
 versao: "9"
 ano_base: 2020
@@ -447,6 +455,24 @@ registros:
       - { nome: DT_INI_ESCR, tipo: N, tamanho: 8, obrigatorio: true, posicao: 7 }
       - { nome: DT_FIN_ESCR, tipo: N, tamanho: 8, obrigatorio: true, posicao: 8 }
 
+  # IDENT_CPF_CNPJ e DT_CRC como texto: ver o cabeçalho deste arquivo.
+  "J930":
+    descricao: "Identificação dos signatários da escrituração"
+    nivel: 2
+    campos:
+      - { nome: REG, tipo: C, tamanho: 4, obrigatorio: true, posicao: 1 }
+      - { nome: IDENT_NOM, tipo: C, tamanho: 255, obrigatorio: true, posicao: 2 }
+      - { nome: IDENT_CPF_CNPJ, tipo: C, tamanho: 14, obrigatorio: true, posicao: 3 }
+      - { nome: IDENT_QUALIF, tipo: C, tamanho: 255, obrigatorio: true, posicao: 4 }
+      - { nome: COD_ASSIN, tipo: C, tamanho: 3, obrigatorio: true, posicao: 5 }
+      - { nome: IND_CRC, tipo: C, tamanho: 11, obrigatorio: false, posicao: 6 }
+      - { nome: EMAIL, tipo: C, tamanho: 60, obrigatorio: false, posicao: 7 }
+      - { nome: FONE, tipo: C, tamanho: 14, obrigatorio: false, posicao: 8 }
+      - { nome: UF_CRC, tipo: C, tamanho: 2, obrigatorio: false, posicao: 9 }
+      - { nome: NUM_SEQ_CRC, tipo: C, tamanho: 20, obrigatorio: false, posicao: 10 }
+      - { nome: DT_CRC, tipo: C, tamanho: 8, obrigatorio: false, posicao: 11 }
+      - { nome: IND_RESP_LEGAL, tipo: C, tamanho: 1, obrigatorio: true, posicao: 12 }
+
   "J990":
     descricao: "Encerramento do Bloco J"
     nivel: 1
@@ -487,6 +513,6 @@ hierarquia:
   "I350": ["I355"]
   "I500": ["I510", "I550"]
   "I550": ["I555"]
-  "J001": ["J005", "J800", "J801", "J900", "J990"]
+  "J001": ["J005", "J800", "J801", "J900", "J930", "J990"]
   "J005": ["J100", "J150", "J210"]
   "J210": ["J215"]

@@ -1,8 +1,54 @@
 {% extends "base.html" %}
 
+{% macro tabela(linhas) %}
+<table>
+  <thead>
+    <tr>
+      <th style="width:{{ '50%' if totais.tem_anterior else '75%' }}">Descrição</th>
+      <th class="right" style="width:25%">Período Atual (R$)</th>
+      {% if totais.tem_anterior %}
+      <th class="right" style="width:25%">Período Anterior (R$)</th>
+      {% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for linha in linhas %}
+      {% if linha.tipo == 'section' %}
+      <tr class="dre-subtotal">
+        <td><strong>{{ linha.descricao }}</strong></td>
+        <td></td>
+        {% if totais.tem_anterior %}<td></td>{% endif %}
+      </tr>
+      {% elif linha.tipo == 'grupo' %}
+      <tr class="grupo">
+        <td colspan="{{ 3 if totais.tem_anterior else 2 }}">{{ linha.descricao }}</td>
+      </tr>
+      {% elif linha.tipo in ('subtotal', 'total') %}
+      <tr class="{{ 'dre-total' if linha.tipo == 'total' else 'dre-subtotal' }}">
+        <td>{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor) }}</td>
+        {% if totais.tem_anterior %}
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+        {% endif %}
+      </tr>
+      {% else %}
+      <tr>
+        <td style="padding-left: 24px;">{{ linha.descricao }}</td>
+        <td class="right">{{ fmt_moeda(linha.valor) }}</td>
+        {% if totais.tem_anterior %}
+        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+        {% endif %}
+      </tr>
+      {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
 {% block content %}
 
-<h2>Demonstração dos Fluxos de Caixa</h2>
+<div class="kicker">Demonstração dos fluxos de caixa</div>
+<h2>{{ ctx.empresa_nome or ctx.titulo }}</h2>
 
 <div class="info-box">
   <div>
@@ -23,7 +69,7 @@
     </dd>
   </div>
   {% endif %}
-  {% if ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  {% if ctx.tem_filtros %}
   <div>
     <dt>Filtros</dt>
     <dd>{{ ctx.filtros_descricao }}</dd>
@@ -35,56 +81,82 @@
 <div class="callout callout-error">
   ⚠ Os fluxos ({{ fmt_moeda(totais.variacao_caixa) }}) não conciliam com a variação de
   caixa e equivalentes nos saldos ({{ fmt_moeda(totais.variacao_caixa_saldos) }}).
-  Diferença: {{ fmt_moeda(totais.diferenca_conciliacao) }} — o balanço de abertura ou de
-  encerramento não fecha, ou há conta patrimonial classificada fora do lugar.
+  Diferença: {{ fmt_moeda(totais.diferenca_conciliacao) }} — os lançamentos das contas de
+  caixa não explicam os saldos do I155, ou há conta de caixa classificada fora do lugar.
 </div>
 {% endif %}
 
+{% if totais.lucro_dre is defined and not totais.sem_lancamentos
+      and (totais.lucro_dre - totais.lucro_liquido) | abs > 0.01 %}
+<div class="callout callout-warning">
+  O lucro do período pelos lançamentos ({{ fmt_moeda(totais.lucro_liquido) }}) difere do
+  resultado declarado no I355 ({{ fmt_moeda(totais.lucro_dre) }}). O método indireto parte
+  dos lançamentos, que é o que concilia com o caixa; confira a escrituração.
+</div>
+{% endif %}
+
+{% if totais.sem_lancamentos %}
+<div class="callout callout-warning">
+  A ECD não tem lançamentos (I200/I250): os fluxos saíram da variação dos saldos, sem separar
+  compra de venda nem excluir transações sem efeito caixa. O método direto não é possível.
+</div>
+{% endif %}
+
+{% if linhas_por_metodo is defined %}
+<h3>Método direto</h3>
+{{ tabela(linhas_por_metodo.direto) }}
+
+<h3 class="page-break">Método indireto</h3>
+<p class="nota">
+  Conciliação do lucro líquido com o caixa líquido das atividades operacionais
+  (CPC 03 R2, item 20A). As atividades de investimento e de financiamento são as mesmas
+  nos dois métodos.
+</p>
+{{ tabela(linhas_por_metodo.indireto) }}
+{% else %}
+{{ tabela(linhas) }}
+{% endif %}
+
+{% if totais.composicao_caixa %}
+<h3 class="mt-6">Composição de caixa e equivalentes de caixa</h3>
 <table>
   <thead>
     <tr>
-      <th style="width:50%">Descrição</th>
-      <th class="right" style="width:25%">Período Atual (R$)</th>
-      {% if totais.tem_anterior %}
-      <th class="right" style="width:25%">Período Anterior (R$)</th>
-      {% endif %}
+      <th style="width:16%">Conta</th>
+      <th style="width:44%">Descrição</th>
+      <th class="right" style="width:20%">Início</th>
+      <th class="right" style="width:20%">Fim</th>
     </tr>
   </thead>
   <tbody>
-    {% for linha in linhas %}
-      {% if linha.tipo == 'section' %}
-      <tr class="dre-subtotal">
-        <td><strong>{{ linha.descricao }}</strong></td>
-        <td></td>
-        {% if totais.tem_anterior %}<td></td>{% endif %}
-      </tr>
-      {% elif linha.tipo == 'subtotal' %}
-      <tr class="dre-subtotal">
-        <td>{{ linha.descricao }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor) }}</td>
-        {% if totais.tem_anterior %}
-        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
-        {% endif %}
-      </tr>
-      {% elif linha.tipo == 'total' %}
-      <tr class="dre-total">
-        <td>{{ linha.descricao }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor) }}</td>
-        {% if totais.tem_anterior %}
-        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
-        {% endif %}
-      </tr>
-      {% else %}
-      <tr>
-        <td style="padding-left: 24px;">{{ linha.descricao }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor) }}</td>
-        {% if totais.tem_anterior %}
-        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
-        {% endif %}
-      </tr>
-      {% endif %}
+    {% for c in totais.composicao_caixa %}
+    <tr>
+      <td>{{ c.cod_cta }}</td>
+      <td>{{ c.nome_cta }}</td>
+      <td class="right">{{ fmt_moeda(c.inicial) }}</td>
+      <td class="right">{{ fmt_moeda(c.final) }}</td>
+    </tr>
     {% endfor %}
+    <tr class="total-row">
+      <td colspan="2">Caixa e equivalentes de caixa</td>
+      <td class="right">{{ fmt_moeda(totais.caixa_inicial) }}</td>
+      <td class="right">{{ fmt_moeda(totais.caixa_final) }}</td>
+    </tr>
   </tbody>
 </table>
+{% endif %}
+
+{% if totais.transferencias_internas_qtd is defined %}
+<p class="nota">
+  <strong>Critério.</strong> Só entram os valores que passaram pelas contas de caixa e
+  equivalentes, lançamento a lançamento. Transferências entre contas da própria empresa
+  (banco para banco, banco para aplicação de liquidez imediata, contas de passagem entre
+  elas) não são fluxo e ficam fora (CPC 03 R2, item 9):
+  {{ totais.transferencias_internas_qtd }} lançamento(s), {{ fmt_moeda(totais.transferencias_internas) }}.
+  Transações sem movimento de caixa — compras a prazo, depreciação, provisões,
+  compensações — também ficam fora (item 43): {{ totais.lancamentos_sem_caixa }} lançamento(s).
+  Juros pagos e recebidos e IR/CSLL estão nas atividades operacionais (itens 34A e 35).
+</p>
+{% endif %}
 
 {% endblock %}

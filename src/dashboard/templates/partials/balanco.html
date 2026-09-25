@@ -1,45 +1,55 @@
 <!-- Balanço Patrimonial (HTMX partial) -->
+{% set atual = fmt_data(totais.data_atual) if totais.data_atual else 'Saldo atual' %}
+{% set anterior = fmt_data(totais.data_anterior) if totais.data_anterior else 'Saldo anterior' %}
+{% set colunas = 4 if totais.tem_anterior else 3 %}
 <div class="table-wrap">
     <table>
         <thead>
             <tr>
                 <th>Conta</th>
                 <th>Descrição</th>
-                <th class="text-right">Saldo Atual</th>
+                <th class="text-right">{{ atual }}</th>
+                {% if totais.tem_anterior %}<th class="text-right">{{ anterior }}</th>{% endif %}
             </tr>
         </thead>
         <tbody>
-            {% for secao, titulo in [("ativo", "ATIVO"), ("passivo", "PASSIVO"), ("pl", "PATRIMÔNIO LÍQUIDO")] %}
+            {% for secao, titulo in [("ativo", "Ativo"), ("passivo", "Passivo"), ("pl", "Patrimônio líquido")] %}
             <tr class="row-section">
-                <td colspan="3">{{ titulo }}</td>
+                <td colspan="{{ colunas }}">{{ titulo }}</td>
             </tr>
             {% for linha in grupos[secao] %}
             <tr>
                 <td class="font-mono" style="padding-left:{{ linha.nivel * 16 + 12 }}px;">{{ linha.cod_cta }}</td>
                 <td>{{ linha.nome_cta }}</td>
                 <td class="text-right font-mono">{{ fmt_moeda(linha.saldo_atual) }}</td>
+                {% if totais.tem_anterior %}<td class="text-right font-mono">{{ fmt_moeda(linha.saldo_anterior) }}</td>{% endif %}
             </tr>
             {% endfor %}
             <tr class="row-subtotal">
-                <td colspan="2" class="text-right"><strong>TOTAL {{ titulo }}</strong></td>
-                <td class="text-right font-mono"><strong>{{ fmt_moeda(totais[secao]) }}</strong></td>
+                <td colspan="2" class="text-right">Total — {{ titulo | lower }}</td>
+                <td class="text-right font-mono">{{ fmt_moeda(totais[secao]) }}</td>
+                {% if totais.tem_anterior %}<td class="text-right font-mono">{{ fmt_moeda(totais[secao ~ '_anterior']) }}</td>{% endif %}
             </tr>
             {% endfor %}
         </tbody>
         <tfoot>
             <tr class="row-total">
                 <td colspan="2" class="text-right">
-                    Ativo = {{ fmt_moeda(totais.ativo) }} &nbsp;|&nbsp;
-                    Passivo + PL = {{ fmt_moeda(totais.passivo_pl) }}
-                </td>
-                <td class="text-right">
+                    Passivo + PL
                     {% if totais.diferenca > 0.01 %}
-                    ⚠️ Dif: {{ fmt_moeda(totais.diferenca) }}
+                    <span class="badge badge-danger">Diferença de {{ fmt_moeda(totais.diferenca) }}</span>
                     {% else %}
-                    ✅ Fecha
+                    <span class="badge badge-success">Fecha com o ativo</span>
                     {% endif %}
                 </td>
+                <td class="text-right font-mono">{{ fmt_moeda(totais.passivo_pl) }}</td>
+                {% if totais.tem_anterior %}<td class="text-right font-mono">{{ fmt_moeda(totais.passivo_pl_anterior) }}</td>{% endif %}
             </tr>
         </tfoot>
     </table>
 </div>
+{% if totais.tem_anterior and totais.origem_anterior == 'saldo_inicial' %}
+<p class="nota-relatorio">Coluna {{ anterior }}: saldo de abertura do exercício (saldo inicial do I155) — o balanço de encerramento do exercício anterior.</p>
+{% elif totais.origem_anterior == 'publicado' %}
+<p class="nota-relatorio">Visão de publicação: o balanço como a ECD o publica (J100), com a coluna do exercício anterior publicada.</p>
+{% endif %}

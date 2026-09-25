@@ -173,6 +173,10 @@ class TestOsTiposDoLeiauteDaEcd:
         ("0000", "TIP_ECD"),
         ("0000", "IND_CENTRALIZADA"),
         ("J210", "IND_TIP"),
+        # O J930 foi conferido contra uma ECD validada pelo PVA; estes dois
+        # são lidos como texto qualquer que seja o tipo do manual.
+        ("J930", "IDENT_CPF_CNPJ"),
+        ("J930", "DT_CRC"),
     }
 
     @staticmethod

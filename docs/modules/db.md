@@ -12,7 +12,7 @@ outro módulo constrói engine ou decide entre `create_all` e `alembic upgrade`.
 
 | Símbolo | Para quê |
 |---|---|
-| `Base` e ~25 modelos | Schema. `Escritorio`, `Usuario`, `Empresa`, `ECD`, `Lancamento`, `Partida`, `ApiKey`, `AuditLog`, … |
+| `Base` e ~25 modelos | Schema. `Escritorio`, `Usuario`, `Empresa`, `ECD`, `Lancamento`, `Partida`, `Signatario` (J930), `ApiKey`, `AuditLog`, … `Empresa.responsavel_{nome,cpf,qualificacao}` guardam quem assina as demonstrações pela empresa quando a ECD foi assinada com e-CNPJ (migração `b182f5a414b4`). |
 | `criar_engine(...)` | Engine nova, sem cache. |
 | `obter_engine(...)` | Engine cacheada por processo. Caminho normal. |
 | `init_db(engine)` / `init_db_once(engine)` | `create_all`; a segunda só na primeira vez por engine. |

@@ -4,28 +4,26 @@
         <thead>
             <tr>
                 <th>Descrição</th>
-                <th class="text-right">Valor</th>
+                <th class="text-right">Período atual</th>
+                {% if totais.tem_anterior %}<th class="text-right">Período anterior</th>{% endif %}
             </tr>
         </thead>
         <tbody>
             {% for linha in linhas %}
-            <tr class="{% if linha.tipo == 'subtotal' %}row-subtotal{% elif linha.tipo == 'total' %}row-total{% endif %}">
+            <tr class="{{ {'subtotal': 'row-subtotal', 'total': 'row-total', 'detail': 'row-detail'}.get(linha.tipo, '') }}">
                 <td>
-                    {% if linha.tipo == 'step' %}
-                    &nbsp;&nbsp;&nbsp;{{ linha.descricao }}
-                    {% else %}
-                    <strong>{{ linha.descricao }}</strong>
-                    {% endif %}
+                    {% if linha.tipo == 'step' %}<strong>{{ linha.descricao }}</strong>
+                    {% elif linha.tipo == 'detail' %}{{ linha.descricao }} <span class="text-muted font-mono">{{ linha.cod_cta }}</span>
+                    {% else %}{{ linha.descricao }}{% endif %}
                 </td>
                 <td class="text-right font-mono">{{ fmt_moeda(linha.valor_atual) }}</td>
+                {% if totais.tem_anterior %}<td class="text-right font-mono">{{ fmt_moeda(linha.valor_anterior) }}</td>{% endif %}
             </tr>
             {% endfor %}
         </tbody>
-        <tfoot>
-            <tr class="row-total">
-                <td class="text-right"><strong>Resultado Líquido</strong></td>
-                <td class="text-right font-mono"><strong>{{ fmt_moeda(totais.resultado_liquido) }}</strong></td>
-            </tr>
-        </tfoot>
     </table>
 </div>
+<p class="nota-relatorio">
+    Cada conta vai para o grupo que o plano referencial (I051) e o nome da conta e dos grupos indicam — CMV em custos, IOF e tarifas em despesas financeiras, outras receitas à parte.
+    {% if totais.origem_anterior == 'publicado' %}Período anterior: DRE publicada na própria ECD (J150).{% endif %}
+</p>

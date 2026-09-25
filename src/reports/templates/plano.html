@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block pagina %}paisagem{% endblock %}
+
+{% block content %}
+
+<div class="kicker">Plano de contas da escrituração</div>
+<h2>{{ ctx.empresa_nome or ctx.titulo }}</h2>
+
+<div class="info-box">
+  <div>
+    <dt>Período</dt>
+    <dd>{{ ctx.periodo_ref }}</dd>
+  </div>
+  <div>
+    <dt>Contas</dt>
+    <dd>{{ totais.total }} ({{ totais.sinteticas }} sintéticas, {{ totais.analiticas }} analíticas)</dd>
+  </div>
+  <div>
+    <dt>Níveis</dt>
+    <dd>{{ totais.nivel_maximo }}</dd>
+  </div>
+  {% for natureza, quantidade in totais.por_natureza.items() %}
+  <div>
+    <dt>{{ natureza }}</dt>
+    <dd>{{ quantidade }}</dd>
+  </div>
+  {% endfor %}
+  {% if ctx.tem_filtros %}
+  <div>
+    <dt>Filtros</dt>
+    <dd>{{ ctx.filtros_descricao }}</dd>
+  </div>
+  {% endif %}
+</div>
+
+{% if totais.divergencias_publicado %}
+<div class="callout callout-warning">
+  {{ totais.divergencias_publicado }} conta(s) estão sob uma sintética no I050 e sob outra
+  no balanço publicado (J100) — marcadas na coluna "Superior". Os demonstrativos seguem o
+  balanço publicado; corrija o COD_CTA_SUP no sistema de origem.
+</div>
+{% endif %}
+
+{% if totais.analiticas_sem_referencial %}
+<div class="callout callout-info">
+  {{ totais.analiticas_sem_referencial | length }} conta(s) analítica(s) sem plano
+  referencial (I051): {{ totais.analiticas_sem_referencial[:10] | join(', ') }}
+  {%- if totais.analiticas_sem_referencial | length > 10 %}…{% endif %}.
+</div>
+{% endif %}
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:17%">Código</th>
+      <th style="width:35%">Nome</th>
+      <th class="center" style="width:5%">Nív.</th>
+      <th class="center" style="width:5%">Tipo</th>
+      <th style="width:9%">Natureza</th>
+      <th style="width:11%">Superior</th>
+      <th style="width:18%">Referencial</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for linha in linhas %}
+    <tr class="{{ 'synthetic' if linha.ind_cta == 'S' else 'analytical' }}">
+      <td class="indent-{{ [linha.nivel - 1, 4] | min }}">{{ linha.cod_cta }}</td>
+      <td>{{ linha.nome_cta }}</td>
+      <td class="center">{{ linha.nivel }}</td>
+      <td class="center">{{ linha.ind_cta }}</td>
+      <td>{{ linha.natureza }}</td>
+      <td>
+        {{ linha.cod_cta_sup }}
+        {% if linha.superior_publicado %}<div class="formula">J100: {{ linha.superior_publicado }}</div>{% endif %}
+      </td>
+      <td>{{ linha.referencial }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% endblock %}

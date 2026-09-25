@@ -32,6 +32,7 @@ from src.db.models import (
     PlanoConta,
     SaldoPeriodico,
     SaldoResultado,
+    Signatario,
 )
 from src.parsers.ecd import CampoInvalidoError, ECDParser
 from src.settings import get_settings
@@ -148,6 +149,12 @@ def _digits(value, width: int) -> str:
         return str(int(value)).zfill(width)
     digits = "".join(character for character in str(value) if character.isdigit())
     return digits.zfill(width)[-width:]
+
+
+def _documento(value) -> str | None:
+    """CPF ou CNPJ só com letras e dígitos — o CNPJ pode ser alfanumérico."""
+    texto = "".join(c for c in str(value or "") if c.isalnum()).upper()
+    return texto or None
 
 
 def _optional_int(value) -> int | None:
@@ -434,6 +441,7 @@ class ECDImportService:
                     "J100",
                     "J150",
                     "J210",
+                    "J930",
                 }:
                     continue
 
@@ -576,6 +584,18 @@ class ECDImportService:
                 elif record_type in {"J005", "J100", "J150", "J210"}:
                     self._guardar_demonstracao(
                         record, current_ecd.id, demonstracoes, start_date, end_date
+                    )
+                elif record_type == "J930":
+                    current_ecd.signatarios.append(
+                        Signatario(
+                            nome=record.get("IDENT_NOM") or "",
+                            cpf_cnpj=_documento(record.get("IDENT_CPF_CNPJ")),
+                            qualificacao=record.get("IDENT_QUALIF") or None,
+                            cod_assin=record.get("COD_ASSIN") or None,
+                            crc=record.get("IND_CRC") or None,
+                            uf_crc=record.get("UF_CRC") or None,
+                            ind_resp_legal=record.get("IND_RESP_LEGAL") or None,
+                        )
                     )
                 elif record_type == "I355":
                     self.session.add(

@@ -21,7 +21,7 @@ registra auditoria quando bloqueada.
 | `credencial_ve_ecd(session, credencial, ecd_id)` | `__init__.py` | `False` para ECD de outro escritório **e** para inexistente. |
 | `credencial_de_instancia(credencial)` / `requer_credencial_de_instancia` | `__init__.py` | Chave sem escritório ou sessão de admin; a dependência responde 403 à chave de escritório. |
 | `ApiKeyService` | `__init__.py` | `criar`, `listar`, `revogar`, `excluir`. |
-| `router` (`/api/v1`) | `routes.py` | `/health`, `/empresas`, `/ecds`, `/ecds/{id}/{balanco,dre,dfc,diario,kpis,notas,validar,evolucao-multi}`, `/webhooks/*`, `/api-keys/*`, `/audit/*`. |
+| `router` (`/api/v1`) | `routes.py` | `/health`, `/empresas`, `/ecds`, `/ecds/{id}/{balanco,dre,dfc,indices,plano-contas,diario,kpis,notas,validar,evolucao-multi}` (a DFC aceita `?metodo=direto`), `/webhooks/*`, `/api-keys/*`, `/audit/*`. |
 | `schema`, `graphql_router` | `graphql.py` | Queries `health`, `empresas`, `ecds`, `balanco`, `dre`, `dfc`, `diario`, `kpis`, `notas`, `validar`, `evolucaoMulti`. |
 | `contexto_graphql` | `graphql.py` | `context_getter` do router: põe a credencial em `info.context["credencial"]`. |
 

@@ -6,6 +6,84 @@ Atualizado ao fim de cada fase, não só em release (§1.7).
 As entradas descrevem o efeito para quem usa o sistema, não o detalhe
 interno da implementação.
 
+## [Não publicado]
+
+**Como atualizar.** Há uma migração nova, `b182f5a414b4` (signatários da ECD
+e responsável legal da empresa): faça o backup e rode
+`docker compose run --rm migrate`. ECD importada antes dela não tem os
+signatários — importe-a de novo para que o contador saia na assinatura.
+
+### Adicionado
+- **DFC pelos dois métodos, direto e indireto** (ADR 0011). O método direto
+  mostra recebimentos de clientes, pagamentos a fornecedores, a empregados,
+  de tributos, juros e IR/CSLL; o indireto concilia o lucro com o caixa das
+  operações, como o CPC 03 pede a quem apresenta pelo direto. O PDF sai com
+  os dois, a composição de caixa e equivalentes conta a conta e o critério
+  aplicado. No painel, botões alternam o método.
+- **Índices para licitação** (Lei 14.133/2021, art. 69): liquidez geral,
+  solvência geral, liquidez corrente, liquidez seca e imediata,
+  endividamento, capital circulante líquido e patrimônio líquido, no
+  exercício e no anterior, com a fórmula de cada um e os grupos do balanço
+  usados no cálculo. Nova aba no painel, PDF, XLSX e TXT.
+- **Balancete de verificação no painel**, numa aba própria, com saldo
+  inicial, débitos, créditos e saldo final de cada conta, a conferência
+  SI + D − C = SF e download em PDF, XLSX e TXT. O relatório existia só
+  pela linha de comando.
+- **Linha de assinatura do contador e do sócio** no balanço, na DRE, na DFC,
+  nos índices e no balancete. O contador (nome, CRC, CPF) vem da própria ECD
+  (J930). A ECD assinada com e-CNPJ não diz quem é o sócio: informe no painel
+  (Relatórios → Assinaturas) ou com `sped-hub exportar … --socio "NOME"
+  --socio-cpf …`; sem isso, a linha sai em branco para assinar à mão.
+- **Relatório do plano de contas** em PDF, TXT e XLSX: código, nome, nível,
+  sintética/analítica, natureza, superior, referencial (I051) e aglutinação
+  (I052). Nova aba no painel e `sped-hub exportar plano --formato txt`.
+- **Exportação em TXT** de todas as demonstrações (`/api/export/txt` e
+  `--formato txt`), com colunas alinhadas e valores no formato brasileiro.
+- **Duas validações novas**: conta que o I050 pendura numa sintética e o
+  balanço publicado (J100) em outra; e conta de resultado com saldo que não
+  aparece em nenhuma linha da DRE publicada (J150) — o caso da ECD que
+  publicou a DRE sem a devolução de compras e sem os juros de empréstimos.
+- `GET /api/v1/ecds/{id}/indices` e `GET /api/v1/ecds/{id}/plano-contas`;
+  a DFC do REST aceita `?metodo=direto`.
+
+### Alterado
+- **A DFC conta só o que passou pelo caixa e pelos bancos.** Transferência
+  entre contas da própria empresa — banco para banco, banco para aplicação
+  de liquidez imediata, ou pela conta de passagem "TRANSFERÊNCIAS ENTRE
+  CONTAS" — não é mais fluxo; compra a prazo, veículo financiado,
+  depreciação e compensações também não. Numa ECD real, mais de mil PIX entre
+  contas da empresa deixaram de inflar captações e pagamentos, e a variação
+  de caixa bateu com o disponível publicado.
+- **A DRE classifica cada conta pelo plano referencial e pelo grupo**, não só
+  pelo nome da conta: COMPRAS DE MERCADORIAS e o CMV vão para custos (a DRE
+  saía com custo zero), IOF, tarifas e juros para despesas financeiras, e
+  outras receitas ganharam degrau próprio ("Outras receitas e despesas
+  operacionais"), seguido de "Resultado antes do resultado financeiro". O PDF
+  e o painel mostram as contas de cada degrau, e o período anterior vem da
+  DRE publicada na própria ECD quando a do ano anterior não foi importada.
+- **Planilhas com cabeçalho em português** e a data do balanço nas colunas
+  de saldo.
+- **O balancete mostra o saldo com D ou C** ("15.540,00 C") em vez do sinal:
+  "(15.540,00)" não dizia se a conta estava credora ou devedora.
+
+### Corrigido
+- **O balanço mostra o saldo anterior** mesmo sem a ECD do ano anterior
+  importada: é o saldo de abertura do exercício, o mesmo do balanço
+  publicado. As colunas levam as datas (31/12 de cada ano).
+- **O patrimônio líquido de natureza 02** (dentro de "PATRIMÔNIO LÍQUIDO",
+  sob o passivo) vai para a seção do PL; antes o PDF mostrava "Total do
+  Patrimônio Líquido 0,00" e o PL misturado ao passivo.
+- **O bloco "Filtros" sai só quando há filtro.** O PDF baixado pelo painel
+  trazia o rótulo FILTROS vazio, o período em formato ISO e nenhum hash da
+  ECD; agora painel e linha de comando montam o documento do mesmo jeito.
+- **Conta com o superior trocado no plano** (clientes dentro de aplicações
+  financeiras, investimentos dentro do realizável a longo prazo) segue o
+  balanço publicado nos relatórios (ADR 0012): o disponível e os grupos do
+  balanço saem como a empresa os publicou, e a validação avisa para corrigir
+  a origem.
+- A PECLD e os clientes deixam de ser tratados como caixa na DFC quando o
+  plano os pendura no disponível.
+
 ## [0.20.0] — 2026-09-25
 
 **Como atualizar a partir da 0.19.0.** Esta versão traz migrações de schema

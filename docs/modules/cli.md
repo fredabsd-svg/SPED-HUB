@@ -16,8 +16,8 @@ Subcomandos (entry point `sped-hub = "src.cli:main"` no pyproject; também
 | Subcomando | Para quê |
 |---|---|
 | `importar-ecd ARQUIVO [--db]` | Importa ECD em modo incremental; sai com 1 em arquivo inexistente, inválido ou duplicado. |
-| `relatorio TIPO [--conta --natureza --nivel-ate --dt-ini --dt-fin --visao --ecd-id --db]` | `balancete`, `razao`, `balanco`, `dre`, `diario` no terminal. |
-| `exportar TIPO [--formato pdf\|xlsx --saida --escritorio --cor --cor-clara --logo …]` | PDF/XLSX com white-label. |
+| `relatorio TIPO [--conta --natureza --nivel-ate --dt-ini --dt-fin --visao --metodo --ecd-id --db]` | `balancete`, `razao`, `balanco`, `dre`, `dfc`, `indices`, `plano`, `diario` no terminal. `--metodo direto\|indireto\|ambos` escolhe o método da DFC; balanço e DRE mostram o período anterior. |
+| `exportar TIPO [--formato pdf\|xlsx\|txt --saida --escritorio --cor --cor-clara --logo --socio --socio-cpf --socio-qualificacao --sem-assinaturas …]` | Balancete, balanço, DRE, DFC (os dois métodos), índices, plano de contas e diário em PDF (white-label), XLSX ou TXT. `--socio` põe o nome de quem assina pela empresa na linha de assinatura. |
 | `validar [--ecd-id --db]` | Roda `ValidadorIntegridade` e imprime erros/alertas. |
 | `filtros listar\|salvar\|mostrar [--nome --criterios]` | Visões salvas de filtros (JSON). |
 | `info [--db]` | Contagens do banco e últimas 5 ECDs. |
@@ -77,6 +77,10 @@ importa a CLI.
 - Sem `--ecd-id`, `relatorio`/`exportar`/`validar` usam a **última ECD
   importada** (`ORDER BY importado_em DESC`).
 - `relatorio diario` imprime só os 10 primeiros lançamentos na tela.
+- **`exportar` monta o documento por `src.reports.documentos`**, o mesmo
+  caminho do painel: cabeçalho, filtros, assinaturas e colunas não divergem
+  mais entre a linha de comando e a tela. `relatorio dfc|indices|plano`
+  imprime o mesmo texto do `--formato txt`.
 - Os testes entram por `main()` com `sys.argv` trocado — o parser também é
   exercitado, não só as funções `cmd_*` (o módulo já esteve com 0% de
   cobertura).
@@ -96,6 +100,6 @@ pytest tests/test_migrations.py -q   # upgrade_head/stamp_head usados por `migra
 - Não autentica nem aplica isolamento de tenant: fala direto com o banco.
 - Não registra auditoria.
 - Não importa EFD/ECF — só ECD (os outros formatos entram pelo dashboard).
-- Não exporta `razao` (o subcomando `exportar` aceita apenas balancete,
-  balanco, dre e diario).
+- Não exporta `razao` (o subcomando `exportar` aceita os tipos de
+  `src.reports.documentos.TIPOS`).
 - Não gera migração — só aplica/carimba as existentes.

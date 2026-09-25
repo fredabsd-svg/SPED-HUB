@@ -248,16 +248,29 @@
 
     {# Barra de abas e painéis separados: com os painéis dentro da barra flex,
        a borda da barra caía embaixo do relatório. #}
-    <section class="card" aria-labelledby="relatorios-titulo" x-data="{ tab: 'balanco', filtros: false }">
+    <section class="card" aria-labelledby="relatorios-titulo" x-data="{ tab: 'balanco', filtros: false, assinaturas: false }">
         <div class="card-header">
             <div class="card-title-group">
                 <h2 id="relatorios-titulo">Relatórios</h2>
                 <span class="card-subtitle">Demonstrações da escrituração, prontas para exportar</span>
             </div>
-            <button type="button" class="btn btn-outline btn-sm" @click="filtros = !filtros"
-                    :aria-expanded="filtros" aria-controls="painel-filtros">
-                {{ ic.icone("filtro") }} Filtros
-            </button>
+            <div style="display:flex;gap:var(--s-2);flex-wrap:wrap;">
+                <button type="button" class="btn btn-outline btn-sm" @click="assinaturas = !assinaturas"
+                        :aria-expanded="assinaturas" aria-controls="painel-assinaturas">
+                    {{ ic.icone("documento") }} Assinaturas
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" @click="filtros = !filtros"
+                        :aria-expanded="filtros" aria-controls="painel-filtros">
+                    {{ ic.icone("filtro") }} Filtros
+                </button>
+            </div>
+        </div>
+
+        <div class="card-body" id="painel-assinaturas" x-show="assinaturas" x-cloak
+             style="border-bottom:1px solid var(--n-100);background:var(--n-25);">
+            <div hx-get="/api/assinaturas?ecd_id={{ ecd_ativo }}" hx-trigger="load">
+                <div class="carregando"><span class="spinner"></span> Carregando…</div>
+            </div>
         </div>
 
         <div class="card-body" id="painel-filtros" x-show="filtros" x-cloak
@@ -308,8 +321,11 @@
         <div class="card-body">
             <div class="tabs" role="tablist" aria-label="Relatórios contábeis">
                 <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'balanco'" :class="{ active: tab === 'balanco' }" @click="tab = 'balanco'">Balanço</button>
+                <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'balancete'" :class="{ active: tab === 'balancete' }" @click="tab = 'balancete'">Balancete</button>
                 <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'dre'" :class="{ active: tab === 'dre' }" @click="tab = 'dre'">DRE</button>
                 <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'dfc'" :class="{ active: tab === 'dfc' }" @click="tab = 'dfc'">DFC</button>
+                <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'indices'" :class="{ active: tab === 'indices' }" @click="tab = 'indices'">Índices</button>
+                <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'plano'" :class="{ active: tab === 'plano' }" @click="tab = 'plano'">Plano de contas</button>
                 <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'diario'" :class="{ active: tab === 'diario' }" @click="tab = 'diario'">Diário</button>
             </div>
 
@@ -324,9 +340,22 @@
                             hx-target="#tab-balanco" hx-swap="innerHTML">Publicação</button>
                     <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_ativo }}&tipo=balanco" download>{{ ic.icone("baixar") }} PDF</a>
                     <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_ativo }}&tipo=balanco" download>{{ ic.icone("baixar") }} XLSX</a>
+                    <a class="btn btn-sm btn-outline" href="/api/export/txt?ecd_id={{ ecd_ativo }}&tipo=balanco" download>{{ ic.icone("baixar") }} TXT</a>
                 </div>
                 <div id="tab-balanco" hx-get="/api/balanco?ecd_id={{ ecd_ativo }}" hx-trigger="load">
                     <div class="carregando"><span class="spinner"></span> Carregando o balanço…</div>
+                </div>
+            </div>
+
+            <!-- Balancete de verificação -->
+            <div class="tab-content" role="tabpanel" :class="{ active: tab === 'balancete' }">
+                <div class="report-actions">
+                    <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_ativo }}&tipo=balancete" download>{{ ic.icone("baixar") }} PDF</a>
+                    <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_ativo }}&tipo=balancete" download>{{ ic.icone("baixar") }} XLSX</a>
+                    <a class="btn btn-sm btn-outline" href="/api/export/txt?ecd_id={{ ecd_ativo }}&tipo=balancete" download>{{ ic.icone("baixar") }} TXT</a>
+                </div>
+                <div id="tab-balancete" hx-get="/api/balancete?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
+                    <div class="carregando"><span class="spinner"></span> Carregando o balancete…</div>
                 </div>
             </div>
 
@@ -335,6 +364,7 @@
                 <div class="report-actions">
                     <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_ativo }}&tipo=dre" download>{{ ic.icone("baixar") }} PDF</a>
                     <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_ativo }}&tipo=dre" download>{{ ic.icone("baixar") }} XLSX</a>
+                    <a class="btn btn-sm btn-outline" href="/api/export/txt?ecd_id={{ ecd_ativo }}&tipo=dre" download>{{ ic.icone("baixar") }} TXT</a>
                 </div>
                 <div id="tab-dre" hx-get="/api/dre?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
                     <div class="carregando"><span class="spinner"></span> Carregando a DRE…</div>
@@ -345,6 +375,20 @@
             <div class="tab-content" role="tabpanel" :class="{ active: tab === 'dfc' }">
                 <div id="tab-dfc" hx-get="/api/dfc?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
                     <div class="carregando"><span class="spinner"></span> Carregando a DFC…</div>
+                </div>
+            </div>
+
+            <!-- Índices para licitação -->
+            <div class="tab-content" role="tabpanel" :class="{ active: tab === 'indices' }">
+                <div id="tab-indices" hx-get="/api/indices?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
+                    <div class="carregando"><span class="spinner"></span> Calculando os índices…</div>
+                </div>
+            </div>
+
+            <!-- Plano de contas -->
+            <div class="tab-content" role="tabpanel" :class="{ active: tab === 'plano' }">
+                <div id="tab-plano" hx-get="/api/plano?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
+                    <div class="carregando"><span class="spinner"></span> Carregando o plano de contas…</div>
                 </div>
             </div>
 

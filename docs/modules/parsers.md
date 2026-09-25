@@ -29,6 +29,11 @@ Quem depende: `ecd_importer` (único caminho de persistência da ECD),
 
 ## Decisões não óbvias e armadilhas
 
+- **J930 está no `ecd_v9.yml` com a ordem de campos conferida contra uma ECD
+  validada pelo PVA**, não contra o manual. `IDENT_CPF_CNPJ` e `DT_CRC` são
+  lidos como texto: como número, o CPF perderia o zero à esquerda. As duas
+  divergências estão no cabeçalho do yml e em `tests/test_cnpj.py`.
+
 - **Streaming de verdade**: memória constante; `parse_em_lotes` entrega
   lotes para importação incremental e `extrair_resumo` itera sem
   materializar lista — há teste de regressão garantindo que ele **não**

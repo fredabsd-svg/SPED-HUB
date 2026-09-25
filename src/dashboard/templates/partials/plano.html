@@ -1,0 +1,42 @@
+<!-- Plano de contas (HTMX partial) -->
+{% import "partials/icones.html" as ic %}
+<div class="report-actions">
+    <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_id }}&tipo=plano" download>{{ ic.icone("baixar") }} PDF</a>
+    <a class="btn btn-sm btn-outline" href="/api/export/txt?ecd_id={{ ecd_id }}&tipo=plano" download>{{ ic.icone("baixar") }} TXT</a>
+    <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_id }}&tipo=plano" download>{{ ic.icone("baixar") }} XLSX</a>
+    <span class="text-muted" style="align-self:center;font-size:var(--fs-sm);">
+        {{ totais.total }} contas · {{ totais.sinteticas }} sintéticas · {{ totais.analiticas }} analíticas
+    </span>
+</div>
+{% if totais.divergencias_publicado %}
+<div class="alert alert-warning">{{ totais.divergencias_publicado }} conta(s) estão sob uma sintética no I050 e sob outra no balanço publicado (J100). Os demonstrativos seguem o J100; corrija o COD_CTA_SUP no sistema de origem.</div>
+{% endif %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Código</th>
+                <th>Nome</th>
+                <th class="text-center">Nível</th>
+                <th class="text-center">Tipo</th>
+                <th>Natureza</th>
+                <th>Referencial</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for linha in linhas %}
+            <tr>
+                <td class="font-mono" style="padding-left:{{ linha.nivel * 14 + 12 }}px;">{{ linha.cod_cta }}</td>
+                <td>
+                    {% if linha.ind_cta == 'S' %}<strong>{{ linha.nome_cta }}</strong>{% else %}{{ linha.nome_cta }}{% endif %}
+                    {% if linha.superior_publicado %}<span class="badge badge-warning">J100: sob {{ linha.superior_publicado }}</span>{% endif %}
+                </td>
+                <td class="text-center">{{ linha.nivel }}</td>
+                <td class="text-center">{{ 'Sintética' if linha.ind_cta == 'S' else 'Analítica' }}</td>
+                <td>{{ linha.natureza }}</td>
+                <td class="font-mono">{{ linha.referencial }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

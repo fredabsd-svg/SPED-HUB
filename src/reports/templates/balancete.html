@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 
+{% block pagina %}paisagem{% endblock %}
+
 {% block content %}
 
 <div class="kicker">Balancete de verificação</div>
@@ -18,7 +20,7 @@
     <dt>Conferência SI + D − C = SF</dt>
     <dd>{{ conferencia.status }}</dd>
   </div>
-  {% if ctx.filtros_descricao and ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  {% if ctx.tem_filtros %}
   <div>
     <dt>Filtros</dt>
     <dd>{{ ctx.filtros_descricao }}</dd>
@@ -38,33 +40,33 @@
 <table>
   <thead>
     <tr>
-      <th style="width:14%">Código</th>
-      <th style="width:32%">Descrição</th>
-      <th class="right" style="width:13%">Saldo inicial</th>
-      <th class="right" style="width:12%">Débitos</th>
-      <th class="right" style="width:12%">Créditos</th>
-      <th class="right" style="width:13%">Saldo final</th>
+      <th style="width:13%">Código</th>
+      <th style="width:31%">Descrição</th>
+      <th class="right valor" style="width:13%">Saldo inicial</th>
+      <th class="right valor" style="width:13%">Débitos</th>
+      <th class="right valor" style="width:13%">Créditos</th>
+      <th class="right valor" style="width:13%">Saldo final</th>
       <th class="center" style="width:4%">Conf.</th>
     </tr>
   </thead>
   <tbody>
     {% for linha in linhas %}
     <tr class="{{ 'synthetic' if linha.ind_cta == 'S' else 'analytical' }}">
-      <td class="indent-{{ linha.nivel - 1 if linha.nivel > 0 else 0 }}">{{ linha.cod_cta }}</td>
+      <td class="indent-{{ [linha.nivel - 1, 4] | min if linha.nivel > 0 else 0 }}">{{ linha.cod_cta }}</td>
       <td>{{ linha.nome_cta }}</td>
-      <td class="right">{{ fmt_moeda(linha.saldo_inicial) }}</td>
-      <td class="right">{{ fmt_moeda(linha.debitos) }}</td>
-      <td class="right">{{ fmt_moeda(linha.creditos) }}</td>
-      <td class="right">{{ fmt_moeda(linha.saldo_final) }}</td>
+      <td class="right valor">{{ fmt_saldo_dc(linha.saldo_inicial) }}</td>
+      <td class="right valor">{{ fmt_moeda(linha.debitos) }}</td>
+      <td class="right valor">{{ fmt_moeda(linha.creditos) }}</td>
+      <td class="right valor">{{ fmt_saldo_dc(linha.saldo_final) }}</td>
       <td class="center">{{ '⚠' if linha.tem_divergencia else '✓' }}</td>
     </tr>
     {% endfor %}
     <tr class="total-row">
       <td colspan="2">TOTAIS</td>
-      <td class="right">{{ fmt_moeda(totais.saldo_inicial) }}</td>
-      <td class="right">{{ fmt_moeda(totais.debitos) }}</td>
-      <td class="right">{{ fmt_moeda(totais.creditos) }}</td>
-      <td class="right">{{ fmt_moeda(totais.saldo_final) }}</td>
+      <td class="right valor">{{ fmt_saldo_dc(totais.saldo_inicial) }}</td>
+      <td class="right valor">{{ fmt_moeda(totais.debitos) }}</td>
+      <td class="right valor">{{ fmt_moeda(totais.creditos) }}</td>
+      <td class="right valor">{{ fmt_saldo_dc(totais.saldo_final) }}</td>
       <td></td>
     </tr>
   </tbody>
