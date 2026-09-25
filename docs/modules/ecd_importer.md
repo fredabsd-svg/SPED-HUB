@@ -37,6 +37,15 @@ Consumido por: `cli`, `watchdog`, `worker_runner` e `dashboard.app`.
   faltam lançamentos. Por isso não existe retomada por offset.
 - **Deduplicação por hash do arquivo**, não por nome nem por período. Reenviar
   o mesmo arquivo levanta `DuplicateECDImportError` com o `ecd_id` anterior.
+- **Valor monetário ilegível recusa a importação.** "1.234,56" (separador de
+  milhar) ou "1 234,56" num campo `VL_*` levanta `ECDImportError` com a
+  linha, o registro e o campo, e nada é gravado. Antes o parser devolvia
+  `None` e o importador gravava 0,00 — a escrituração entrava com um valor
+  a menos e aparência de completa (§6.1). Ponto ou vírgula como separador
+  decimal continuam válidos ("1000.00", das fixtures, e "1000,00").
+- **O 0000 é lido pelos nomes do leiaute**: `IND_GRANDE_PORTE` (o importador
+  procurava "IND_GRANDE_POR", chave que o parser nunca gera, e a coluna
+  `ind_grande_por` da empresa ficava sempre vazia).
 - **Hierarquia cíclica é recusada antes do commit** (ADR 0006):
   `ECDImportError` com o caminho do ciclo na mensagem, nada gravado. A
   detecção é a `encontrar_ciclos` de `validators.integridade` — o mesmo fato
@@ -57,6 +66,7 @@ Consumido por: `cli`, `watchdog`, `worker_runner` e `dashboard.app`.
 ```bash
 pytest tests/test_ecd_grande.py -q          # volume e ausência de flush por registro
 pytest tests/test_integracao.py -q          # fluxo completo
+pytest tests/test_importacao_valores.py -q  # valor ilegível recusado; IND_GRANDE_PORTE
 ```
 
 `tests/fixtures/sintetico.py` gera ECD de tamanho arbitrário sem precisar de

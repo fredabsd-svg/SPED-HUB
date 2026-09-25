@@ -7,6 +7,7 @@ Rastreia hierarquia pai-filho (I050→I051/I052, I200→I250, I150→I155, I350�
 """
 
 import logging
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -94,13 +95,51 @@ def detectar_encoding(caminho: Path, bytes_amostra: int = 4096) -> str:
         return "ISO-8859-1"
 
 
-def _parse_valor(valor_str: str, tipo: str):
-    """Converte string do SPED para tipo Python."""
-    if not valor_str:
+# Número com, no máximo, um separador decimal — vírgula (o formato do SPED)
+# ou ponto (o das fixtures e de alguns geradores). Separador de milhar não.
+_NUMERO = re.compile(r"^[+-]?(\d+([.,]\d*)?|[.,]\d+)$")
+
+
+class CampoInvalidoError(ValueError):
+    """Campo monetário (VL_*) que não é um número.
+
+    "1.234,56" e "1 234,56" não viram número; lidos como antes, eles viravam
+    `None` e o importador gravava 0,00 — a escrituração entrava com um valor
+    a menos e nada indicava isso (§6.1).
+    """
+
+    def __init__(self, registro: str, campo: str, valor: str, linha: int | None = None):
+        self.registro = registro
+        self.campo = campo
+        self.valor = valor
+        self.linha = linha
+        super().__init__(registro, campo, valor, linha)
+
+    def __str__(self) -> str:
+        onde = f"linha {self.linha}, " if self.linha is not None else ""
+        return (
+            f"Valor monetário inválido ({onde}{self.registro}, campo {self.campo}): "
+            f"{self.valor!r}. O leiaute aceita só dígitos com vírgula decimal, sem "
+            "separador de milhar"
+        )
+
+
+def _parse_valor(valor_str: str, tipo: str, campo: str = "", registro: str = ""):
+    """Converte string do SPED para tipo Python.
+
+    Campo `N` ilegível vira `None` — exceto os monetários (`VL_*`), que
+    levantam `CampoInvalidoError`: um valor que some vira zero no banco.
+    """
+    if not valor_str or not valor_str.strip():
         return None
     if tipo == "N":
+        texto = valor_str.strip()
+        if campo.startswith("VL_"):
+            if not _NUMERO.match(texto):
+                raise CampoInvalidoError(registro, campo, valor_str)
+            return float(texto.replace(",", "."))
         try:
-            return float(valor_str.replace(",", "."))
+            return float(texto.replace(",", "."))
         except ValueError:
             return None
     return valor_str.strip()
@@ -129,7 +168,9 @@ def _parse_linha(linha: str, metadados: dict) -> dict | None:
     for campo_meta in reg_meta["campos"]:
         pos = campo_meta["posicao"] - 1
         valor_str = campos[pos] if pos < len(campos) else ""
-        resultado[campo_meta["nome"]] = _parse_valor(valor_str, campo_meta["tipo"])
+        resultado[campo_meta["nome"]] = _parse_valor(
+            valor_str, campo_meta["tipo"], campo_meta["nome"], reg_nome
+        )
 
     return resultado
 
@@ -163,7 +204,11 @@ class ECDParser:
                 linha = raw_line.decode(encoding, errors="replace").strip()
                 if not linha:
                     continue
-                registro = _parse_linha(linha, self.metadados)
+                try:
+                    registro = _parse_linha(linha, self.metadados)
+                except CampoInvalidoError as exc:
+                    exc.linha = num_linha
+                    raise
                 if registro is None:
                     continue
 

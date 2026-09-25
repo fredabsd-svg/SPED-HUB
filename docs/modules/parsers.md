@@ -13,6 +13,7 @@ dirigidos pelo YAML de leiaute — e herança pai→filho.
 | Classe | Para quê |
 |---|---|
 | `ECDParser` (`ecd.py`) | `parse` (iterador), `parse_todos`, `parse_em_lotes(n)`, `contar_registros`. Campos nomeados via `src/layouts/ecd_v9.yml`; anota `_linha` e `_offset_bytes`; filhos herdam campos do pai. |
+| `CampoInvalidoError` (`ecd.py`) | `ValueError` com `registro`, `campo`, `valor` e `linha` do campo monetário (`VL_*`) ilegível. |
 | `EFDParser` (`efd.py`) | `parse`, `parse_todos`, `extrair_resumo` (identificação, PIS/COFINS: contribuição, crédito, saldo, a recolher; receita bruta do 0111). Registros genéricos: `_reg` + `_campos` posicionais. |
 | `ECFParser` (`ecf.py`) | `parse`, `parse_todos`, `extrair_resumo` (identificação e as linhas declaradas do N630/IRPJ e N670/CSLL). |
 | `detectar_encoding` | Nos três: UTF-8 ou ISO-8859-1 pelos primeiros 4096 bytes. |
@@ -44,6 +45,14 @@ Quem depende: `ecd_importer` (único caminho de persistência da ECD),
 - **Campo tipo N vira `float` (vírgula→ponto) — inclusive o CNPJ**, que sai
   como `123456000199.0`: perde zeros à esquerda, e o consumidor precisa
   reconstituir com `zfill(14)` (as fixtures fazem exatamente isso).
+- **Campo monetário ilegível é erro, não `None`.** Nos campos `VL_*` da ECD,
+  valor que não é dígitos com no máximo um separador decimal (vírgula, como
+  no leiaute, ou ponto, como nas fixtures) levanta `CampoInvalidoError`
+  com o registro, o campo e a linha. "1.234,56" e "1 234,56" viravam
+  `None`, e o importador gravava 0,00: a escrituração entrava com um valor
+  a menos e aparência de completa. Campo `N` que não é monetário (data,
+  nível, indicador) continua virando `None` quando ilegível. Campo vazio
+  continua `None`.
 - **Assimetria proposital**: só a ECD tem leiaute YAML e campos nomeados;
   EFD e ECF entregam `_campos` posicionais — quem consome conta posições na
   mão (é o que `extrair_resumo` faz). `_campos` não traz o REG: o campo nº
