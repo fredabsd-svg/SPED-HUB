@@ -15,7 +15,8 @@ outro módulo constrói engine ou decide entre `create_all` e `alembic upgrade`.
 | `Base` e ~25 modelos | Schema. `Escritorio`, `Usuario`, `Empresa`, `ECD`, `Lancamento`, `Partida`, `Signatario` (J930), `ApiKey`, `AuditLog`, … `Empresa.responsavel_{nome,cpf,qualificacao}` guardam quem assina as demonstrações pela empresa quando a ECD foi assinada com e-CNPJ (migração `b182f5a414b4`). |
 | `criar_engine(...)` | Engine nova, sem cache. |
 | `obter_engine(...)` | Engine cacheada por processo. Caminho normal. |
-| `init_db(engine)` / `init_db_once(engine)` | `create_all`; a segunda só na primeira vez por engine. |
+| `init_db(engine)` / `init_db_once(engine)` | `create_all` e, no SQLite, `completar_colunas`; a segunda só na primeira vez por engine. |
+| `completar_colunas(engine, metadata=None)` | No SQLite, acrescenta as colunas dos modelos que faltam em tabelas existentes, se o `ALTER TABLE` aceitar (ADR 0013). Fora do SQLite, não faz nada. |
 | `get_session(engine=None)` | `Session` do SQLAlchemy. |
 | `truncar_para_coluna(modelo, campo, valor)` | Corta no limite real declarado no modelo. |
 
@@ -72,6 +73,14 @@ Quem depende: praticamente tudo — `cli`, `watchdog`, `auth`, `audit`,
   compartilha socket TCP com o pai e corrompe a conexão dos dois.
 - **`init_db_once` usa `WeakSet` de engines**, não flag global: engines
   diferentes (bancos diferentes) precisam cada uma da sua inicialização.
+- **No SQLite, `init_db` completa as colunas novas (ADR 0013).** O `create_all`
+  não altera tabela existente: com a coluna `empresas.responsavel_nome` da
+  0.20.0, o painel que subiu sobre o banco sem migrar dava 500 na página
+  inicial. Só entra o que o `ALTER TABLE ADD COLUMN` aceita numa tabela com
+  linhas (admite nulo ou tem `server_default`, não é única nem chave
+  primária); o resto vai para o log. As colunas saem de uma consulta só ao
+  `sqlite_master` com `pragma_table_info`: o `inspect` tabela a tabela
+  custava 5,2 ms por `init_db`; a função inteira leva 1,2 ms.
 - **`truncar_para_coluna` lê o limite do metadata do SQLAlchemy**, não de uma
   constante. `String(n)` é ignorado pelo SQLite e imposto pelo Postgres: um
   `User-Agent` de 1 KB gravava sem reclamar em desenvolvimento e derrubava o
