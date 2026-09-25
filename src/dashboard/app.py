@@ -3274,10 +3274,13 @@ async def escrituracao_arquivo(request: Request, escrituracao_id: int):
         nome = f"{escrituracao.tipo}_{escrituracao.data_inicio:%Y%m}_{escrituracao.id}.txt"
         # O conteúdo já vem com CRLF do gerador, e vai como bytes justamente
         # para ninguém no caminho "consertar" a quebra de linha — o validador
-        # recusa o arquivo inteiro se ela mudar.
+        # recusa o arquivo inteiro se ela mudar. Em ISO-8859-1, que é o que o
+        # leiaute pede: em UTF-8 o validador lia "INDÃšSTRIA".
+        from src.escrituracoes import arquivo_para_baixar
+
         return Response(
-            content=escrituracao.conteudo.encode("utf-8"),
-            media_type="text/plain; charset=utf-8",
+            content=arquivo_para_baixar(escrituracao),
+            media_type="text/plain; charset=iso-8859-1",
             headers={"Content-Disposition": f'attachment; filename="{nome}"'},
         )
     finally:

@@ -25,7 +25,7 @@ com os relatórios contábeis; o `cli.py` registra o parser e despacha.
 | `registrar(sub)` | Acrescenta o parser `fiscal` à CLI. |
 | `cmd_fiscal(args)` | Despacha a ação e traduz falhas em mensagem legível. |
 | `conferir_argumentos(args)` | A mensagem de erro por argumento faltando, ou `None`. |
-| `gravar(destino, texto)` | Escreve o arquivo SPED sem deixar o Python mexer na quebra de linha. |
+| `gravar(destino, texto, codificacao=)` | Escreve o arquivo SPED em ISO-8859-1 sem deixar o Python mexer na quebra de linha; o espelho passa `codificacao="utf-8"`. |
 | `_filtro(bruto)` | `campo:valor`, `campo:operador:valor` ou `campo:operador`. |
 | `_valor_tipado(campo, bruto)` | O texto do terminal no tipo que a coluna espera. |
 | `GERADORES` | Os tipos de escrituração que o comando gera. |
@@ -146,6 +146,11 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   arquivo não distingue nada e o que sobra é conferir a chamada. Não é
   preciosismo: foi assim que o entrypoint do nginx quebrou para quem constrói
   no Windows, com toda a verificação automática passando.
+- **O arquivo SPED é gravado em ISO-8859-1; o espelho, em UTF-8.** O leiaute
+  pede Latin-1, e o arquivo saía em UTF-8 — o validador lia "INDÃšSTRIA". O
+  que não cabe no Latin-1 é transliterado antes de gravar (`para_latin1`),
+  para a gravação nunca falhar no meio. O espelho é prosa para gente e fica em
+  UTF-8.
 - **`importar` varre a pasta só por `.xml`.** Sem o filtro, a pasta de
   downloads do contador encheria o relatório de rejeições de PDF e planilha
   que ninguém mandou importar. Um XML ilegível vira rejeição com motivo e não

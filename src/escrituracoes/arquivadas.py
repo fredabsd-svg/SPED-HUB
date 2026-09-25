@@ -45,7 +45,7 @@ from src.db.models import (
     Escrituracao,
     EscrituracaoDocumento,
 )
-from src.escrituracoes.base import ResultadoGeracao
+from src.escrituracoes.base import ResultadoGeracao, codificar
 from src.escrituracoes.leiaute import POR_OBRIGACAO
 
 # As obrigações que este pacote gera.  Arquivar sob um tipo desconhecido
@@ -61,13 +61,24 @@ class TipoDesconhecido(ValueError):
 
 
 def hash_do_conteudo(texto: str) -> str:
-    """SHA-256 do arquivo exatamente como sai, com CRLF.
+    """SHA-256 do arquivo exatamente como sai, com CRLF e em ISO-8859-1.
 
     É o que permite conferir contra o arquivo que o contribuinte tem em mãos.
     Normalizar a quebra de linha antes de somar daria o mesmo hash para dois
     arquivos que o validador do Fisco trata de forma diferente.
+
+    Os bytes são os do Latin-1, que é como o arquivo sai (`codificar`). Até a
+    correção o arquivo saía — e o hash era calculado — em UTF-8; para texto só
+    ASCII os dois dão o mesmo hash, e é o caso da maioria das escriturações
+    arquivadas antes. As que tinham acento guardam o hash do UTF-8 que foi
+    entregue na época.
     """
-    return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+    return hashlib.sha256(codificar(texto)).hexdigest()
+
+
+def arquivo_para_baixar(escrituracao: Escrituracao) -> bytes:
+    """Os bytes do arquivo guardado, em ISO-8859-1 — o que o validador lê."""
+    return codificar(escrituracao.conteudo)
 
 
 def arquivar(
@@ -310,7 +321,10 @@ def comparar(escrituracao: Escrituracao, resultado: ResultadoGeracao) -> Compara
     depois da entrega aparece nos dois.
     """
     texto_novo = resultado.texto()
-    if hash_do_conteudo(texto_novo) == escrituracao.hash_conteudo:
+    # O texto, não o hash: o hash de uma escrituração arquivada antes de o
+    # arquivo sair em Latin-1 é o do UTF-8 daquela época, e compará-lo com o
+    # de agora acusaria divergência — com diff vazio — num arquivo intocado.
+    if texto_novo == escrituracao.conteudo:
         return Comparacao(iguais=True)
 
     antigas = escrituracao.conteudo.replace("\r\n", "\n").rstrip("\n").split("\n")

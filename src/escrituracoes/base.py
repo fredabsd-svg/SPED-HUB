@@ -10,6 +10,8 @@ acertá-la numa escrituração e errá-la na seguinte.
 from __future__ import annotations
 
 import datetime
+import re
+import unicodedata
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -72,8 +74,100 @@ def formatar_data(data: datetime.date | None) -> str:
     return data.strftime("%d%m%Y") if data else ""
 
 
+# O arquivo é "ASCII - ISO 8859-1 (Latin-1)" (Guia da EFD-Contribuições 1.35,
+# 2.1; a EFD ICMS/IPI usa o mesmo).  Caractere fora dele não pode ser gravado,
+# e a nota traz de tudo: travessão, aspa curva, reticências tipográficas,
+# emoji.  A troca é fixa — o mesmo texto vira sempre o mesmo arquivo, que é o
+# que permite comparar duas gerações — e o que não tem equivalente vira "?",
+# que ao menos mostra que havia algo ali.
+CODIFICACAO = "latin-1"
+
+_TRANSLITERACAO = str.maketrans(
+    {
+        "‐": "-",  # hífen
+        "‑": "-",  # hífen que não quebra
+        "‒": "-",  # traço numérico
+        "–": "-",  # meia-risca
+        "—": "-",  # travessão
+        "―": "-",  # barra horizontal
+        "−": "-",  # sinal de menos
+        "‘": "'",
+        "’": "'",
+        "‚": "'",
+        "‛": "'",
+        "′": "'",
+        "“": '"',
+        "”": '"',
+        "„": '"',
+        "‟": '"',
+        "″": '"',
+        "…": "...",
+        "•": "-",  # marcador
+        "€": "EUR",
+        "™": "TM",
+        # Invisíveis: somem, em vez de virar "?" no meio da palavra.
+        "​": "",  # espaço de largura zero
+        "‌": "",
+        "‍": "",  # o "junta" dos emoji compostos
+        "⁠": "",
+        "︎": "",  # seletores de variação (texto/emoji)
+        "️": "",
+        "﻿": "",  # BOM
+    }
+)
+
+
+def para_latin1(valor: str) -> str:
+    """O texto só com caracteres do ISO-8859-1, trocando o resto sempre igual.
+
+    Acento que existe no Latin-1 fica ("AÇÚCAR"); letra que só se escreve
+    fora dele perde o diacrítico ("Ő" vira "O"); o que não tem letra de base
+    vira "?". Ver `_TRANSLITERACAO` para os sinais tipográficos.
+    """
+    if valor.isascii():
+        return valor
+    saida = []
+    for caractere in valor.translate(_TRANSLITERACAO):
+        if ord(caractere) <= 0xFF:
+            saida.append(caractere)
+            continue
+        base = "".join(
+            c
+            for c in unicodedata.normalize("NFKD", caractere)
+            if ord(c) <= 0xFF and not unicodedata.combining(c)
+        )
+        saida.append(base or "?")
+    return "".join(saida)
+
+
+def codificar(conteudo: str) -> bytes:
+    """O arquivo em bytes, como ele sai — ISO-8859-1, sem falhar."""
+    return para_latin1(conteudo).encode(CODIFICACAO)
+
+
+# "Para campos alfanuméricos [...] podem ser usados todos os caracteres da
+# Tabela ASCII, exceto os caracteres '|' (Pipe, código 124) e os
+# não-imprimíveis (caracteres 00 a 31). [...] Não poderão ser informados
+# espaços 'em branco' no início ou ao final da informação." — Guia Prático da
+# EFD ICMS/IPI 3.2.2, Seção 3.  O pipe é o separador de campo e o CR/LF o de
+# registro: um deles dentro da descrição parte a linha, desloca os campos e faz
+# o `9999` contar menos linhas do que o arquivo tem.
+_PROIBIDOS_NO_CAMPO = re.compile(r"\s*[\x00-\x1f|]+\s*")
+
+
 def texto(valor: Any) -> str:
-    return "" if valor is None else str(valor)
+    """O valor como ele pode ir para um campo do arquivo.
+
+    Todo campo passa por aqui (ver `_add`), então é aqui que o texto da nota
+    deixa de poder quebrar o registro: `|` e caractere de controle viram um
+    espaço, as pontas são aparadas e o resto é levado ao Latin-1.
+    """
+    if valor is None:
+        return ""
+    bruto = str(valor)
+    if _PROIBIDOS_NO_CAMPO.search(bruto):
+        bruto = _PROIBIDOS_NO_CAMPO.sub(" ", bruto)
+    return para_latin1(bruto).strip()
 
 
 @dataclass
@@ -120,6 +214,10 @@ class ResultadoGeracao:
         recusarem o arquivo inteiro sem dizer por quê.
         """
         return "\r\n".join(r.linha() for r in self.registros) + "\r\n"
+
+    def em_bytes(self) -> bytes:
+        """O arquivo como vai para o disco e para o validador: ISO-8859-1."""
+        return codificar(self.texto())
 
 
 # `modFrete` da NF-e e `IND_FRT` do C100 têm a mesma tabela desde 01/01/2018:

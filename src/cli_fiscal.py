@@ -82,6 +82,8 @@ from src.escrituracoes import (
     transmitidas_do_periodo,
     utilizacao,
 )
+from src.escrituracoes.base import CODIFICACAO as CODIFICACAO_SPED
+from src.escrituracoes.base import para_latin1
 
 # O mesmo formato dos relatórios — 1.234.567,89.  `f"{v:,.2f}"` daria
 # `1,234,567.89`, que num sistema fiscal brasileiro se lê como outro número.
@@ -144,8 +146,14 @@ def _nome_padrao(empresa: Empresa, tipo: str, inicio: datetime.date) -> str:
     return f"{tipo}_{empresa.cnpj}_{inicio:%Y%m}.txt"
 
 
-def gravar(destino: pathlib.Path, texto: str) -> None:
+def gravar(destino: pathlib.Path, texto: str, *, codificacao: str = CODIFICACAO_SPED) -> None:
     """Escreve o arquivo SPED sem deixar o Python mexer na quebra de linha.
+
+    Em ISO-8859-1, que é o que o leiaute pede ("ASCII - ISO 8859-1
+    (Latin-1)"). Até a correção saía em UTF-8, e o validador lia "INDÚSTRIA"
+    como "INDÃšSTRIA". O que não cabe no Latin-1 é transliterado antes
+    (`para_latin1`), para a gravação nunca falhar no meio. O espelho, que é
+    prosa para gente e não arquivo para o validador, é gravado em UTF-8.
 
     `newline=""` é o que impede a tradução automática: no Windows, um `open`
     em modo texto sem ele reescreve cada `\\n` como `\\r\\n`, e o texto do
@@ -158,7 +166,9 @@ def gravar(destino: pathlib.Path, texto: str) -> None:
     foi assim que o entrypoint do nginx quebrou para quem constrói no
     Windows, com toda a verificação automática passando.
     """
-    with open(destino, "w", encoding="utf-8", newline="") as saida:
+    if codificacao == CODIFICACAO_SPED:
+        texto = para_latin1(texto)
+    with open(destino, "w", encoding=codificacao, newline="") as saida:
         saida.write(texto)
 
 
@@ -393,7 +403,7 @@ def _espelho(sessao: Session, args) -> int:
     print(texto)
 
     if args.saida:
-        gravar(pathlib.Path(args.saida), texto)
+        gravar(pathlib.Path(args.saida), texto, codificacao="utf-8")
         print(f"  espelho gravado em {args.saida}\n")
 
     return DIVERGENTE if visao.divergencias() else 0

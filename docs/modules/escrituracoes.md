@@ -47,6 +47,10 @@ existisse.
 | `GeradorEFDContribuicoes(session, empresa=, data_inicio=, data_fim=, tipo_escrituracao=)` | Monta a EFD-Contribuições do período. |
 | `.gerar()` | Devolve `ResultadoGeracao`; levanta `CampoObrigatorioAusente`. |
 | `ResultadoGeracao.texto()` | O arquivo, com CRLF. |
+| `ResultadoGeracao.em_bytes()` / `codificar(texto)` | O arquivo em ISO-8859-1, como vai para o disco e para o validador. |
+| `para_latin1(texto)` | O texto só com caracteres do Latin-1; o resto é transliterado sempre do mesmo jeito. |
+| `texto(valor)` | O valor como vai para um campo: sem `\|` nem caractere de controle, aparado, em Latin-1. |
+| `arquivo_para_baixar(escrituracao)` | Os bytes do arquivo guardado, em ISO-8859-1 (a rota de download usa). |
 | `ResultadoGeracao.avisos` | O que a apuração não cobre — para ser lido antes de transmitir. |
 | `ResultadoGeracao.contagem_por_tipo()` | Quantos registros de cada tipo. |
 | `GeradorBase` | O que os geradores compartilham; base de um gerador novo. Precisa declarar `LEIAUTE`. |
@@ -333,9 +337,28 @@ a porta de entrada humana de tudo isto.
   gera dois C170 idênticos. Perguntar "esta linha continua no arquivo?"
   responderia que sim quando uma das duas mudou, e o resumo diria que o C170
   está intacto justamente quando não está.
-- **O hash é do texto com CRLF.** Normalizar antes de somar daria o mesmo hash
-  para dois arquivos que o validador do Fisco trata de forma diferente — e o
-  hash existe justamente para conferir contra o arquivo entregue.
+- **O hash é do texto com CRLF, nos bytes do Latin-1.** Normalizar antes de
+  somar daria o mesmo hash para dois arquivos que o validador do Fisco trata
+  de forma diferente — e o hash existe justamente para conferir contra o
+  arquivo entregue. Até o arquivo sair em Latin-1 o hash era do UTF-8; para
+  texto só ASCII os dois coincidem, e a escrituração antiga com acento guarda
+  o hash do UTF-8 que saiu na época. Por isso `comparar` compara o **texto**,
+  e não o hash: comparar o hash antigo com o de agora acusaria divergência,
+  com diff vazio, num arquivo intocado.
+- **O arquivo sai em ISO-8859-1.** O leiaute pede "ASCII - ISO 8859-1
+  (Latin-1)" (Guia Prático da EFD-Contribuições 1.35, 2.1), e o arquivo saía
+  em UTF-8 — na CLI e no download da tela —, com o validador lendo
+  "INDÃšSTRIA". Caractere fora do Latin-1 (travessão, aspa curva, emoji) não
+  cabe nele e é transliterado por `para_latin1`, sempre do mesmo jeito — o
+  mesmo texto dá o mesmo arquivo, que é o que permite comparar gerações —; o
+  que não tem equivalente vira "?". O download da escrituração arquivada serve
+  os mesmos bytes (`arquivo_para_baixar`).
+- **Texto da nota não quebra o registro.** "PARAFUSO 1/4 | ACO" com um CR/LF
+  no meio partia o C170 em duas linhas físicas — campos a mais numa, a menos
+  na outra, e o `9999` contando menos linhas do que o arquivo tinha. O Guia
+  Prático da EFD ICMS/IPI 3.2.2 (Seção 3) veda `|` e os caracteres 00 a 31 em
+  campo alfanumérico, e espaço nas pontas; `texto()`, por onde todo campo
+  passa em `_add`, troca-os por um espaço e apara.
 - **As contagens do bloco 9 se contam.** O `9900` conta os registros do próprio
   bloco 9, inclusive os `9900` que ainda vão ser escritos, o `9990` e o `9999`;
   o `X990` de cada bloco conta a si mesmo; o `9999` conta a própria linha. É o
@@ -378,5 +401,6 @@ a porta de entrada humana de tudo isto.
 ```bash
 pytest tests/test_gerador_efd_icms.py tests/test_gerador_efd_contribuicoes.py \
        tests/test_escrituracao_arquivada.py \
-       tests/test_documentos_cancelados_e_denegados.py -q
+       tests/test_documentos_cancelados_e_denegados.py \
+       tests/test_arquivo_sped_em_latin1.py -q
 ```
