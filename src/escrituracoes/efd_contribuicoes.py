@@ -51,6 +51,7 @@ from src.escrituracoes.base import (
     formatar_data,
     formatar_quantidade,
     formatar_valor,
+    formatar_valor_obrigatorio,
 )
 from src.escrituracoes.base import texto as _texto
 from src.escrituracoes.leiaute import EFD_CONTRIBUICOES
@@ -68,6 +69,13 @@ REGIMES = {
 
 # Regimes em que a empresa desconta crédito das aquisições.
 _COM_CREDITO = {"1", "3"}
+CUMULATIVO = "2"
+
+# IND_REG_CUM do 0110: escrituração detalhada nos blocos A, C, D e F.
+REGIME_DE_COMPETENCIA_DETALHADO = "9"
+
+# IND_ESCRI do C010: apuração pelo registro individualizado (C100/C170).
+ESCRITURACAO_INDIVIDUALIZADA = "2"
 
 # IND_ATIV do registro 0000.  O nome traz a obrigação de propósito: existe um
 # `ATIVIDADES_ICMS` com o MESMO nome de campo e outra tabela, e chamar um dos
@@ -182,6 +190,7 @@ class GeradorEFDContribuicoes(GeradorBase):
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
         self._avisar_frete_sem_modalidade()
+        self._avisar_pagamento_sem_indicador()
         self._avisar_csosn_convertido()
         self._avisar_participante_sem_endereco()
         return self._resultado
@@ -291,7 +300,18 @@ class GeradorEFDContribuicoes(GeradorBase):
         )
         self._add("0001", "0")
         # O registro que declara o regime — e portanto se há crédito.
-        self._add("0110", e.cod_inc_trib, "1" if self._tem_credito else "", "", "")
+        # O campo 05 (IND_REG_CUM) é o critério de escrituração de quem está
+        # "exclusivamente no regime cumulativo (COD_INC_TRIB = 2)", e "9" é o
+        # da "escrituração detalhada, com base nos registros dos Blocos A, C, D
+        # e F" (Guia Prático 1.35, 0110) — que é o que este arquivo é: C100 e
+        # C170, sem F500 nem F550. Nos outros regimes o campo não se aplica.
+        self._add(
+            "0110",
+            e.cod_inc_trib,
+            "1" if self._tem_credito else "",
+            "",
+            REGIME_DE_COMPETENCIA_DETALHADO if e.cod_inc_trib == CUMULATIVO else "",
+        )
         self._add("0140", e.cnpj, e.nome, e.cnpj, e.uf, _texto(e.ie), _texto(e.cod_mun), "", "")
 
         for campos in self._participantes(visoes):
@@ -381,7 +401,9 @@ class GeradorEFDContribuicoes(GeradorBase):
         self._add("C001", "0" if visoes else "1")
         if visoes:
             e = self.empresa
-            self._add("C010", e.cnpj, "0")  # IND_ESCRI: 0 = escrituração completa
+            # IND_ESCRI só aceita 1 (consolidado, C180/C190) ou 2 (individualizado,
+            # C100/C170) — Guia 1.35, C010, campo 03. Saía "0", fora da tabela.
+            self._add("C010", e.cnpj, ESCRITURACAO_INDIVIDUALIZADA)
             for visao in visoes:
                 self._documento_c100(visao)
         self._encerrar_bloco("C", "C990")
@@ -410,7 +432,9 @@ class GeradorEFDContribuicoes(GeradorBase):
             formatar_data(c["data_emissao"]),
             formatar_data(c["data_entrada_saida"] or c["data_emissao"]),
             formatar_valor(c["valor_total"]),
-            "",  # IND_PGTO
+            # Obrigatório ("S") e saía vazio. O C100 é o da EFD ICMS/IPI, a que o
+            # Guia delega, e o `_ind_pgto` é o mesmo de lá.
+            self._ind_pgto(c),
             formatar_valor(c["valor_desconto"]),
             "",  # VL_ABAT_NT
             formatar_valor(c["valor_produtos"]),
@@ -578,8 +602,17 @@ class GeradorEFDContribuicoes(GeradorBase):
                 "porque nesse regime não há crédito a descontar"
             )
 
-        self._consolidacao("M200", debito_pis, credito_pis)
-        self._consolidacao("M600", debito_cofins, credito_cofins)
+        sobra_pis = self._consolidacao("M200", debito_pis, credito_pis)
+        sobra_cofins = self._consolidacao("M600", debito_cofins, credito_cofins)
+        if sobra_pis or sobra_cofins:
+            self._resultado.avisos.append(
+                "o crédito do período passou da contribuição: ficaram SEM desconto "
+                f"{formatar_valor_obrigatorio(sobra_pis)} de PIS e "
+                f"{formatar_valor_obrigatorio(sobra_cofins)} de Cofins. O M200/M600 só "
+                "desconta até a contribuição do período (Guia, M200, campo 03); o saldo "
+                "a usar depois vai no M100 e no 1100, que este gerador NÃO escreve — "
+                "controle-o à mão até lá"
+            )
         self._resultado.avisos.append(
             "apuração dos blocos M é a soma direta dos documentos: não inclui créditos "
             "extemporâneos, ajustes, retenções nem regimes especiais — confira antes "
@@ -618,21 +651,43 @@ class GeradorEFDContribuicoes(GeradorBase):
                 "— confira a origem antes de transmitir"
             )
 
-    def _consolidacao(self, tipo: str, debito: float, credito: float) -> None:
-        """M200 (PIS) e M600 (Cofins) têm o mesmo desenho de campos."""
-        devido = max(debito - credito, 0.0)
-        self._add(
-            tipo,
-            formatar_valor(debito if self._tem_credito else 0.0),  # NÃO cumulativa
-            formatar_valor(credito),  # VL_TOT_CRED_DESC
-            "",  # VL_TOT_CRED_DESC_ANT
-            formatar_valor(devido if self._tem_credito else 0.0),
-            "",  # VL_RET_NC
-            "",  # VL_OUT_DED_NC
-            formatar_valor(devido if self._tem_credito else 0.0),
-            formatar_valor(debito if not self._tem_credito else 0.0),  # cumulativa
-            "",  # VL_RET_CUM
-            "",  # VL_OUT_DED_CUM
-            formatar_valor(debito if not self._tem_credito else 0.0),
-            formatar_valor(devido if self._tem_credito else debito),  # VL_TOT_CONT_REC
-        )
+    def _consolidacao(self, tipo: str, debito: float, credito: float) -> float:
+        """M200 (PIS) e M600 (Cofins), que têm o mesmo desenho de campos.
+
+        Devolve o crédito que sobrou sem desconto.
+
+        Guia Prático da EFD-Contribuições 1.35, M200:
+
+          * os treze campos são obrigatórios ("S"), e no regime que não se
+            aplica "o valor do campo deverá ser igual a 0" — zero se escreve,
+            não se omite (`formatar_valor_obrigatorio`);
+          * campo 03: "o somatório dos campos VL_TOT_CRED_DESC e
+            VL_TOT_CRED_DESC_ANT deve ser menor ou igual ao valor do campo
+            VL_TOT_CONT_NC_PER". Descontava-se o crédito inteiro, e com compra
+            maior que venda o arquivo dizia ter descontado mais do que devia.
+            O desconto vai até a contribuição; o resto é saldo, que mora no
+            M100/1100.
+        """
+        if self._tem_credito:
+            descontado = min(credito, debito)
+            devido = debito - descontado
+            valores = (
+                debito,  # VL_TOT_CONT_NC_PER
+                descontado,  # VL_TOT_CRED_DESC
+                0.0,  # VL_TOT_CRED_DESC_ANT
+                devido,  # VL_TOT_CONT_NC_DEV
+                0.0,  # VL_RET_NC
+                0.0,  # VL_OUT_DED_NC
+                devido,  # VL_CONT_NC_REC
+                0.0,  # VL_TOT_CONT_CUM_PER
+                0.0,  # VL_RET_CUM
+                0.0,  # VL_OUT_DED_CUM
+                0.0,  # VL_CONT_CUM_REC
+                devido,  # VL_TOT_CONT_REC
+            )
+            sobra = credito - descontado
+        else:
+            valores = (0.0,) * 7 + (debito, 0.0, 0.0, debito, debito)
+            sobra = 0.0
+        self._add(tipo, *(formatar_valor_obrigatorio(v) for v in valores))
+        return sobra

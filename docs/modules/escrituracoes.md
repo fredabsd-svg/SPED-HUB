@@ -109,7 +109,9 @@ Muito, e é preciso saber antes de usar.
 
 - **bloco A (serviços/NFS-e)** — a Central ainda não importa NFS-e;
 - **blocos D (transporte), F (demais operações) e I (financeiras)**;
-- **créditos extemporâneos, ajustes e o bloco 1 inteiro**;
+- **créditos extemporâneos, ajustes e o bloco 1 inteiro** — inclusive o
+  saldo de crédito que passa da contribuição do mês (M100/1100): o M200 só
+  desconta até a contribuição, e a sobra sai num aviso;
 - **bases próprias do monofásico e da alíquota por unidade** — o CST já decide
   se o valor destacado entra na apuração, mas a apuração usa o valor
   destacado, não uma base calculada;
@@ -273,6 +275,29 @@ a porta de entrada humana de tudo isto.
   destacada num item cujo CST diz que não há está inconsistente, e quem fecha o
   mês precisa saber antes de transmitir. Descarte de valor zero não vira aviso:
   repeti-lo em todo item monofásico afogaria os que importam.
+- **O crédito descontado no M200/M600 não passa da contribuição.** O Guia
+  Prático da EFD-Contribuições 1.35 (M200, campo 03) valida que
+  "VL_TOT_CRED_DESC + VL_TOT_CRED_DESC_ANT" seja menor ou igual a
+  "VL_TOT_CONT_NC_PER", e o gerador descontava o crédito inteiro: com compra
+  maior que venda, o arquivo dizia ter descontado mais do que devia. O desconto
+  vai até a contribuição, a contribuição devida sai `0,00`, e a sobra é
+  avisada com o valor — ela é saldo, que mora no M100/1100, que este gerador
+  não escreve.
+- **Os treze campos do M200/M600 saem preenchidos.** São todos "S" no Guia, que
+  manda informar 0 no regime que não se aplica; saíam vazios. É a mesma
+  exceção ao "zero vira vazio" que o Bloco E da EFD ICMS/IPI já fazia
+  (`formatar_valor_obrigatorio`).
+- **C010, 0110 e C100 da EFD-Contribuições no que o Guia não deixa dúvida.**
+  `IND_ESCRI` do C010 saía "0", fora da tabela (1 ou 2): sai `2`, apuração
+  pelo registro individualizado (C100/C170), que é o que o arquivo é. O
+  `IND_REG_CUM` do 0110 sai `9` (escrituração detalhada nos blocos A, C, D e F)
+  quando `COD_INC_TRIB` é `2` — o campo é o critério de quem está só no
+  cumulativo, e este arquivo não tem F500 nem F550. O `IND_PGTO` do C100 é o
+  mesmo `_ind_pgto` da EFD ICMS/IPI. **Ficaram como estavam**, por o Guia não
+  decidir: `COD_TIPO_CONT` do 0110 (não obrigatório; preenchê-lo afirmaria
+  que não há alíquota diferenciada, e o gerador não sabe) e o `1` do
+  `IND_APRO_CRED` (o Guia o exige só quando há crédito comum a mais de um
+  tipo de receita).
 - **No regime cumulativo não há crédito.** A empresa que apura pelo lucro
   presumido paga PIS e Cofins sobre a receita e não desconta nada das compras.
   Um gerador que somasse os créditos das entradas ali produziria contribuição a
@@ -457,5 +482,6 @@ pytest tests/test_gerador_efd_icms.py tests/test_gerador_efd_contribuicoes.py \
        tests/test_documentos_cancelados_e_denegados.py \
        tests/test_arquivo_sped_em_latin1.py \
        tests/test_c190_valor_da_operacao.py \
-       tests/test_participante_quantidade_periodo_e_deducao.py -q
+       tests/test_participante_quantidade_periodo_e_deducao.py \
+       tests/test_efd_contribuicoes_conforme_o_guia.py -q
 ```

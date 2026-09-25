@@ -484,7 +484,9 @@ class _Leitor:
                 problemas.append(f"contribuição: {_moeda(declarado)} × {_moeda(debito)}")
 
             declarado_credito = _valor(self.campo(m, "VL_TOT_CRED_DESC"))
-            esperado_credito = 0.0 if cumulativo else credito
+            # O crédito descontado vai só até a contribuição do período (Guia,
+            # M200, campo 03); o que passa disso é saldo, não desconto.
+            esperado_credito = 0.0 if cumulativo else min(credito, debito)
             if abs(declarado_credito - esperado_credito) > MEIO_CENTAVO:
                 problemas.append(
                     f"créditos: {_moeda(declarado_credito)} × {_moeda(esperado_credito)}"

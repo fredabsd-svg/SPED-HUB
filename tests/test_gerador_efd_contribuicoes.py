@@ -244,7 +244,21 @@ class TestCumulativoNaoTemCredito:
         paga sobre a receita e não desconta nada das compras.
         """
         empresa = _empresa(sessao, escritorio, regime=regime)
-        ImportadorDeDocumentos(sessao, escritorio_id=escritorio.id).importar(nfe_xml(itens=2))
+        importador = ImportadorDeDocumentos(sessao, escritorio_id=escritorio.id)
+        importador.importar(nfe_xml(itens=2))
+        # E uma venda maior que a compra: o crédito descontado vai só até a
+        # contribuição do período (Guia, M200, campo 03), e sem débito que o
+        # absorva o desconto seria zero em qualquer regime — o teste deixaria
+        # de distinguir um do outro.
+        importador.importar(
+            nfe_xml(
+                chave="35260798765432000198550010000000031000000017",
+                numero="3",
+                emitente_cnpj="98765432000198",
+                destinatario_cnpj="11111111000111",
+                itens=3,
+            )
+        )
         sessao.commit()
         return empresa
 
@@ -329,7 +343,10 @@ class TestApuracao:
     def test_credito_maior_que_debito_nao_gera_valor_negativo(self, sessao, escritorio):
         """O campo é 'contribuição a recolher'; saldo credor não cabe nele.
 
-        O excedente vira saldo para o período seguinte — que este gerador ainda
+        E o crédito descontado também não passa da contribuição: "o somatório
+        dos campos VL_TOT_CRED_DESC e VL_TOT_CRED_DESC_ANT deve ser menor ou
+        igual ao valor do campo VL_TOT_CONT_NC_PER" (Guia, M200, campo 03). O
+        excedente vira saldo para o período seguinte — que este gerador ainda
         não escritura, e o aviso da apuração diz isso.
         """
         empresa = self._entrada_e_saida(sessao, escritorio, itens_saida=1, itens_entrada=3)
@@ -337,7 +354,7 @@ class TestApuracao:
         campos = _primeiro(_linhas(_gerar(sessao, empresa)), "M200")
 
         assert _numero(campos[0]) == pytest.approx(16.50)
-        assert _numero(campos[1]) == pytest.approx(49.50)
+        assert _numero(campos[1]) == pytest.approx(16.50), "desconto limitado ao débito"
         assert _numero(campos[3]) == 0.0, "16,50 − 49,50 não pode sair negativo"
 
     def test_cofins_tem_valor_proprio(self, sessao, escritorio):
