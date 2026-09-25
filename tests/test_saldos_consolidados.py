@@ -471,9 +471,10 @@ class TestPainel:
 
     def test_kpis(self, cliente):
         html = cliente.get("/api/kpis", params={"ecd_id": 1}).text
-        for valor in ("R$ 830000.00", "R$ 570000.00", "R$ 180000.00"):
+        # Formato brasileiro nos cartões (o painel mostrava "R$ 830000.00").
+        for valor in ("830.000,00", "570.000,00", "180.000,00"):
             assert valor in html, f"o KPI {valor} sumiu do painel"
-        assert "Margem Líquida" in html and "18.0%" in html, (
+        assert "Margem Líquida" in html and "18,0%" in html, (
             "a margem líquida (180.000 / 1.000.000) não aparecia: a receita bruta chegava "
             "negativa ao painel"
         )
