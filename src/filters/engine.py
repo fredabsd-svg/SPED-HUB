@@ -17,6 +17,7 @@ from src.db.models import (
     SaldoPeriodico,
     SaldoResultado,
 )
+from src.reports.estrutura import correcoes_pelo_balanco_publicado
 from src.reports.saldos import Hierarquia
 
 
@@ -135,6 +136,7 @@ class FilterEngine:
         self.ecd_id = ecd_id
         self._plano_cache: dict[str, PlanoConta] | None = None
         self._hierarquia_cache: Hierarquia | None = None
+        self._correcoes_cache: dict[str, tuple[str | None, str]] | None = None
 
     def _get_plano(self) -> dict[str, PlanoConta]:
         if self._plano_cache is None:
@@ -149,10 +151,38 @@ class FilterEngine:
         return self._get_plano()
 
     def hierarquia(self) -> Hierarquia:
-        """A árvore do plano de contas desta ECD (carregada uma vez)."""
+        """A árvore do plano de contas desta ECD (carregada uma vez).
+
+        Segue o `COD_CTA_SUP` do I050, exceto nas analíticas que o balanço
+        publicado (J100) agrupa noutra sintética do próprio plano — ver
+        `correcoes_de_superior`.
+        """
         if self._hierarquia_cache is None:
-            self._hierarquia_cache = Hierarquia.do_plano(self._get_plano())
+            superiores = {cod: pc.cod_cta_sup for cod, pc in self._get_plano().items()}
+            superiores.update(
+                {cod: novo for cod, (_antigo, novo) in self.correcoes_de_superior().items()}
+            )
+            self._hierarquia_cache = Hierarquia(superiores)
         return self._hierarquia_cache
+
+    def correcoes_de_superior(self) -> dict[str, tuple[str | None, str]]:
+        """`{conta: (superior no I050, superior no J100)}` onde os dois divergem.
+
+        Um I050 com o superior trocado (CLIENTES A RECEBER pendurada em
+        APLICAÇÕES FINANCEIRAS) põe clientes no disponível, investimento no
+        realizável a longo prazo, e daí para a frente erra o balanço, a DFC e
+        os índices.  O balanço publicado da própria ECD costuma estar certo:
+        é o que a empresa assinou.  A correção vale só no caso sem
+        ambiguidade — a analítica aglutinada pelo I052 no próprio código, com
+        linha de detalhe no J100 cujo superior é uma sintética do plano, da
+        mesma natureza.  A validação avisa cada correção, para que o plano
+        seja acertado na origem.
+        """
+        if self._correcoes_cache is None:
+            self._correcoes_cache = correcoes_pelo_balanco_publicado(
+                self.session, self.ecd_id, self._get_plano()
+            )
+        return self._correcoes_cache
 
     def contas_selecionadas(self, criterios: FilterCriteria) -> set[str]:
         """As contas que os critérios de conta deixam passar.

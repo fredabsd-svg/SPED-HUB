@@ -38,6 +38,10 @@
 <!-- ═══ Content ═══ -->
 {% block content %}{% endblock %}
 
+{% if assinaturas %}
+{% include "_assinaturas.html" %}
+{% endif %}
+
 <!-- ═══ Footer ═══ -->
 <div class="report-footer">
   {% if white_label %}

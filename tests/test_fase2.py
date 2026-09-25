@@ -262,7 +262,7 @@ class TestDRE:
         ctx, linhas, totais = dre.gerar()
 
         assert ctx.titulo == "Demonstração do Resultado do Exercício"
-        assert len(linhas) == 11  # 11 degraus
+        assert len(linhas) == 13  # 13 degraus
         assert "resultado_liquido" in totais
 
     def test_dre_tem_total(self, db):
@@ -300,7 +300,7 @@ class TestDRE:
         dre = DRE(session, ecd.id)
         ctx, linhas, totais = dre.gerar(empresa_id=emp.id)
 
-        assert len(linhas) == 11
+        assert len(linhas) == 13
 
     def test_dre_resultado_liquido_calculo(self, db):
         session, ecd, emp = db

@@ -1,0 +1,47 @@
+<!-- Índices de habilitação econômico-financeira (HTMX partial) -->
+{% import "partials/icones.html" as ic %}
+{% set atual = fmt_data(totais.data_atual) if totais.data_atual else 'Atual' %}
+{% set anterior = fmt_data(totais.data_anterior) if totais.data_anterior else 'Anterior' %}
+<div class="report-actions">
+    <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_id }}&tipo=indices" download>{{ ic.icone("baixar") }} PDF</a>
+    <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_id }}&tipo=indices" download>{{ ic.icone("baixar") }} XLSX</a>
+    <a class="btn btn-sm btn-outline" href="/api/export/txt?ecd_id={{ ecd_id }}&tipo=indices" download>{{ ic.icone("baixar") }} TXT</a>
+</div>
+{% if totais.contas_nao_classificadas %}
+<div class="alert alert-warning">{{ totais.contas_nao_classificadas | length }} conta(s) sem grupo do balanço identificado: {{ totais.contas_nao_classificadas[:8] | join(', ') }}.</div>
+{% endif %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Índice</th>
+                <th class="text-right">{{ atual }}</th>
+                {% if totais.tem_anterior %}<th class="text-right">{{ anterior }}</th>{% endif %}
+                <th class="text-center">Referência</th>
+                <th class="text-center">Situação</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for i in indices %}
+            <tr>
+                <td>
+                    {% if i.usual %}<strong>{{ i.nome }}</strong>{% else %}{{ i.nome }}{% endif %}
+                    <div class="text-muted" style="font-size:var(--fs-xs);">{{ i.formula }}</div>
+                </td>
+                <td class="text-right font-mono">{{ '—' if i.valor is none else fmt_moeda(i.valor) }}</td>
+                {% if totais.tem_anterior %}<td class="text-right font-mono">{{ '—' if i.valor_anterior is none else fmt_moeda(i.valor_anterior) }}</td>{% endif %}
+                <td class="text-center">{{ i.referencia or '—' }}</td>
+                <td class="text-center">
+                    {% if i.atende is not none %}
+                    <span class="badge {{ 'badge-success' if i.atende else 'badge-danger' }}">{{ 'Atende' if i.atende else 'Não atende' }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<p class="nota-relatorio">
+    Lei 14.133/2021, art. 69: LG, SG e LC maiores que 1 são os índices usuais (SICAF e guia do TCU); índices de rentabilidade são vedados (§ 2º) e o PL mínimo pode chegar a 10% do valor estimado do contrato (§ 4º){% if totais.contrato_maximo_pl_10 %} — com o PL atual, contratos de até {{ fmt_moeda(totais.contrato_maximo_pl_10) }}{% endif %}.
+    O PDF sai com a assinatura do contador, como pede o § 1º.
+</p>

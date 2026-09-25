@@ -16,7 +16,7 @@ relatórios.
 | Símbolo | Para quê |
 |---|---|
 | `FilterCriteria` | Dataclass de critérios; `to_dict()`/`from_dict()` para JSON. |
-| `FilterEngine(session, ecd_id)` | `aplicar_saldos` (linhas cruas do I155), `aplicar_lancamentos`, `aplicar_saldos_resultado`, `descricao_filtros`; `plano`, `hierarquia`, `contas_selecionadas` e `linhas_de_saldo`, a matéria-prima de `src.reports.saldos.consolidar`. |
+| `FilterEngine(session, ecd_id)` | `aplicar_saldos` (linhas cruas do I155), `aplicar_lancamentos`, `aplicar_saldos_resultado`, `descricao_filtros`; `plano`, `hierarquia`, `contas_selecionadas` e `linhas_de_saldo`, a matéria-prima de `src.reports.saldos.consolidar`; `correcoes_de_superior` (analíticas que o J100 agrupa noutra sintética, ADR 0012). |
 | `tem_criterio_de_conta(criterios)` | Separa "sem critério de conta" de "critério que não casou com nada". |
 
 Os 16 tipos: conta (exata, prefixo, intervalo, nome), natureza, classificação
@@ -35,6 +35,11 @@ Quem depende: os relatórios de `reports/`, `dashboard` (app e services) e
 `cli`.
 
 ## Decisões não óbvias e armadilhas
+
+- **`hierarquia()` segue o J100 onde ele contradiz o I050** (ADR 0012): só
+  para analítica aglutinada no próprio código, com superior do J100 que é
+  sintética do plano e da mesma natureza. `plano()` continua devolvendo o
+  I050 intacto — o relatório do plano de contas mostra o declarado.
 
 - **Semântica fixa: AND entre tipos, OR entre valores do mesmo tipo.** Não
   há OR entre tipos nem negação.

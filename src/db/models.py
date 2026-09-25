@@ -221,6 +221,15 @@ class Empresa(Base):
     # errado porque não tem como saber.
     ind_nat_pj: Mapped[str | None] = mapped_column(String(2))
 
+    # ── Quem assina as demonstrações pela empresa ──────────────────────────
+    # A ECD assinada com e-CNPJ traz no J930 a própria empresa como
+    # responsável legal: o nome do sócio não está em registro nenhum.  Sem
+    # cadastro, a linha de assinatura sai só com a qualificação; com ele, o
+    # nome e o CPF de quem assina saem em todos os relatórios.
+    responsavel_nome: Mapped[str | None] = mapped_column(String(150))
+    responsavel_cpf: Mapped[str | None] = mapped_column(String(11))
+    responsavel_qualificacao: Mapped[str | None] = mapped_column(String(60))
+
     escritorio_id: Mapped[int | None] = mapped_column(
         ForeignKey("escritorios.id"), nullable=True, index=True
     )
@@ -277,6 +286,9 @@ class ECD(Base):
         back_populates="ecd", cascade="all, delete-orphan"
     )
     demonstracoes: Mapped[list["DemonstracaoContabil"]] = relationship(
+        back_populates="ecd", cascade="all, delete-orphan"
+    )
+    signatarios: Mapped[list["Signatario"]] = relationship(
         back_populates="ecd", cascade="all, delete-orphan"
     )
 
@@ -557,6 +569,35 @@ class LinhaDemonstracao(Base):
     ind_tip: Mapped[str | None] = mapped_column(String(1))  # J210: 0 DLPA / 1 DMPL
 
     demonstracao: Mapped["DemonstracaoContabil"] = relationship(back_populates="linhas")
+
+
+class Signatario(Base):
+    """J930 — quem assinou a escrituração: contador e responsável legal.
+
+    Guarda só o que a linha de assinatura dos relatórios usa. E-mail e
+    telefone, que o J930 também traz, ficam de fora: dado pessoal sem uso
+    aqui é dado pessoal que só pode vazar.
+    """
+
+    __tablename__ = "signatarios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ecd_id: Mapped[int] = mapped_column(ForeignKey("ecds.id"), nullable=False, index=True)
+    nome: Mapped[str] = mapped_column(String(255), nullable=False)
+    # CPF (11) de pessoa física ou CNPJ (14) de quem assina com e-CNPJ.
+    cpf_cnpj: Mapped[str | None] = mapped_column(String(14))
+    qualificacao: Mapped[str | None] = mapped_column(String(255))
+    # Tabela de qualificação do signatário: 900 = contador, 001 = e-CNPJ...
+    cod_assin: Mapped[str | None] = mapped_column(String(3))
+    crc: Mapped[str | None] = mapped_column(String(11))
+    uf_crc: Mapped[str | None] = mapped_column(String(2))
+    # "S" para o responsável legal da empresa perante a RFB.
+    ind_resp_legal: Mapped[str | None] = mapped_column(String(1))
+
+    ecd: Mapped["ECD"] = relationship(back_populates="signatarios")
+
+    def __repr__(self):
+        return f"<Signatario {self.cod_assin} {_hash_sensivel(self.cpf_cnpj or '')}>"
 
 
 # ── Lançamentos ────────────────────────────────────────────────────────────

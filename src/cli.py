@@ -25,11 +25,12 @@ from src.db.repository import Repository
 from src.ecd_importer import ECDImportService
 from src.filters.engine import FilterCriteria
 from src.logging_config import configurar_logging
+from src.reports import documentos
 from src.reports.balancete import Balancete
 from src.reports.balanco import BalancoPatrimonial
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
-from src.reports.export_engine import ExportEngine, WhiteLabel
+from src.reports.export_engine import WhiteLabel
 from src.reports.razao import Razao
 from src.validators.integridade import ValidadorIntegridade
 
@@ -138,6 +139,8 @@ def cmd_relatorio(args):
         _cmd_dre(session, ecd, criterios)
     elif args.tipo == "diario":
         _cmd_diario(session, ecd, criterios)
+    elif args.tipo in ("dfc", "indices", "plano"):
+        _cmd_documento(session, ecd, criterios, args)
 
 
 def _cmd_balancete(session, ecd, criterios):
@@ -207,49 +210,83 @@ def _cmd_balanco(session, ecd, criterios, args):
     else:
         ctx, grupos, totais = balanco.gerar(criterios, visao=visao)
 
-    print(f"\n{'='*80}")
+    anterior = totais.get("tem_anterior")
+    rotulo_atual = _rotulo_data(totais.get("data_atual"), "Saldo")
+    rotulo_anterior = _rotulo_data(totais.get("data_anterior"), "Anterior")
+
+    print(f"\n{'='*100}")
     print(f"  {ctx.titulo}")
     print(f"  Período: {ecd.dt_ini} a {ecd.dt_fin}")
-    print(f"{'='*80}")
+    print(f"{'='*100}")
 
     for secao, titulo in [("ativo", "ATIVO"), ("passivo", "PASSIVO"), ("pl", "PATRIMÔNIO LÍQUIDO")]:
         print(f"\n  ── {titulo} ──")
-        print(f"  {'Conta':<20} {'Nome':<40} {'Saldo':>18}")
-        print(f"  {'-'*20} {'-'*40} {'-'*18}")
+        cabecalho = f"  {'Conta':<20} {'Nome':<40} {rotulo_atual:>18}"
+        if anterior:
+            cabecalho += f" {rotulo_anterior:>18}"
+        print(cabecalho)
+        print(f"  {'-'*20} {'-'*40} {'-'*18}" + (f" {'-'*18}" if anterior else ""))
         for ln in grupos[secao]:
             indent = "  " * (ln.nivel - 1)
-            print(f"  {indent}{ln.cod_cta:<20} {ln.nome_cta[:40]:<40} {ln.saldo_atual:>18,.2f}")
-        total = totais[secao]
-        print(f"  {'─'*20} {'─'*40} {'─'*18}")
-        print(f"  {'TOTAL':<20} {'':<40} {total:>18,.2f}")
+            linha = f"  {indent}{ln.cod_cta:<20} {ln.nome_cta[:40]:<40} {ln.saldo_atual:>18,.2f}"
+            if anterior:
+                linha += f" {ln.saldo_anterior:>18,.2f}"
+            print(linha)
+        print(f"  {'─'*20} {'─'*40} {'─'*18}" + (f" {'─'*18}" if anterior else ""))
+        total = f"  {'TOTAL':<20} {'':<40} {totais[secao]:>18,.2f}"
+        if anterior:
+            total += f" {totais[secao + '_anterior']:>18,.2f}"
+        print(total)
 
     print(f"\n  Ativo = {totais['ativo']:,.2f}  |  Passivo + PL = {totais['passivo_pl']:,.2f}")
     if totais["diferenca"] > 0.01:
         print(f"  ⚠ Diferença: {totais['diferenca']:,.2f}")
     else:
         print("  ✓ Balanço fecha!")
+    if anterior and totais.get("origem_anterior") == "saldo_inicial":
+        print("  Saldo anterior: saldo de abertura do exercício (I155).")
+
+
+def _rotulo_data(data, padrao: str) -> str:
+    return data.strftime("%d/%m/%Y") if data else padrao
 
 
 def _cmd_dre(session, ecd, criterios):
     dre = DRE(session, ecd.id)
-    ctx, linhas, totais = dre.gerar(criterios)
+    ctx, linhas, totais = dre.gerar(criterios, detalhar=True)
+    anterior = totais.get("tem_anterior")
 
-    print(f"\n{'='*80}")
+    print(f"\n{'='*100}")
     print(f"  {ctx.titulo}")
     print(f"  Período: {ecd.dt_ini} a {ecd.dt_fin}")
-    print(f"{'='*80}")
-    print(f"  {'Descrição':<50} {'Valor':>18}")
-    print(f"  {'-'*50} {'-'*18}")
+    print(f"{'='*100}")
+    cabecalho = f"  {'Descrição':<60} {'Período atual':>18}"
+    if anterior:
+        cabecalho += f" {'Período anterior':>18}"
+    print(cabecalho)
+    print(f"  {'-'*60} {'-'*18}" + (f" {'-'*18}" if anterior else ""))
 
     for ln in linhas:
-        marker = ""
-        if ln.tipo == "subtotal":
-            marker = "  "
-        elif ln.tipo == "total":
-            marker = "══"
-        print(f"  {marker}{ln.descricao:<50} {ln.valor_atual:>18,.2f}")
+        marker = {"subtotal": "  ", "total": "══", "detail": "      "}.get(ln.tipo, "")
+        descricao = f"{marker}{ln.descricao}"[:60]
+        linha = f"  {descricao:<60} {ln.valor_atual:>18,.2f}"
+        if anterior:
+            linha += f" {ln.valor_anterior:>18,.2f}"
+        print(linha)
 
     print(f"\n  Resultado Líquido: {totais['resultado_liquido']:,.2f}")
+    if totais.get("origem_anterior") == "publicado":
+        print("  Período anterior: DRE publicada na própria ECD (J150).")
+
+
+def _cmd_documento(session, ecd, criterios, args):
+    """DFC, índices e plano de contas: o mesmo texto do `exportar --formato txt`."""
+    documento = documentos.montar(session, ecd.id, args.tipo, criterios, assinar=False)
+    metodo = getattr(args, "metodo", "ambos")
+    if args.tipo == "dfc" and metodo != "ambos":
+        documento.linhas = [ln for ln in documento.linhas if ln["metodo"].lower() == metodo]
+        documento.colunas = [c for c in documento.colunas if c != "metodo"]
+    print(documentos.texto(documento))
 
 
 def _cmd_diario(session, ecd, criterios):
@@ -281,7 +318,11 @@ def _cmd_diario(session, ecd, criterios):
 
 
 def cmd_exportar(args):
-    """Exporta relatório para PDF ou XLSX."""
+    """Exporta relatório para PDF, XLSX ou TXT.
+
+    O documento é montado por `src.reports.documentos` — o mesmo caminho do
+    painel: cabeçalho, filtros, assinaturas e colunas são iguais nos dois.
+    """
     engine = criar_engine(args.db)
     session = get_session(engine)
     repo = Repository(session)
@@ -290,11 +331,6 @@ def cmd_exportar(args):
     if ecd is None:
         logger.error("Nenhuma ECD encontrada.")
         sys.exit(1)
-
-    # Busca empresa
-    from src.db.models import Empresa
-
-    empresa = session.get(Empresa, ecd.empresa_id)
 
     criterios = _build_criterios(args)
 
@@ -313,153 +349,31 @@ def cmd_exportar(args):
         with open(args.logo, "rb") as f:
             wl.logo_base64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode()}"
 
-    export = ExportEngine()
-
-    # Preenche contexto
-    from src.reports.base import ReportContext
-
-    ctx = ReportContext(
-        titulo="",
-        empresa_nome=empresa.nome if empresa else "",
-        empresa_cnpj=empresa.cnpj if empresa else "",
-        periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}",
-        hash_ecd=ecd.hash_arquivo or "",
+    responsavel = documentos.Responsavel(
+        nome=getattr(args, "socio", None) or "",
+        cpf=getattr(args, "socio_cpf", None) or "",
+        qualificacao=getattr(args, "socio_qualificacao", None) or "",
+    )
+    documento = documentos.montar(
+        session,
+        ecd.id,
+        args.tipo,
+        criterios,
+        visao=getattr(args, "visao", "hierarquica"),
+        responsavel=responsavel,
+        assinar=not getattr(args, "sem_assinaturas", False),
     )
 
-    output_path = args.saida
-    if not output_path:
-        ext = ".pdf" if args.formato == "pdf" else ".xlsx"
-        output_path = f"sped_hub_{args.tipo}_{ecd.id}{ext}"
+    output_path = args.saida or f"sped_hub_{args.tipo}_{ecd.id}.{args.formato}"
 
     if args.formato == "pdf":
-        _export_pdf(args, session, ecd, ctx, criterios, wl, export, output_path)
+        documentos.gravar_pdf(documento, output_path, wl)
     elif args.formato == "xlsx":
-        _export_xlsx(args, session, ecd, ctx, criterios, wl, export, output_path)
-
-
-def _export_pdf(args, session, ecd, ctx, criterios, wl, export, output_path):
-    """Exporta para PDF."""
-    if args.tipo == "balanco":
-        balanco = BalancoPatrimonial(session, ecd.id)
-        visao = getattr(args, "visao", "hierarquica")
-        if visao == "publicacao":
-            ctx_rel, grupos, totais = balanco.gerar_publicacao(criterios)
-        else:
-            ctx_rel, grupos, totais = balanco.gerar(criterios, visao=visao)
-        ctx.titulo = ctx_rel.titulo
-        ctx.filtros_descricao = ctx_rel.filtros_descricao
-        export.export_pdf("balanco.html", output_path, ctx, wl, grupos=grupos, totais=totais)
-
-    elif args.tipo == "dre":
-        dre = DRE(session, ecd.id)
-        ctx_rel, linhas, totais = dre.gerar(criterios)
-        ctx.titulo = ctx_rel.titulo
-        ctx.filtros_descricao = ctx_rel.filtros_descricao
-        export.export_pdf("dre.html", output_path, ctx, wl, linhas=linhas, totais=totais)
-
-    elif args.tipo == "diario":
-        diario = LivroDiario(session, ecd.id)
-        ctx_rel, lancamentos, totais = diario.gerar(criterios)
-        ctx.titulo = ctx_rel.titulo
-        ctx.filtros_descricao = ctx_rel.filtros_descricao
-        export.export_pdf(
-            "diario.html", output_path, ctx, wl, lancamentos=lancamentos, totais=totais
-        )
-
-    elif args.tipo == "balancete":
-        # Até a 0.16.x não existia template PDF: `--formato pdf` caía num
-        # XLSX gravado em OUTRO caminho, avisando só em log INFO.
-        balancete = Balancete(session, ecd.id)
-        ctx_rel, linhas = balancete.gerar(criterios, nivel_max=criterios.nivel_ate)
-        ctx.titulo = ctx_rel.titulo
-        ctx.filtros_descricao = ctx_rel.filtros_descricao
-        export.export_pdf(
-            "balancete.html",
-            output_path,
-            ctx,
-            wl,
-            linhas=linhas,
-            totais=balancete.totais(linhas),
-            conferencia=balancete.conferir(linhas),
-        )
-
-    logger.info("PDF exportado: %s", output_path)
-
-
-def _export_xlsx(args, session, ecd, ctx, criterios, wl, export, output_path):
-    """Exporta para XLSX."""
-    if args.tipo == "balancete":
-        balancete = Balancete(session, ecd.id)
-        ctx_rel, linhas = balancete.gerar(criterios)
-        ctx.titulo = ctx_rel.titulo
-        linhas_dict = balancete.to_dict(linhas)
-        colunas = [
-            "cod_cta",
-            "nome_cta",
-            "nivel",
-            "saldo_inicial",
-            "debitos",
-            "creditos",
-            "saldo_final",
-            "divergencia",
-        ]
-        export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
-
-    elif args.tipo == "balanco":
-        balanco = BalancoPatrimonial(session, ecd.id)
-        visao = getattr(args, "visao", "hierarquica")
-        if visao == "publicacao":
-            ctx_rel, grupos, totais = balanco.gerar_publicacao(criterios)
-        else:
-            ctx_rel, grupos, totais = balanco.gerar(criterios, visao=visao)
-        ctx.titulo = ctx_rel.titulo
-
-        linhas_dict = []
-        for secao, nome in [("ativo", "Ativo"), ("passivo", "Passivo"), ("pl", "PL")]:
-            for ln in grupos[secao]:
-                linhas_dict.append(
-                    {
-                        "secao": nome,
-                        "cod_cta": ln.cod_cta,
-                        "nome_cta": ln.nome_cta,
-                        "saldo_atual": ln.saldo_atual,
-                    }
-                )
-        colunas = ["secao", "cod_cta", "nome_cta", "saldo_atual"]
-        export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
-
-    elif args.tipo == "dre":
-        dre = DRE(session, ecd.id)
-        ctx_rel, linhas, totais = dre.gerar(criterios)
-        ctx.titulo = ctx_rel.titulo
-        linhas_dict = [
-            {"tipo": ln.tipo, "descricao": ln.descricao, "valor_atual": ln.valor_atual}
-            for ln in linhas
-        ]
-        colunas = ["tipo", "descricao", "valor_atual"]
-        export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
-
-    elif args.tipo == "diario":
-        diario = LivroDiario(session, ecd.id)
-        ctx_rel, lancamentos, totais = diario.gerar(criterios)
-        ctx.titulo = ctx_rel.titulo
-        linhas_dict = []
-        for lanc in lancamentos:
-            for p in lanc.partidas:
-                linhas_dict.append(
-                    {
-                        "num_lcto": lanc.num_lcto,
-                        "data": lanc.data,
-                        "cod_cta": p.cod_cta,
-                        "historico": p.historico,
-                        "debito": p.debito if p.debito else "",
-                        "credito": p.credito if p.credito else "",
-                    }
-                )
-        colunas = ["num_lcto", "data", "cod_cta", "historico", "debito", "credito"]
-        export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
-
-    logger.info("XLSX exportado: %s", output_path)
+        documentos.gravar_xlsx(documento, output_path, wl)
+    else:
+        Path(output_path).write_text(documentos.texto(documento), encoding="utf-8")
+    logger.info("%s exportado: %s", args.formato.upper(), output_path)
+    return output_path
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -871,7 +785,9 @@ def main(argv: list[str] | None = None) -> int:
     # relatorio
     p_rel = sub.add_parser("relatorio", help="Gerar relatórios")
     p_rel.add_argument(
-        "tipo", choices=["balancete", "razao", "balanco", "dre", "diario"], help="Tipo de relatório"
+        "tipo",
+        choices=["balancete", "razao", "balanco", "dre", "dfc", "indices", "plano", "diario"],
+        help="Tipo de relatório",
     )
     p_rel.add_argument("--conta", help="Código da conta (obrigatório para razão)")
     p_rel.add_argument("--natureza", help="Filtrar por natureza (01-05,09)")
@@ -884,16 +800,23 @@ def main(argv: list[str] | None = None) -> int:
         default="hierarquica",
         help="Visão do balanço (default: hierarquica)",
     )
+    p_rel.add_argument(
+        "--metodo",
+        choices=["direto", "indireto", "ambos"],
+        default="ambos",
+        help="Método da DFC (default: ambos)",
+    )
     p_rel.add_argument("--ecd-id", type=int, help="ID da ECD (default: última importada)")
     p_rel.add_argument("--db", default="sped_hub.db", help="Banco SQLite")
 
     # exportar
-    p_exp = sub.add_parser("exportar", help="Exportar relatório para PDF/XLSX")
+    p_exp = sub.add_parser("exportar", help="Exportar relatório para PDF, XLSX ou TXT")
+    p_exp.add_argument("tipo", choices=list(documentos.TIPOS), help="Tipo de relatório")
     p_exp.add_argument(
-        "tipo", choices=["balancete", "balanco", "dre", "diario"], help="Tipo de relatório"
-    )
-    p_exp.add_argument(
-        "--formato", choices=["pdf", "xlsx"], default="pdf", help="Formato de saída (default: pdf)"
+        "--formato",
+        choices=list(documentos.FORMATOS),
+        default="pdf",
+        help="Formato de saída (default: pdf)",
     )
     p_exp.add_argument("--saida", help="Caminho do arquivo de saída")
     p_exp.add_argument("--conta", help="Código da conta (filtro)")
@@ -914,6 +837,13 @@ def main(argv: list[str] | None = None) -> int:
     p_exp.add_argument("--cor", help="Cor primária (hex, ex: #0C3A30)")
     p_exp.add_argument("--cor-clara", help="Cor primária clara (hex, ex: #F5F2EA)")
     p_exp.add_argument("--logo", help="Caminho da logo (PNG)")
+    # Assinaturas: o contador vem do J930; o sócio, daqui ou do cadastro.
+    p_exp.add_argument("--socio", help="Nome de quem assina pela empresa (sócio/administrador)")
+    p_exp.add_argument("--socio-cpf", help="CPF de quem assina pela empresa")
+    p_exp.add_argument("--socio-qualificacao", help='Qualificação (default: "Sócio administrador")')
+    p_exp.add_argument(
+        "--sem-assinaturas", action="store_true", help="Não incluir as linhas de assinatura"
+    )
 
     # validar
     p_val = sub.add_parser("validar", help="Validar integridade contábil")

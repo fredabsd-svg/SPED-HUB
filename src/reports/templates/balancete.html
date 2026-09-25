@@ -18,7 +18,7 @@
     <dt>Conferência SI + D − C = SF</dt>
     <dd>{{ conferencia.status }}</dd>
   </div>
-  {% if ctx.filtros_descricao and ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  {% if ctx.tem_filtros %}
   <div>
     <dt>Filtros</dt>
     <dd>{{ ctx.filtros_descricao }}</dd>

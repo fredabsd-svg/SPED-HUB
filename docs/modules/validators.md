@@ -3,10 +3,12 @@
 ## O que faz
 
 Confere a consistência interna de uma ECD já importada e devolve a lista do
-que não fecha. São oito validações: partidas dobradas, SI+D−C=SF, movimentos
+que não fecha. São doze validações: partidas dobradas, SI+D−C=SF, movimentos
 I250 vs I155, DRE vs I355, Ativo = Passivo + PL, analíticas órfãs,
-lançamentos em sintéticas e ciclo na hierarquia do plano de contas. Não
-altera nada — só lê e reporta.
+lançamentos em sintéticas, ciclo na hierarquia do plano de contas, balanço
+publicado que não fecha, DRE publicada divergente, superior do I050 que o
+balanço publicado contradiz (k) e conta de resultado com saldo fora da DRE
+publicada (l). Não altera nada — só lê e reporta.
 
 ## O que expõe
 
@@ -14,7 +16,7 @@ altera nada — só lê e reporta.
 
 | Símbolo | Para quê |
 |---|---|
-| `ValidadorIntegridade(session, ecd_id)` | O serviço. `validar_todas()` roda as oito. |
+| `ValidadorIntegridade(session, ecd_id)` | O serviço. `validar_todas()` roda as doze. |
 | `Inconsistencia` | Dataclass: `tipo`, `severidade` (`erro`/`alerta`), `descricao`, `detalhes`. |
 | `relatorio(inconsistencias)` | Sumário: totais, status `OK`/`ERROS`, detalhes. |
 
@@ -75,6 +77,14 @@ Consumido por: `cli` (comando `validar`), `api.routes` (REST) e
 - **Validar não bloqueia importar.** A importação aceita o arquivo mesmo com
   inconsistências; a validação é passo separado, chamado por quem quer
   saber. Um `ERROS` no relatório não desfaz nada.
+
+- **(k) e (l) são alertas, não erros.** (k) lista cada analítica que os
+  relatórios agrupam pelo J100 em vez do I050 (ADR 0012) — o plano precisa
+  ser corrigido na origem, mas o balanço sai certo. (l) acha a conta com
+  saldo no I355 cuja aglutinação (I052) não está em nenhuma linha de
+  detalhe do J150: a (j) só compara as linhas que existem, e uma ECD real
+  publicou uma DRE sem a devolução de compras e sem os juros de
+  empréstimos, sem nenhuma linha divergente.
 
 ## Como testar isoladamente
 

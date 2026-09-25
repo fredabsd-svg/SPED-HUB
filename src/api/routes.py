@@ -7,7 +7,9 @@ Endpoints:
   GET  /api/v1/ecds/{id}         — Detalhes da ECD
   GET  /api/v1/ecds/{id}/balanco — Balanço Patrimonial
   GET  /api/v1/ecds/{id}/dre     — DRE
-  GET  /api/v1/ecds/{id}/dfc     — DFC
+  GET  /api/v1/ecds/{id}/dfc     — DFC (?metodo=indireto|direto)
+  GET  /api/v1/ecds/{id}/indices — Índices de habilitação (Lei 14.133/2021, art. 69)
+  GET  /api/v1/ecds/{id}/plano-contas — Plano de contas (I050/I051/I052)
   GET  /api/v1/ecds/{id}/diario  — Livro Diário (paginado)
   GET  /api/v1/ecds/{id}/kpis    — KPIs
   GET  /api/v1/ecds/{id}/notas   — Notas Explicativas
@@ -27,6 +29,7 @@ API Keys (Fase 12):
   GET    /api/v1/webhooks/eventos — Lista eventos disponíveis
 """
 
+import dataclasses
 import datetime
 import logging
 
@@ -59,6 +62,8 @@ from src.reports.balanco import BalancoPatrimonial
 from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
+from src.reports.indices import IndicesFinanceiros
+from src.reports.plano_contas import PlanoDeContas
 from src.settings import database_reference
 from src.validators.integridade import ValidadorIntegridade
 from src.version import APP_VERSION
@@ -416,12 +421,15 @@ async def api_dre(ecd_id: int = Depends(ecd_autorizada)):
 
 
 @router.get("/ecds/{ecd_id}/dfc")
-async def api_dfc(ecd_id: int = Depends(ecd_autorizada)):
-    """Demonstração dos Fluxos de Caixa."""
+async def api_dfc(
+    ecd_id: int = Depends(ecd_autorizada),
+    metodo: str = Query("indireto", pattern="^(direto|indireto)$"),
+):
+    """Demonstração dos Fluxos de Caixa pelo método indireto (padrão) ou direto."""
     session = _get_session()
     try:
         dfc = DFC(session, ecd_id)
-        ctx, linhas, totais = dfc.gerar()
+        ctx, linhas, totais = dfc.gerar(metodo=metodo)
 
         return {
             "titulo": ctx.titulo,
@@ -434,6 +442,54 @@ async def api_dfc(ecd_id: int = Depends(ecd_autorizada)):
                 }
                 for ln in linhas
             ],
+            "totais": totais,
+        }
+    finally:
+        session.close()
+
+
+@router.get("/ecds/{ecd_id}/indices")
+async def api_indices(ecd_id: int = Depends(ecd_autorizada)):
+    """Índices de habilitação econômico-financeira, exercício atual e anterior."""
+    session = _get_session()
+    try:
+        ctx, indices, totais = IndicesFinanceiros(session, ecd_id).gerar()
+        grupos_anterior = totais["grupos_anterior"]
+        return {
+            "titulo": ctx.titulo,
+            "indices": [
+                {
+                    "chave": i.chave,
+                    "nome": i.nome,
+                    "formula": i.formula,
+                    "valor": i.valor,
+                    "valor_anterior": i.valor_anterior,
+                    "referencia": i.referencia,
+                    "usual": i.usual,
+                    "atende": i.atende,
+                    "atende_anterior": i.atende_anterior,
+                }
+                for i in indices
+            ],
+            "grupos": dataclasses.asdict(totais["grupos"]),
+            "grupos_anterior": dataclasses.asdict(grupos_anterior) if grupos_anterior else None,
+            "atende_usuais": totais["atende_usuais"],
+            "data_atual": totais["data_atual"],
+            "data_anterior": totais["data_anterior"],
+        }
+    finally:
+        session.close()
+
+
+@router.get("/ecds/{ecd_id}/plano-contas")
+async def api_plano_contas(ecd_id: int = Depends(ecd_autorizada)):
+    """O plano de contas da ECD, com referencial e aglutinação."""
+    session = _get_session()
+    try:
+        ctx, linhas, totais = PlanoDeContas(session, ecd_id).gerar()
+        return {
+            "titulo": ctx.titulo,
+            "contas": [dataclasses.asdict(ln) for ln in linhas],
             "totais": totais,
         }
     finally:

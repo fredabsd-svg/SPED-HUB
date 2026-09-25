@@ -91,6 +91,8 @@ def fmt_data_hora(dt: datetime.datetime) -> str:
 
 # ── Contexto de Relatório ──────────────────────────────────────────────────
 
+SEM_FILTROS = "Nenhum filtro aplicado"
+
 
 @dataclass
 class ReportContext:
@@ -106,6 +108,17 @@ class ReportContext:
     hash_ecd: str = ""
     total_paginas: int = 1
     pagina_atual: int = 1
+
+    @property
+    def tem_filtros(self) -> bool:
+        """Há filtro aplicado — só então o relatório mostra o bloco "Filtros".
+
+        Os templates comparavam com "Nenhum filtro aplicado", e o contexto
+        montado pelo painel chegava com a descrição vazia: o PDF saía com o
+        rótulo FILTROS e nada embaixo.
+        """
+        descricao = (self.filtros_descricao or "").strip()
+        return bool(descricao) and descricao != SEM_FILTROS
 
     def to_dict(self) -> dict:
         return self.__dict__

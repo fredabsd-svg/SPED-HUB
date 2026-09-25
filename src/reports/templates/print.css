@@ -360,3 +360,72 @@ tbody tr.total-row td {
 .mb-6 { margin-bottom: var(--space-6); }
 .page-break { page-break-before: always; }
 .no-break { page-break-inside: avoid; }
+/* ── Assinaturas ── */
+.assinaturas {
+  margin-top: var(--space-16);
+  page-break-inside: avoid;
+}
+
+.assinaturas-linhas {
+  display: flex;
+  justify-content: space-around;
+  gap: var(--space-8);
+}
+
+.assinatura {
+  flex: 1;
+  max-width: 75mm;
+  text-align: center;
+  font-size: var(--font-size-sm);
+}
+
+.assinatura-traco {
+  border-top: 1px solid var(--color-neutral-800);
+  margin-bottom: var(--space-1);
+}
+
+.assinatura-nome {
+  font-weight: var(--font-weight-semibold);
+  min-height: 1.2em;
+}
+
+.assinatura-cargo,
+.assinatura-doc {
+  color: var(--color-neutral-600);
+  font-size: var(--font-size-xs);
+}
+
+/* ── Notas e tabelas auxiliares ── */
+.nota {
+  font-size: var(--font-size-xs);
+  color: var(--color-neutral-600);
+  margin-bottom: var(--space-4);
+}
+
+.nota strong { color: var(--color-neutral-800); }
+
+tr.detail td:first-child {
+  padding-left: var(--space-8);
+  color: var(--color-neutral-600);
+}
+
+tr.detail td {
+  font-size: var(--font-size-xs);
+}
+
+tr.grupo td {
+  font-style: italic;
+  color: var(--color-neutral-600);
+  padding-top: var(--space-2);
+}
+
+.status-ok { color: var(--color-success); font-weight: var(--font-weight-semibold); }
+.status-falha { color: var(--color-error); font-weight: var(--font-weight-semibold); }
+
+.formula {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-normal);
+  color: var(--color-neutral-500);
+}
+
+h3 { page-break-after: avoid; }

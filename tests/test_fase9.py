@@ -574,7 +574,7 @@ class TestIntegracaoFase9:
         """
         result = schema.execute_sync(query, context_value=_CONTEXTO)
         assert result.errors is None
-        assert len(result.data["dre"]["linhas"]) == 11
+        assert len(result.data["dre"]["linhas"]) == 13
 
     def test_graphql_dfc_completo(self, db):
         from src.api.graphql import schema

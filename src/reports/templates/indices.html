@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% macro valor(indice, v) -%}
+{% if v is none %}—{% else %}{{ fmt_moeda(v) }}{% endif %}
+{%- endmacro %}
+
+{% macro situacao(atende) -%}
+{% if atende is none %}{% elif atende %}<span class="status-ok">Atende</span>{% else %}<span class="status-falha">Não atende</span>{% endif %}
+{%- endmacro %}
+
+{% block content %}
+
+<div class="kicker">Habilitação econômico-financeira · Lei 14.133/2021, art. 69</div>
+<h2>{{ ctx.empresa_nome or ctx.titulo }}</h2>
+
+<div class="info-box">
+  <div>
+    <dt>Exercício</dt>
+    <dd>{{ fmt_data(totais.data_atual) if totais.data_atual else ctx.periodo_ref }}</dd>
+  </div>
+  {% if totais.tem_anterior %}
+  <div>
+    <dt>Exercício anterior</dt>
+    <dd>{{ fmt_data(totais.data_anterior) if totais.data_anterior else '—' }}</dd>
+  </div>
+  {% endif %}
+  <div>
+    <dt>LG, SG e LC maiores que 1</dt>
+    <dd>{{ situacao(totais.atende_usuais) }}</dd>
+  </div>
+  {% if ctx.tem_filtros %}
+  <div>
+    <dt>Filtros</dt>
+    <dd>{{ ctx.filtros_descricao }}</dd>
+  </div>
+  {% endif %}
+</div>
+
+{% if totais.contas_nao_classificadas %}
+<div class="callout callout-warning">
+  {{ totais.contas_nao_classificadas | length }} conta(s) sem grupo do balanço identificado
+  (circulante, não circulante, PL): {{ totais.contas_nao_classificadas[:10] | join(', ') }}.
+  Entram no ativo total e, se forem de passivo, no circulante — confira o plano de contas.
+</div>
+{% endif %}
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:{{ '46%' if totais.tem_anterior else '60%' }}">Índice</th>
+      <th class="right" style="width:14%">{{ fmt_data(totais.data_atual) if totais.data_atual else 'Atual' }}</th>
+      {% if totais.tem_anterior %}
+      <th class="right" style="width:14%">{{ fmt_data(totais.data_anterior) if totais.data_anterior else 'Anterior' }}</th>
+      {% endif %}
+      <th class="center" style="width:10%">Referência</th>
+      <th class="center" style="width:16%">Situação</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for i in indices %}
+    <tr class="{{ 'synthetic' if i.usual else 'analytical' }}">
+      <td>
+        {{ i.nome }}
+        <div class="formula">{{ i.formula }}</div>
+      </td>
+      <td class="right">{{ valor(i, i.valor) }}</td>
+      {% if totais.tem_anterior %}<td class="right">{{ valor(i, i.valor_anterior) }}</td>{% endif %}
+      <td class="center">{{ i.referencia or '—' }}</td>
+      <td class="center">
+        {{ situacao(i.atende) }}
+        {% if totais.tem_anterior and i.usual %}<div class="formula">anterior: {{ situacao(i.atende_anterior) }}</div>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% set g = totais.grupos %}
+{% set ga = totais.grupos_anterior %}
+<h3 class="mt-6">Grupos do balanço usados no cálculo</h3>
+<table>
+  <thead>
+    <tr>
+      <th style="width:{{ '50%' if ga else '75%' }}">Grupo</th>
+      <th class="right" style="width:25%">{{ fmt_data(totais.data_atual) if totais.data_atual else 'Atual' }}</th>
+      {% if ga %}<th class="right" style="width:25%">{{ fmt_data(totais.data_anterior) if totais.data_anterior else 'Anterior' }}</th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for rotulo, campo in [
+      ("Ativo Circulante (AC)", "ac"),
+      ("Disponível (caixa e equivalentes)", "disponivel"),
+      ("Estoques", "estoques"),
+      ("Realizável a Longo Prazo (RLP)", "rlp"),
+      ("Ativo Não Circulante", "anc"),
+      ("Ativo Total (AT)", "at"),
+      ("Passivo Circulante (PC)", "pc"),
+      ("Passivo Não Circulante (PNC)", "pnc"),
+      ("Patrimônio Líquido (PL)", "pl"),
+    ] %}
+    <tr>
+      <td>{{ rotulo }}</td>
+      <td class="right">{{ fmt_moeda(g[campo]) }}</td>
+      {% if ga %}<td class="right">{{ fmt_moeda(ga[campo]) }}</td>{% endif %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p class="nota">
+  <strong>Base legal.</strong> Lei 14.133/2021, art. 69: balanço e DRE dos dois últimos
+  exercícios (inciso I); índices fixados no edital, vedados os de rentabilidade ou
+  lucratividade (§ 2º) e os não usualmente adotados (§ 5º); patrimônio líquido ou capital
+  mínimo de até 10% do valor estimado da contratação (§ 4º)
+  {%- if totais.contrato_maximo_pl_10 %} — com o PL atual, atende essa exigência em
+  contratações estimadas em até {{ fmt_moeda(totais.contrato_maximo_pl_10) }}{% endif %}.
+  Os índices usuais (LG, SG e LC, referência maior que 1,00) são os do SICAF e do guia de
+  licitações do TCU. O § 1º admite exigir declaração, assinada por profissional habilitado
+  da área contábil, que ateste o atendimento aos índices do edital.
+  {% if totais.origem_anterior == 'saldo_inicial' %}
+  O exercício anterior é o balanço de abertura do exercício atual (saldo inicial do I155).
+  {% endif %}
+</p>
+
+{% endblock %}

@@ -23,6 +23,35 @@ logger = logging.getLogger("sped-hub.export")
 # Negativo entre parênteses e zero como "-", a convenção dos relatórios.
 FORMATO_MOEDA_XLSX = '#,##0.00;(#,##0.00);"-"'
 
+TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+
+# Colunas de valor pelo nome antigo (chave do dicionário). Valor `float` em
+# qualquer outra coluna também sai no formato de moeda: nas planilhas dos
+# relatórios, número com casas decimais é sempre valor (ou índice, que se lê
+# igual); inteiro (nível, quantidade) fica como está.
+_COLUNAS_DE_VALOR = {
+    "saldo",
+    "débito",
+    "crédito",
+    "debito",
+    "credito",
+    "valor",
+    "saldo_atual",
+    "saldo_anterior",
+    "debitos",
+    "creditos",
+    "saldo_inicial",
+    "saldo_final",
+    "valor_atual",
+    "valor_anterior",
+}
+
+
+def _eh_moeda(coluna: str, valor) -> bool:
+    return coluna.lower() in _COLUNAS_DE_VALOR or (
+        isinstance(valor, float) and not isinstance(valor, bool)
+    )
+
 
 @dataclass
 class WhiteLabel:
@@ -51,7 +80,7 @@ class ExportEngine:
 
     def __init__(self, templates_dir: str | None = None):
         if templates_dir is None:
-            templates_dir = str(Path(__file__).resolve().parent / "templates")
+            templates_dir = str(TEMPLATES_DIR)
         self.env = Environment(
             loader=FileSystemLoader(templates_dir),
             autoescape=select_autoescape(["html"]),
@@ -95,7 +124,7 @@ class ExportEngine:
         try:
             from weasyprint import HTML
 
-            base_url = str(Path(__file__).resolve().parent / "templates")
+            base_url = str(TEMPLATES_DIR)
             HTML(string=html, base_url=base_url).write_pdf(output_path)
             logger.info("PDF gerado: %s", output_path)
             self._emitir_relatorio_gerado("pdf", template_name, output_path, ctx)
@@ -200,18 +229,7 @@ class ExportEngine:
                     # Alinhamento
                     if isinstance(valor, (int, float)):
                         cell.alignment = Alignment(horizontal="right")
-                        if col_name.lower() in (
-                            "saldo",
-                            "débito",
-                            "crédito",
-                            "valor",
-                            "saldo_atual",
-                            "saldo_anterior",
-                            "debitos",
-                            "creditos",
-                            "saldo_inicial",
-                            "saldo_final",
-                        ):
+                        if _eh_moeda(col_name, valor):
                             cell.number_format = moeda_format
                     else:
                         cell.alignment = Alignment(horizontal="left")
@@ -346,18 +364,7 @@ class ExportEngine:
                 cell.border = thin_border
                 if isinstance(valor, (int, float)):
                     cell.alignment = Alignment(horizontal="right")
-                    if col_name.lower() in (
-                        "saldo",
-                        "debito",
-                        "credito",
-                        "valor",
-                        "saldo_atual",
-                        "saldo_anterior",
-                        "debitos",
-                        "creditos",
-                        "saldo_inicial",
-                        "saldo_final",
-                    ):
+                    if _eh_moeda(col_name, valor):
                         cell.number_format = moeda_format
                 else:
                     cell.alignment = Alignment(horizontal="left")

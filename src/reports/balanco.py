@@ -4,21 +4,30 @@ Duas visões:
 1. Hierárquica — segue a estrutura do plano de contas (I050)
 2. Publicação — aglutinação por I052/J100/J150
 
-Conforme Seção 3.2 do prompt: contas de natureza 01 = Ativo, 02 = Passivo, 03 = PL.
+Ativo = natureza 01; passivo e PL pela natureza e pelo grupo (o PL de
+natureza 02, dentro de "PATRIMÔNIO LÍQUIDO", vai para o PL — ver
+`Classificador.secao_balanco`).
 """
 
+import datetime
+import re
+from collections import defaultdict
 from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import Aglutinacao, PlanoConta
+from src.db.models import ECD, Aglutinacao, DemonstracaoContabil, LinhaDemonstracao, PlanoConta
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
     saldo_por_natureza,
+    valor_sinalizado,
 )
+from src.reports.classificacao import Classificador, normalizar
 from src.reports.saldos import consolidar
+
+_PL_PUBLICADO = re.compile(r"^(?!.*\bPASSIVO\b).*PATRIMONIO LIQUIDO")
 
 
 @dataclass
@@ -44,8 +53,6 @@ class BalancoPatrimonial:
 
     def _get_ecd_anterior(self) -> int | None:
         """Encontra o ID da ECD do período anterior para a mesma empresa."""
-        from src.db.models import ECD
-
         ecd_atual = self.session.get(ECD, self.ecd_id)
         if not ecd_atual:
             return None
@@ -85,63 +92,117 @@ class BalancoPatrimonial:
             (contexto, grupos, totais)
 
         O saldo de cada conta é o SF do último I150 do intervalo; o das
-        sintéticas, a soma das filhas. O total de cada grupo soma só as
-        contas listadas sem superior listado — sintética e filha nunca
-        entram as duas.
+        sintéticas, a soma das filhas.
+
+        **Saldo anterior**: o SF da ECD anterior, quando ela foi importada;
+        sem ela, o saldo inicial do primeiro I150 do intervalo — que é o
+        balanço de encerramento do exercício anterior, o mesmo que a ECD
+        publica no `VL_CTA_INI` do J100. Antes, sem a ECD anterior, a coluna
+        saía toda zerada.
+
+        **Patrimônio líquido**: a seção vem do `Classificador` — natureza 03
+        ou conta dentro do grupo "PATRIMÔNIO LÍQUIDO" (muito plano usa
+        natureza 02 para o PL). A sintética que junta passivo e PL (o "2
+        PASSIVO" de quem põe o PL embaixo dele) não é listada: o valor dela
+        não é nem o passivo nem o PL, e aparece no total "Passivo + PL".
+
+        **Totais**: por seção, a soma das contas-base (as analíticas com
+        saldo) exibidas ou abaixo de uma conta exibida. Sintética e filha
+        nunca entram as duas, e a sintética mista não desfaz o total.
         """
         if criterios is None:
             criterios = FilterCriteria()
 
         saldos = consolidar(self.engine, criterios)
         plano = self.engine.plano()
+        classificador = Classificador(self.engine)
+        hierarquia = saldos.hierarquia
 
-        # Busca saldos do período anterior
+        # Saldo anterior: ECD anterior, se houver; senão, o saldo inicial.
         ecd_ant_id = self._get_ecd_anterior()
-        saldo_anterior_por_conta: dict[str, float] = {}
         if ecd_ant_id:
             saldo_anterior_por_conta = self._get_saldos_anteriores(ecd_ant_id)
+            origem_anterior = "ecd_anterior"
+        else:
+            saldo_anterior_por_conta = {cod: saldo.si for cod, saldo in saldos.saldos.items()}
+            origem_anterior = "saldo_inicial"
 
-        # Monta linhas por natureza
-        grupos: dict[str, list[LinhaBalanco]] = {"01": [], "02": [], "03": []}
-
-        # Se há filtro de natureza, restringe o plano
         nats_permitidas = set(criterios.cod_nat) if criterios.cod_nat else {"01", "02", "03"}
 
-        listadas: list[str] = []
-        for cod_cta in saldos.visiveis:
-            pc = plano[cod_cta]
-            if pc.cod_nat not in nats_permitidas or pc.cod_nat not in grupos:
+        def secao(cod: str) -> str | None:
+            if plano[cod].cod_nat not in nats_permitidas:
+                return None
+            return classificador.secao_balanco(cod)
+
+        # Sintética com contas-base em mais de uma seção (passivo e PL).
+        base = hierarquia.contas_base(saldos.proprios)
+        secoes_abaixo: dict[str, set[str]] = defaultdict(set)
+        for cod in base:
+            sec = secao(cod)
+            if sec is None:
                 continue
-            listadas.append(cod_cta)
-            grupos[pc.cod_nat].append(
+            for superior in (cod, *hierarquia.ancestrais(cod)):
+                secoes_abaixo[superior].add(sec)
+
+        grupos: dict[str, list[LinhaBalanco]] = {"ativo": [], "passivo": [], "pl": []}
+        visiveis: set[str] = set()
+        for cod_cta in saldos.visiveis:
+            sec = secao(cod_cta)
+            if sec is None or len(secoes_abaixo.get(cod_cta, {sec})) > 1:
+                continue
+            pc = plano[cod_cta]
+            visiveis.add(cod_cta)
+            grupos[sec].append(
                 LinhaBalanco(
                     cod_cta=cod_cta,
                     nome_cta=pc.nome_cta,
                     nivel=pc.nivel,
                     cod_nat=pc.cod_nat,
                     ind_cta=pc.ind_cta,
-                    saldo_atual=saldo_por_natureza(saldos.saldo(cod_cta).sf, pc.cod_nat),
+                    # `+ 0.0`: saldo credor zerado sai 0,00, não -0,00.
+                    saldo_atual=saldo_por_natureza(saldos.saldo(cod_cta).sf, pc.cod_nat) + 0.0,
                     saldo_anterior=saldo_por_natureza(
                         saldo_anterior_por_conta.get(cod_cta, 0.0), pc.cod_nat
-                    ),
-                    ancestrais=saldos.hierarquia.ancestrais(cod_cta),
+                    )
+                    + 0.0,
+                    ancestrais=hierarquia.ancestrais(cod_cta),
                 )
             )
-        ativo, passivo, pl = grupos["01"], grupos["02"], grupos["03"]
 
-        # Totais: só as linhas sem superior listado, cada valor uma vez.
-        no_total = set(saldos.hierarquia.maximais(listadas))
+        # Totais pelas contas-base exibidas ou cobertas por uma linha exibida.
+        exibidas = set(saldos.visiveis)
+        soma = {s: 0.0 for s in grupos}
+        soma_ant = {s: 0.0 for s in grupos}
+        for cod in base:
+            sec = secao(cod)
+            if sec is None or not (
+                cod in exibidas or any(a in exibidas for a in hierarquia.ancestrais(cod))
+            ):
+                continue
+            natureza = plano[cod].cod_nat
+            soma[sec] += saldo_por_natureza(saldos.saldo(cod).sf, natureza)
+            if origem_anterior == "saldo_inicial":
+                soma_ant[sec] += saldo_por_natureza(saldos.saldo(cod).si, natureza)
+        if origem_anterior == "ecd_anterior":
+            # A ECD anterior tem as próprias contas: soma as linhas listadas
+            # sem superior listado, na seção de cada uma.
+            for sec, linhas in grupos.items():
+                listadas = {ln.cod_cta for ln in linhas}
+                soma_ant[sec] = sum(
+                    ln.saldo_anterior
+                    for ln in linhas
+                    if not any(a in listadas for a in ln.ancestrais)
+                )
 
-        def _total(linhas: list[LinhaBalanco], campo: str) -> float:
-            return round(sum(getattr(ln, campo) for ln in linhas if ln.cod_cta in no_total), 2)
+        total_ativo = round(soma["ativo"], 2) + 0.0
+        total_passivo = round(soma["passivo"], 2) + 0.0
+        total_pl = round(soma["pl"], 2) + 0.0
+        tem_anterior = ecd_ant_id is not None or any(abs(v) > 0.005 for v in soma_ant.values())
 
-        total_ativo = _total(ativo, "saldo_atual")
-        total_passivo = _total(passivo, "saldo_atual")
-        total_pl = _total(pl, "saldo_atual")
-
-        total_ativo_ant = _total(ativo, "saldo_anterior")
-        total_passivo_ant = _total(passivo, "saldo_anterior")
-        total_pl_ant = _total(pl, "saldo_anterior")
+        ecd = self.session.get(ECD, self.ecd_id)
+        data_atual = criterios.dt_fin or (ecd.dt_fin if ecd else None)
+        inicio = criterios.dt_ini or (ecd.dt_ini if ecd else None)
+        data_anterior = inicio - datetime.timedelta(days=1) if inicio else None
 
         totais = {
             "ativo": total_ativo,
@@ -149,10 +210,14 @@ class BalancoPatrimonial:
             "pl": total_pl,
             "passivo_pl": round(total_passivo + total_pl, 2),
             "diferenca": round(abs(total_ativo - (total_passivo + total_pl)), 2),
-            "ativo_anterior": total_ativo_ant,
-            "passivo_anterior": total_passivo_ant,
-            "pl_anterior": total_pl_ant,
-            "tem_anterior": ecd_ant_id is not None,
+            "ativo_anterior": round(soma_ant["ativo"], 2) + 0.0,
+            "passivo_anterior": round(soma_ant["passivo"], 2) + 0.0,
+            "pl_anterior": round(soma_ant["pl"], 2) + 0.0,
+            "passivo_pl_anterior": round(soma_ant["passivo"] + soma_ant["pl"], 2) + 0.0,
+            "tem_anterior": tem_anterior,
+            "origem_anterior": origem_anterior,
+            "data_atual": data_atual,
+            "data_anterior": data_anterior,
         }
 
         ctx = ReportContext(
@@ -160,7 +225,121 @@ class BalancoPatrimonial:
             filtros_descricao=self.engine.descricao_filtros(criterios),
         )
 
-        return ctx, {"ativo": ativo, "passivo": passivo, "pl": pl}, totais
+        return ctx, grupos, totais
+
+    def _linhas_j100(self) -> list[LinhaDemonstracao]:
+        """As linhas do J100 da demonstração que fecha no fim da ECD."""
+        demonstracoes = list(
+            self.session.execute(
+                select(DemonstracaoContabil)
+                .where(DemonstracaoContabil.ecd_id == self.ecd_id)
+                .order_by(DemonstracaoContabil.dt_fin.desc(), DemonstracaoContabil.id_dem)
+            ).scalars()
+        )
+        for demonstracao in demonstracoes:
+            linhas = [ln for ln in demonstracao.linhas if ln.registro == "J100"]
+            if linhas:
+                return sorted(linhas, key=lambda ln: ln.id)
+        return []
+
+    def _gerar_do_j100(
+        self,
+    ) -> tuple[ReportContext, dict[str, list[LinhaBalanco]], dict[str, float]] | None:
+        """O balanço **como a empresa o publicou**: as linhas do J100, sem recálculo.
+
+        Os códigos de aglutinação são os da empresa (numa ECD real, o próprio
+        código da conta), e o saldo anterior é o `VL_CTA_INI` publicado. O PL
+        é a linha "PATRIMÔNIO LÍQUIDO" e o que está abaixo dela; a linha de
+        nível 1 do lado do passivo, que soma passivo e PL, não é listada —
+        é o total "Passivo + PL". Filtros não se aplicam: é o documento.
+        """
+        linhas = self._linhas_j100()
+        if not linhas:
+            return None
+        por_codigo = {ln.cod_agl: ln for ln in linhas}
+
+        def cadeia(linha: LinhaDemonstracao) -> list[LinhaDemonstracao]:
+            resultado, vistos, atual = [linha], {linha.cod_agl}, linha
+            while atual.cod_agl_sup and atual.cod_agl_sup in por_codigo:
+                atual = por_codigo[atual.cod_agl_sup]
+                if atual.cod_agl in vistos:
+                    break
+                vistos.add(atual.cod_agl)
+                resultado.append(atual)
+            return resultado
+
+        def eh_pl(linha: LinhaDemonstracao) -> bool:
+            return any(_PL_PUBLICADO.search(normalizar(ln.descricao)) for ln in cadeia(linha))
+
+        def sinalizado(valor: float, indicador: str | None, lado: str) -> float:
+            vl = valor_sinalizado(valor or 0.0, indicador or ("D" if lado == "A" else "C"))
+            return (vl if lado == "A" else -vl) + 0.0
+
+        pl_abaixo: dict[str, set[bool]] = defaultdict(set)
+        for linha in linhas:
+            if linha.ind_grp_bal != "P":
+                continue
+            for superior in cadeia(linha):
+                pl_abaixo[superior.cod_agl].add(eh_pl(linha))
+
+        grupos: dict[str, list[LinhaBalanco]] = {"ativo": [], "passivo": [], "pl": []}
+        totais_publicados = {"A": [0.0, 0.0], "P": [0.0, 0.0]}
+        pl_maximo = [0.0, 0.0]
+        for linha in linhas:
+            lado = linha.ind_grp_bal or "A"
+            atual = sinalizado(linha.vl_cta_fin, linha.ind_dc_cta_fin, lado)
+            anterior = sinalizado(linha.vl_cta_ini, linha.ind_dc_cta_ini, lado)
+            if (linha.nivel_agl or 0) == 1 and lado in totais_publicados:
+                totais_publicados[lado][0] += atual
+                totais_publicados[lado][1] += anterior
+            if lado == "A":
+                secao, natureza = "ativo", "01"
+            elif len(pl_abaixo.get(linha.cod_agl, set())) > 1:
+                continue  # passivo e PL juntos: é o total "Passivo + PL"
+            elif eh_pl(linha):
+                secao, natureza = "pl", "03"
+                if not any(eh_pl(sup) for sup in cadeia(linha)[1:]):
+                    pl_maximo[0] += atual
+                    pl_maximo[1] += anterior
+            else:
+                secao, natureza = "passivo", "02"
+            grupos[secao].append(
+                LinhaBalanco(
+                    cod_cta=linha.cod_agl,
+                    nome_cta=linha.descricao or "",
+                    nivel=linha.nivel_agl or 1,
+                    cod_nat=natureza,
+                    ind_cta="S" if (linha.ind_cod_agl or "").upper() == "T" else "A",
+                    saldo_atual=atual,
+                    saldo_anterior=anterior,
+                    ancestrais=tuple(ln.cod_agl for ln in cadeia(linha)[1:]),
+                )
+            )
+
+        ativo, ativo_ant = totais_publicados["A"]
+        passivo_pl, passivo_pl_ant = totais_publicados["P"]
+        pl, pl_ant = pl_maximo
+        ecd = self.session.get(ECD, self.ecd_id)
+        totais = {
+            "ativo": round(ativo, 2) + 0.0,
+            "passivo": round(passivo_pl - pl, 2) + 0.0,
+            "pl": round(pl, 2) + 0.0,
+            "passivo_pl": round(passivo_pl, 2) + 0.0,
+            "diferenca": round(abs(ativo - passivo_pl), 2),
+            "ativo_anterior": round(ativo_ant, 2) + 0.0,
+            "passivo_anterior": round(passivo_pl_ant - pl_ant, 2) + 0.0,
+            "pl_anterior": round(pl_ant, 2) + 0.0,
+            "passivo_pl_anterior": round(passivo_pl_ant, 2) + 0.0,
+            "tem_anterior": any(abs(ln.vl_cta_ini or 0.0) > 0.005 for ln in linhas),
+            "origem_anterior": "publicado",
+            "data_atual": ecd.dt_fin if ecd else None,
+            "data_anterior": (ecd.dt_ini - datetime.timedelta(days=1)) if ecd else None,
+        }
+        ctx = ReportContext(
+            titulo="Balanço Patrimonial (Publicação)",
+            filtros_descricao="Nenhum filtro aplicado",
+        )
+        return ctx, grupos, totais
 
     def gerar_publicacao(
         self,
@@ -184,6 +363,10 @@ class BalancoPatrimonial:
         """
         if criterios is None:
             criterios = FilterCriteria()
+
+        publicado = self._gerar_do_j100()
+        if publicado is not None:
+            return publicado
 
         # Busca aglutinações
         agls = list(

@@ -226,8 +226,10 @@ class TestExportar:
             "exportar", "balanco", "--formato", "xlsx", "--saida", str(saida), "--db", db_com_ecd
         )
         planilha = load_workbook(saida).active
-        cabecalho = next(linha for linha in planilha.iter_rows() if linha[0].value == "secao")
-        coluna = [c.value for c in cabecalho].index("saldo_atual")
+        # O cabeçalho sai com rótulos em português; a coluna do saldo atual
+        # leva a data do balanço.
+        cabecalho = next(linha for linha in planilha.iter_rows() if linha[0].value == "Seção")
+        coluna = [c.value for c in cabecalho].index("31/12/2024")
         formatos = {
             linha[coluna].number_format
             for linha in planilha.iter_rows(min_row=cabecalho[0].row + 1)

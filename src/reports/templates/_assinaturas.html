@@ -1,0 +1,13 @@
+<!-- ═══ Assinaturas — responsável legal e contador (J930 / cadastro da empresa) ═══ -->
+<div class="assinaturas">
+  <div class="assinaturas-linhas">
+    {% for a in assinaturas %}
+    <div class="assinatura">
+      <div class="assinatura-traco"></div>
+      <div class="assinatura-nome">{{ a.nome or ' ' }}</div>
+      <div class="assinatura-cargo">{{ a.cargo }}</div>
+      {% if a.documento %}<div class="assinatura-doc">{{ a.documento }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>

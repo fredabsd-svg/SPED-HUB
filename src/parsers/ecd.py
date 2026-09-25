@@ -40,6 +40,7 @@ REGISTROS_INTERESSE = frozenset(
         "J100",
         "J150",
         "J210",
+        "J930",
         "J990",
         "9001",
         "9900",

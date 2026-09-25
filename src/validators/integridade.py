@@ -11,6 +11,8 @@ Validações:
 (h) Ciclo na hierarquia do plano de contas
 (i) Balanço publicado fecha — ativo = passivo, no J100
 (j) DRE publicada × os saldos que a própria escrituração declara
+(k) Superior do I050 que o balanço publicado (J100) contradiz
+(l) Conta de resultado com saldo que a DRE publicada (J150) não mostra
 
 As duas últimas são as regras do PGE do Sped Contábil, transcritas do Manual
 do Leiaute 9 (Anexo ao ADE Cofis nº 01/2026): `REGRA_EXISTEM_2_NIVEIS_1`,
@@ -114,6 +116,8 @@ class ValidadorIntegridade:
         resultados.extend(self._validar_hierarquia_ciclica())
         resultados.extend(self._validar_balanco_publicado())
         resultados.extend(self._validar_dre_publicada())
+        resultados.extend(self._validar_superior_vs_publicado())
+        resultados.extend(self._validar_contas_fora_da_dre_publicada())
 
         from src.webhooks import emitir
 
@@ -508,6 +512,92 @@ class ValidadorIntegridade:
                         "publicado": round(abs(publicado), 2),
                         "escriturado": round(abs(escriturado), 2),
                         "diferenca": round(abs(publicado) - abs(escriturado), 2),
+                    },
+                )
+            )
+        return inconsistencias
+
+    def _validar_superior_vs_publicado(self) -> list[Inconsistencia]:
+        """(k) Analítica que o I050 pendura numa sintética e o J100 noutra.
+
+        Os relatórios seguem o J100 nesses casos (`FilterEngine.hierarquia`):
+        o balanço assinado costuma estar certo e o `COD_CTA_SUP`, trocado.
+        O aviso existe para que o plano seja corrigido na origem — e para
+        que ninguém estranhe o balancete agrupar a conta fora do I050.
+        """
+        engine = FilterEngine(self.session, self.ecd_id)
+        plano = engine.plano()
+        inconsistencias = []
+        for cod, (antigo, novo) in sorted(engine.correcoes_de_superior().items()):
+            nome = plano[cod].nome_cta
+            nome_antigo = plano[antigo].nome_cta if antigo in plano else "—"
+            inconsistencias.append(
+                Inconsistencia(
+                    tipo="superior_divergente_do_publicado",
+                    severidade="alerta",
+                    descricao=(
+                        f"Conta {cod} ({nome}) está sob {antigo} ({nome_antigo}) no I050, "
+                        f"mas sob {novo} ({plano[novo].nome_cta}) no balanço publicado; "
+                        "os relatórios seguem o balanço publicado — corrija o COD_CTA_SUP "
+                        "no sistema de origem"
+                    ),
+                    detalhes={"cod_cta": cod, "superior_i050": antigo, "superior_j100": novo},
+                )
+            )
+        return inconsistencias
+
+    def _validar_contas_fora_da_dre_publicada(self) -> list[Inconsistencia]:
+        """(l) Conta com saldo de resultado (I355) que nenhuma linha da DRE publicada mostra.
+
+        A (j) confere as linhas que a DRE publicada tem; esta procura as que
+        ela **deixou de ter**. Uma ECD real publicou uma DRE sem a devolução
+        de compras e sem os juros de empréstimos: o prejuízo publicado
+        diferia do que os próprios saldos davam, e nenhuma linha
+        divergia — as contas simplesmente não estavam lá.
+        """
+        codigos_publicados = {
+            linha.cod_agl
+            for linha in self._linhas_publicadas("J150")
+            if (linha.ind_cod_agl or "").upper() == "D"
+        }
+        if not codigos_publicados:
+            return []
+
+        saldo_por_conta: dict[str, float] = defaultdict(float)
+        for saldo in self.session.execute(
+            select(SaldoResultado).where(SaldoResultado.ecd_id == self.ecd_id)
+        ).scalars():
+            saldo_por_conta[saldo.cod_cta] += valor_sinalizado(saldo.vl_sld_fin, saldo.ind_dc_fin)
+
+        aglutinacoes: dict[str, set[str]] = defaultdict(set)
+        nomes: dict[str, str] = {}
+        for cod_cta, nome, cod_agl in self.session.execute(
+            select(PlanoConta.cod_cta, PlanoConta.nome_cta, Aglutinacao.cod_agl)
+            .join(Aglutinacao, Aglutinacao.plano_conta_id == PlanoConta.id)
+            .where(PlanoConta.ecd_id == self.ecd_id)
+        ):
+            aglutinacoes[cod_cta].add(cod_agl)
+            nomes[cod_cta] = nome
+
+        inconsistencias = []
+        for cod, saldo in sorted(saldo_por_conta.items()):
+            if abs(saldo) <= 0.01 or cod not in aglutinacoes:
+                continue
+            if aglutinacoes[cod] & codigos_publicados:
+                continue
+            inconsistencias.append(
+                Inconsistencia(
+                    tipo="conta_fora_da_dre_publicada",
+                    severidade="alerta",
+                    descricao=(
+                        f"Conta {cod} ({nomes[cod]}) tem saldo de resultado de "
+                        f"{abs(saldo):,.2f} {'D' if saldo > 0 else 'C'} e não aparece em "
+                        "nenhuma linha da DRE publicada (J150)"
+                    ),
+                    detalhes={
+                        "cod_cta": cod,
+                        "saldo": round(saldo, 2),
+                        "aglutinacao": sorted(aglutinacoes[cod]),
                     },
                 )
             )

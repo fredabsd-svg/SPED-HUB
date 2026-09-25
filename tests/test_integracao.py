@@ -205,7 +205,7 @@ class TestIntegracaoGrande:
         elapsed = time.perf_counter() - t0
 
         assert ctx.titulo == "Demonstração do Resultado do Exercício"
-        assert len(linhas) == 11
+        assert len(linhas) == 13
         assert elapsed < 2.0, f"DRE demorou {elapsed:.2f}s"
 
     def test_dfc_performance(self, db_grande):

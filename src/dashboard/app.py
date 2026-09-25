@@ -137,11 +137,17 @@ from src.monitoring import build_operational_snapshot, janela_padrao_minutos, me
 from src.parsers.ecf import ECFParser
 from src.parsers.efd import EFDParser
 from src.ratelimit import get_ip_limiter, init_limiter, ip_do_request
+from src.reports import documentos as relatorio_documentos
+from src.reports.assinaturas import assinaturas as assinaturas_da_ecd
+from src.reports.assinaturas import formatar_cpf
 from src.reports.balanco import BalancoPatrimonial
 from src.reports.base import fmt_data, fmt_moeda
 from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
+from src.reports.export_engine import WhiteLabel
+from src.reports.indices import IndicesFinanceiros
+from src.reports.plano_contas import PlanoDeContas
 from src.settings import database_reference, get_settings
 from src.uploads import max_upload_bytes, safe_original_name, save_upload
 from src.version import APP_VERSION
@@ -960,7 +966,7 @@ async def api_dre(request: Request, ecd_id: int = Query(...)):
     session = get_session(_get_engine())
     try:
         dre = DRE(session, ecd_id)
-        ctx, linhas, totais = dre.gerar()
+        ctx, linhas, totais = dre.gerar(detalhar=True)
         return HTMLResponse(
             jinja_env.get_template("partials/dre.html").render(
                 {
@@ -1006,13 +1012,60 @@ async def api_diario(request: Request, ecd_id: int = Query(...), pagina: int = Q
 
 
 @app.get("/api/dfc", response_class=HTMLResponse)
-async def api_dfc(request: Request, ecd_id: int = Query(...)):
+async def api_dfc(
+    request: Request,
+    ecd_id: int = Query(...),
+    metodo: str = Query("direto", pattern="^(direto|indireto)$"),
+):
     session = get_session(_get_engine())
     try:
         dfc = DFC(session, ecd_id)
-        ctx, linhas, totais = dfc.gerar()
+        ctx, linhas, totais = dfc.gerar(metodo=metodo)
         return HTMLResponse(
             jinja_env.get_template("partials/dfc.html").render(
+                {
+                    "request": request,
+                    "ctx": ctx,
+                    "linhas": linhas,
+                    "totais": totais,
+                    "ecd_id": ecd_id,
+                    "metodo": metodo,
+                }
+            )
+        )
+    finally:
+        session.close()
+
+
+@app.get("/api/indices", response_class=HTMLResponse)
+async def api_indices(request: Request, ecd_id: int = Query(...)):
+    """Índices de habilitação econômico-financeira (Lei 14.133/2021, art. 69)."""
+    session = get_session(_get_engine())
+    try:
+        ctx, indices, totais = IndicesFinanceiros(session, ecd_id).gerar()
+        return HTMLResponse(
+            jinja_env.get_template("partials/indices.html").render(
+                {
+                    "request": request,
+                    "ctx": ctx,
+                    "indices": indices,
+                    "totais": totais,
+                    "ecd_id": ecd_id,
+                }
+            )
+        )
+    finally:
+        session.close()
+
+
+@app.get("/api/plano", response_class=HTMLResponse)
+async def api_plano(request: Request, ecd_id: int = Query(...)):
+    """O plano de contas da ECD (I050, I051, I052)."""
+    session = get_session(_get_engine())
+    try:
+        ctx, linhas, totais = PlanoDeContas(session, ecd_id).gerar()
+        return HTMLResponse(
+            jinja_env.get_template("partials/plano.html").render(
                 {
                     "request": request,
                     "ctx": ctx,
@@ -1022,6 +1075,70 @@ async def api_dfc(request: Request, ecd_id: int = Query(...)):
                 }
             )
         )
+    finally:
+        session.close()
+
+
+def _render_assinaturas(session, ecd_id: int, *, salvo: bool = False, erro: str = "") -> str:
+    ecd = session.get(ECD, ecd_id)
+    empresa = session.get(Empresa, ecd.empresa_id)
+    _responsavel, contador = assinaturas_da_ecd(session, ecd_id)
+    return jinja_env.get_template("partials/assinaturas.html").render(
+        {
+            "ecd_id": ecd_id,
+            "empresa": empresa,
+            "contador": contador,
+            "cpf_formatado": (
+                formatar_cpf(empresa.responsavel_cpf) if empresa.responsavel_cpf else ""
+            ),
+            "salvo": salvo,
+            "erro": erro,
+        }
+    )
+
+
+@app.get("/api/assinaturas", response_class=HTMLResponse)
+async def api_assinaturas(ecd_id: int = Query(...)):
+    """Quem assina os relatórios: o contador do J930 e o responsável da empresa."""
+    session = get_session(_get_engine())
+    try:
+        return HTMLResponse(_render_assinaturas(session, ecd_id))
+    finally:
+        session.close()
+
+
+@app.post("/api/assinaturas", response_class=HTMLResponse)
+async def api_assinaturas_salvar(request: Request, ecd_id: int = Query(...)):
+    """Grava o responsável legal na empresa da ECD.
+
+    A ECD assinada com e-CNPJ não diz quem é o sócio; o nome vai para o
+    cadastro da empresa e vale para todas as escriturações dela. A ECD vem
+    na query string para passar pela conferência de escopo do middleware.
+    """
+    formulario = await request.form()
+    nome = (formulario.get("nome") or "").strip()[:150]
+    cpf = "".join(c for c in (formulario.get("cpf") or "") if c.isdigit())
+    qualificacao = (formulario.get("qualificacao") or "").strip()[:60]
+    session = get_session(_get_engine())
+    try:
+        if cpf and len(cpf) != 11:
+            return HTMLResponse(
+                _render_assinaturas(session, ecd_id, erro="CPF precisa ter 11 dígitos."),
+                status_code=400,
+            )
+        ecd = session.get(ECD, ecd_id)
+        empresa = session.get(Empresa, ecd.empresa_id)
+        empresa.responsavel_nome = nome or None
+        empresa.responsavel_cpf = cpf or None
+        empresa.responsavel_qualificacao = qualificacao or None
+        session.commit()
+        AuditService(_db_reference()).registrar(
+            acao="empresa.responsavel",
+            recurso=f"Empresa #{empresa.id}",
+            usuario_id=request.state.usuario.id,
+            detalhes={"preenchido": bool(nome)},
+        )
+        return HTMLResponse(_render_assinaturas(session, ecd_id, salvo=True))
     finally:
         session.close()
 
@@ -1277,83 +1394,58 @@ async def api_cache_stats():
 # ── Rotas: Exportação ──────────────────────────────────────────────────────
 
 
-@app.get("/api/export/pdf")
-async def api_export_pdf(
-    ecd_id: int = Query(...),
-    tipo: str = Query("balanco"),
-    visao: str = Query("hierarquica"),
-):
-    """Exporta relatório para PDF."""
+_FORMATOS_EXPORTACAO = {"pdf", "xlsx", "txt"}
+
+
+def _exportar_documento(
+    request: Request, ecd_id: int, tipo: str, visao: str, formato: str
+) -> Response:
+    """Monta o documento por `src.reports.documentos` — o mesmo caminho da CLI.
+
+    Antes cada rota montava o próprio contexto, sem a descrição de filtros:
+    o PDF saía com o rótulo FILTROS vazio, o período em ISO e sem o hash da
+    ECD. Agora cabeçalho, filtros, assinaturas e colunas são os da CLI.
+    """
+    if tipo not in relatorio_documentos.TIPOS or formato not in _FORMATOS_EXPORTACAO:
+        return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
     session = get_session(_get_engine())
     try:
-        from src.db.models import ECD, Empresa
-        from src.reports.base import ReportContext
-        from src.reports.export_engine import ExportEngine, WhiteLabel
-
-        ecd = session.get(ECD, ecd_id)
-        empresa = session.get(Empresa, ecd.empresa_id) if ecd else None
-
-        wl = WhiteLabel()
-        export = ExportEngine()
-        ctx = ReportContext(
-            titulo="",
-            empresa_nome=empresa.nome if empresa else "",
-            empresa_cnpj=empresa.cnpj if empresa else "",
-            periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}" if ecd else "",
+        documento = relatorio_documentos.montar(session, ecd_id, tipo, visao=visao)
+        conteudo, media_type, extensao = relatorio_documentos.exportar(
+            documento, formato, WhiteLabel()
         )
-
-        if tipo == "balanco":
-            balanco = BalancoPatrimonial(session, ecd_id)
-            if visao == "publicacao":
-                ctx_rel, grupos, totais = balanco.gerar_publicacao()
-            else:
-                ctx_rel, grupos, totais = balanco.gerar(visao=visao)
-            ctx.titulo = ctx_rel.titulo
-            html = export.render_html("balanco.html", ctx, wl, grupos=grupos, totais=totais)
-
-        elif tipo == "dre":
-            dre = DRE(session, ecd_id)
-            ctx_rel, linhas, totais = dre.gerar()
-            ctx.titulo = ctx_rel.titulo
-            html = export.render_html("dre.html", ctx, wl, linhas=linhas, totais=totais)
-
-        elif tipo == "dfc":
-            dfc = DFC(session, ecd_id)
-            ctx_rel, linhas, totais = dfc.gerar()
-            ctx.titulo = ctx_rel.titulo
-            html = export.render_html("dfc.html", ctx, wl, linhas=linhas, totais=totais)
-
-        else:
-            return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
-
-        # Gera PDF
-        from weasyprint import HTML as WHTML
-
-        pdf_bytes = WHTML(string=html).write_pdf()
-
-        # Registra auditoria
-        svc_audit = AuditService(_db_reference())
-        svc_audit.registrar(
+        AuditService(_db_reference()).registrar(
             acao="relatorio.export",
-            recurso=f"PDF: {tipo} ECD #{ecd_id}",
-            detalhes={"tipo": tipo, "visao": visao, "formato": "pdf"},
+            recurso=f"{formato.upper()}: {tipo} ECD #{ecd_id}",
+            usuario_id=getattr(getattr(request.state, "usuario", None), "id", None),
+            detalhes={"tipo": tipo, "visao": visao, "formato": formato},
         )
-
         return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename={tipo}_{ecd_id}.pdf"},
+            content=conteudo,
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={tipo}_{ecd_id}.{extensao}"},
         )
-
     except Exception as e:
-        logger.exception("Erro ao exportar PDF")
+        logger.exception("Erro ao exportar %s", formato.upper())
         return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
     finally:
         session.close()
 
 
+@app.get("/api/export/pdf")
+async def api_export_pdf(
+    request: Request,
+    ecd_id: int = Query(...),
+    tipo: str = Query("balanco"),
+    visao: str = Query("hierarquica"),
+):
+    """Exporta relatório para PDF."""
+    return _exportar_documento(request, ecd_id, tipo, visao, "pdf")
+
+
 @app.get("/api/export/xlsx")
 async def api_export_xlsx(
+    request: Request,
     ecd_id: int = Query(...),
     tipo: str = Query("balanco"),
     visao: str = Query("hierarquica"),
@@ -1365,90 +1457,18 @@ async def api_export_xlsx(
     diretório existisse, nada servia o arquivo depois.  Agora o XLSX é
     montado em memória e baixado, como o PDF.
     """
-    session = get_session(_get_engine())
-    try:
-        from src.db.models import ECD, Empresa
-        from src.reports.base import ReportContext
-        from src.reports.export_engine import ExportEngine, WhiteLabel
+    return _exportar_documento(request, ecd_id, tipo, visao, "xlsx")
 
-        ecd = session.get(ECD, ecd_id)
-        empresa = session.get(Empresa, ecd.empresa_id) if ecd else None
 
-        wl = WhiteLabel()
-        export = ExportEngine()
-        ctx = ReportContext(
-            titulo="",
-            empresa_nome=empresa.nome if empresa else "",
-            empresa_cnpj=empresa.cnpj if empresa else "",
-            periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}" if ecd else "",
-        )
-
-        buffer = io.BytesIO()
-
-        if tipo == "balanco":
-            balanco = BalancoPatrimonial(session, ecd_id)
-            if visao == "publicacao":
-                ctx_rel, grupos, totais = balanco.gerar_publicacao()
-            else:
-                ctx_rel, grupos, totais = balanco.gerar(visao=visao)
-            ctx.titulo = ctx_rel.titulo
-            linhas_dict = []
-            for secao, nome in [("ativo", "Ativo"), ("passivo", "Passivo"), ("pl", "PL")]:
-                for ln in grupos[secao]:
-                    linhas_dict.append(
-                        {
-                            "secao": nome,
-                            "cod_cta": ln.cod_cta,
-                            "nome_cta": ln.nome_cta,
-                            "saldo_atual": ln.saldo_atual,
-                        }
-                    )
-            colunas = ["secao", "cod_cta", "nome_cta", "saldo_atual"]
-            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
-
-        elif tipo == "dre":
-            dre = DRE(session, ecd_id)
-            ctx_rel, linhas, totais = dre.gerar()
-            ctx.titulo = ctx_rel.titulo
-            linhas_dict = [
-                {"tipo": ln.tipo, "descricao": ln.descricao, "valor_atual": ln.valor_atual}
-                for ln in linhas
-            ]
-            colunas = ["tipo", "descricao", "valor_atual"]
-            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
-
-        elif tipo == "dfc":
-            dfc = DFC(session, ecd_id)
-            ctx_rel, linhas, totais = dfc.gerar()
-            ctx.titulo = ctx_rel.titulo
-            linhas_dict = [
-                {"tipo": ln.tipo, "descricao": ln.descricao, "valor": ln.valor} for ln in linhas
-            ]
-            colunas = ["tipo", "descricao", "valor"]
-            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
-
-        else:
-            return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
-
-        # Registra auditoria
-        svc_audit = AuditService(_db_reference())
-        svc_audit.registrar(
-            acao="relatorio.export",
-            recurso=f"XLSX: {tipo} ECD #{ecd_id}",
-            detalhes={"tipo": tipo, "visao": visao, "formato": "xlsx"},
-        )
-
-        return Response(
-            content=buffer.getvalue(),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f"attachment; filename={tipo}_{ecd_id}.xlsx"},
-        )
-
-    except Exception as e:
-        logger.exception("Erro ao exportar XLSX")
-        return JSONResponse({"status": "erro", "mensagem": str(e)}, status_code=500)
-    finally:
-        session.close()
+@app.get("/api/export/txt")
+async def api_export_txt(
+    request: Request,
+    ecd_id: int = Query(...),
+    tipo: str = Query("plano"),
+    visao: str = Query("hierarquica"),
+):
+    """Exporta relatório em texto puro (colunas alinhadas, valores pt-BR)."""
+    return _exportar_documento(request, ecd_id, tipo, visao, "txt")
 
 
 # ── Rotas: Filtros ─────────────────────────────────────────────────────────

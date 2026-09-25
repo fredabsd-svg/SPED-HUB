@@ -1,17 +1,32 @@
-<!-- DFC Partial (HTMX) — Fase 6: +período anterior -->
-<div class="report-actions report-actions-end">
-    <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_id }}&tipo=dfc" download>📄 PDF</a>
-    <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_id }}&tipo=dfc" download>📊 XLSX</a>
+<!-- DFC (HTMX partial) — métodos direto e indireto -->
+{% import "partials/icones.html" as ic %}
+<div class="report-actions">
+    <button class="btn btn-sm {{ 'btn-primary' if metodo == 'direto' else 'btn-outline' }}"
+            hx-get="/api/dfc?ecd_id={{ ecd_id }}&metodo=direto" hx-target="#tab-dfc" hx-swap="innerHTML"
+            aria-pressed="{{ 'true' if metodo == 'direto' else 'false' }}">Método direto</button>
+    <button class="btn btn-sm {{ 'btn-primary' if metodo == 'indireto' else 'btn-outline' }}"
+            hx-get="/api/dfc?ecd_id={{ ecd_id }}&metodo=indireto" hx-target="#tab-dfc" hx-swap="innerHTML"
+            aria-pressed="{{ 'true' if metodo == 'indireto' else 'false' }}">Método indireto</button>
+    <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_id }}&tipo=dfc" download>{{ ic.icone("baixar") }} PDF</a>
+    <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_id }}&tipo=dfc" download>{{ ic.icone("baixar") }} XLSX</a>
+    <a class="btn btn-sm btn-outline" href="/api/export/txt?ecd_id={{ ecd_id }}&tipo=dfc" download>{{ ic.icone("baixar") }} TXT</a>
 </div>
+
+{% if not totais.conciliado %}
+<div class="alert alert-error">Os fluxos ({{ fmt_moeda(totais.variacao_caixa) }}) não conciliam com a variação de caixa e equivalentes nos saldos ({{ fmt_moeda(totais.variacao_caixa_saldos) }}): diferença de {{ fmt_moeda(totais.diferenca_conciliacao) }}.</div>
+{% endif %}
+{% if totais.sem_lancamentos %}
+<div class="alert alert-warning">A ECD não tem lançamentos: a DFC saiu da variação dos saldos e o método direto não é possível.</div>
+{% endif %}
 
 <div class="table-wrap">
     <table>
         <thead>
             <tr>
                 <th>Descrição</th>
-                <th class="text-right">Período Atual (R$)</th>
+                <th class="text-right">Período atual (R$)</th>
                 {% if totais.tem_anterior %}
-                <th class="text-right">Período Anterior (R$)</th>
+                <th class="text-right">Período anterior (R$)</th>
                 {% endif %}
             </tr>
         </thead>
@@ -19,29 +34,15 @@
             {% for l in linhas %}
             {% if l.tipo == 'section' %}
             <tr class="row-section">
-                <td><strong>{{ l.descricao }}</strong></td>
-                <td></td>
-                {% if totais.tem_anterior %}<td></td>{% endif %}
+                <td colspan="{{ 3 if totais.tem_anterior else 2 }}">{{ l.descricao }}</td>
             </tr>
-            {% elif l.tipo == 'subtotal' %}
-            <tr class="row-subtotal">
-                <td>{{ l.descricao }}</td>
-                <td class="text-right font-mono">{{ fmt_moeda(l.valor) }}</td>
-                {% if totais.tem_anterior %}
-                <td class="text-right font-mono">{{ fmt_moeda(l.valor_anterior) }}</td>
-                {% endif %}
-            </tr>
-            {% elif l.tipo == 'total' %}
-            <tr class="row-total">
-                <td>{{ l.descricao }}</td>
-                <td class="text-right font-mono">{{ fmt_moeda(l.valor) }}</td>
-                {% if totais.tem_anterior %}
-                <td class="text-right font-mono">{{ fmt_moeda(l.valor_anterior) }}</td>
-                {% endif %}
+            {% elif l.tipo == 'grupo' %}
+            <tr class="row-grupo">
+                <td colspan="{{ 3 if totais.tem_anterior else 2 }}">{{ l.descricao }}</td>
             </tr>
             {% else %}
-            <tr>
-                <td style="padding-left:24px;">{{ l.descricao }}</td>
+            <tr class="{{ {'subtotal': 'row-subtotal', 'total': 'row-total'}.get(l.tipo, '') }}">
+                <td {% if l.tipo in ('step', 'conciliacao') %}style="padding-left:24px;"{% endif %}>{{ l.descricao }}</td>
                 <td class="text-right font-mono">{{ fmt_moeda(l.valor) }}</td>
                 {% if totais.tem_anterior %}
                 <td class="text-right font-mono">{{ fmt_moeda(l.valor_anterior) }}</td>
@@ -53,35 +54,20 @@
     </table>
 </div>
 
-{% if totais %}
-<div style="margin-top:16px;display:flex;gap:24px;flex-wrap:wrap;">
-    <div style="background:var(--primary-light);padding:12px 16px;border-radius:var(--radius);">
-        <div style="font-size:.7rem;text-transform:uppercase;color:var(--gray-500);">Operacional</div>
-        <div style="font-weight:700;font-size:1.1rem;">{{ fmt_moeda(totais.operacional) }}</div>
-        {% if totais.tem_anterior %}
-        <div style="font-size:.7rem;color:var(--gray-500);">Ant: {{ fmt_moeda(totais.operacional_anterior) }}</div>
-        {% endif %}
+<div class="dfc-resumo">
+    {% for rotulo, chave in [("Operacional", "operacional"), ("Investimento", "investimento"), ("Financiamento", "financiamento"), ("Variação de caixa", "variacao_caixa")] %}
+    <div class="dfc-resumo-item{% if chave == 'variacao_caixa' %} dfc-resumo-total{% endif %}">
+        <div class="dfc-resumo-rotulo">{{ rotulo }}</div>
+        <div class="dfc-resumo-valor font-mono">{{ fmt_moeda(totais[chave]) }}</div>
+        {% if totais.tem_anterior %}<div class="dfc-resumo-rotulo">Anterior: {{ fmt_moeda(totais[chave ~ '_anterior']) }}</div>{% endif %}
     </div>
-    <div style="background:var(--primary-light);padding:12px 16px;border-radius:var(--radius);">
-        <div style="font-size:.7rem;text-transform:uppercase;color:var(--gray-500);">Investimento</div>
-        <div style="font-weight:700;font-size:1.1rem;">{{ fmt_moeda(totais.investimento) }}</div>
-        {% if totais.tem_anterior %}
-        <div style="font-size:.7rem;color:var(--gray-500);">Ant: {{ fmt_moeda(totais.investimento_anterior) }}</div>
-        {% endif %}
-    </div>
-    <div style="background:var(--primary-light);padding:12px 16px;border-radius:var(--radius);">
-        <div style="font-size:.7rem;text-transform:uppercase;color:var(--gray-500);">Financiamento</div>
-        <div style="font-weight:700;font-size:1.1rem;">{{ fmt_moeda(totais.financiamento) }}</div>
-        {% if totais.tem_anterior %}
-        <div style="font-size:.7rem;color:var(--gray-500);">Ant: {{ fmt_moeda(totais.financiamento_anterior) }}</div>
-        {% endif %}
-    </div>
-    <div style="background:var(--primary);padding:12px 16px;border-radius:var(--radius);color:white;">
-        <div style="font-size:.7rem;text-transform:uppercase;opacity:.8;">Variação Caixa</div>
-        <div style="font-weight:700;font-size:1.1rem;">{{ fmt_moeda(totais.variacao_caixa) }}</div>
-        {% if totais.tem_anterior %}
-        <div style="font-size:.7rem;opacity:.8;">Ant: {{ fmt_moeda(totais.variacao_caixa_anterior) }}</div>
-        {% endif %}
-    </div>
+    {% endfor %}
 </div>
-{% endif %}
+
+<p class="nota-relatorio">
+    Só entra o que passou pelas contas de caixa e equivalentes. Ficaram fora
+    {{ totais.transferencias_internas_qtd }} transferência(s) entre contas da própria empresa
+    ({{ fmt_moeda(totais.transferencias_internas) }}, CPC 03 item 9) e
+    {{ totais.lancamentos_sem_caixa }} lançamento(s) sem movimento de caixa (item 43).
+    {% if metodo == 'indireto' %}O caixa das operações pelo método indireto é o mesmo do direto: os dois saem dos lançamentos.{% endif %}
+</p>

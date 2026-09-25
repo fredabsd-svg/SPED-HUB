@@ -2,7 +2,8 @@
 
 {% block content %}
 
-<h2>Demonstração do Resultado do Exercício</h2>
+<div class="kicker">Demonstração do resultado do exercício</div>
+<h2>{{ ctx.empresa_nome or ctx.titulo }}</h2>
 
 <div class="info-box">
   <div>
@@ -15,7 +16,7 @@
       {{ fmt_moeda(totais.resultado_liquido) }}
     </dd>
   </div>
-  {% if ctx.filtros_descricao != 'Nenhum filtro aplicado' %}
+  {% if ctx.tem_filtros %}
   <div>
     <dt>Filtros</dt>
     <dd>{{ ctx.filtros_descricao }}</dd>
@@ -26,46 +27,27 @@
 <table>
   <thead>
     <tr>
-      <th style="width:50%">Descrição</th>
+      <th style="width:{{ '50%' if totais.tem_anterior else '75%' }}">Descrição</th>
       <th class="right" style="width:25%">Período Atual</th>
-      <th class="right" style="width:25%">Período Anterior</th>
+      {% if totais.tem_anterior %}<th class="right" style="width:25%">Período Anterior</th>{% endif %}
     </tr>
   </thead>
   <tbody>
     {% for linha in linhas %}
-      {% if linha.tipo == 'step' %}
-      <tr class="dre-step">
+      {% set classe = {'step': 'dre-step', 'subtotal': 'dre-subtotal', 'total': 'dre-total', 'detail': 'detail'}.get(linha.tipo, '') %}
+      <tr class="{{ classe }}">
         <td>{{ linha.descricao }}</td>
         <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
+        {% if totais.tem_anterior %}<td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>{% endif %}
       </tr>
-      {% elif linha.tipo == 'subtotal' %}
-      <tr class="dre-subtotal">
-        <td>{{ linha.descricao }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
-      </tr>
-      {% elif linha.tipo == 'total' %}
-      <tr class="dre-total">
-        <td>{{ linha.descricao }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
-      </tr>
-      {% elif linha.tipo == 'detail' %}
-      <tr>
-        <td style="padding-left: var(--space-8)">{{ linha.descricao }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
-      </tr>
-      {% else %}
-      <tr>
-        <td>{{ linha.descricao }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_atual) }}</td>
-        <td class="right">{{ fmt_moeda(linha.valor_anterior) }}</td>
-      </tr>
-      {% endif %}
     {% endfor %}
   </tbody>
 </table>
+
+{% if totais.origem_anterior == 'publicado' %}
+<p class="nota">
+  Período anterior: DRE publicada na própria ECD (J150, valores do exercício anterior).
+</p>
+{% endif %}
 
 {% endblock %}
