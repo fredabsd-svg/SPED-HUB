@@ -77,6 +77,8 @@ from src.auth import (
     usuario_pode_acessar_ecd,
 )
 from src.cache.redis_cache import RedisCacheService
+from src.cnpj import formatar as formatar_cnpj
+from src.dashboard.destaques import gerar_destaques
 from src.dashboard.services import DashboardService
 from src.db.models import (
     ECD,
@@ -332,6 +334,9 @@ _PUBLIC_API_PATHS = {
     "/api/health/full",
 }
 
+# Identificador numérico aceito na query: dígitos ASCII e nada mais.
+_ID_ASCII = re.compile(r"[0-9]{1,18}")
+
 
 # Nomes de loopback ficam sempre liberados, independentemente do allowlist:
 # o HEALTHCHECK do container chama `http://localhost:8000/api/v1/health`, e
@@ -492,12 +497,19 @@ async def require_dashboard_api_auth(request: Request, call_next):
                 status_code=403,
             )
 
-        raw_ids = []
-        if request.query_params.get("ecd_id"):
-            raw_ids.append(request.query_params["ecd_id"])
-        if request.query_params.get("ecd_ids"):
-            raw_ids.extend(request.query_params["ecd_ids"].split(","))
-        ecd_ids = {int(value.strip()) for value in raw_ids if value.strip().isdigit()}
+        # Todo valor é conferido — `getlist`, não `get` — e só dígito ASCII
+        # passa.  O filtro era `isdigit()`: `+2`, `2.0` e `2_0` não passavam
+        # nele e por isso escapavam da checagem de dono, mas o FastAPI os
+        # converte para `2` e a rota servia a ECD de outro escritório.
+        raw_ids = list(request.query_params.getlist("ecd_id"))
+        for lista in request.query_params.getlist("ecd_ids"):
+            raw_ids.extend(parte for parte in lista.split(",") if parte.strip())
+        if any(not _ID_ASCII.fullmatch(value) for value in raw_ids):
+            return JSONResponse(
+                {"status": "erro", "mensagem": "Identificador de ECD inválido"},
+                status_code=400,
+            )
+        ecd_ids = {int(value) for value in raw_ids}
         if ecd_ids:
             session = get_session(_get_engine())
             try:
@@ -521,7 +533,36 @@ jinja_env.globals["now"] = datetime.datetime.now
 jinja_env.globals["app_version"] = APP_VERSION
 
 
+def _periodo_br(periodo: str) -> str:
+    """`2024-01-01 a 2024-12-31` → `01/01/2024 a 31/12/2024`.
+
+    O texto ISO continua sendo o que a API entrega; só a tela converte.  O
+    que não casar com o formato sai como veio, em vez de sumir.
+    """
+    return re.sub(r"(\d{4})-(\d{2})-(\d{2})", r"\3/\2/\1", periodo or "")
+
+
+def _percentual(valor: float, casas: int = 1) -> str:
+    """`31.25` → `31,3%` — vírgula decimal, como o resto da tela."""
+    return f"{valor:.{casas}f}".replace(".", ",") + "%"
+
+
+jinja_env.filters["cnpj"] = formatar_cnpj
+jinja_env.filters["periodo"] = _periodo_br
+jinja_env.filters["percentual"] = _percentual
+
+
 # ── Rotas: Autenticação ────────────────────────────────────────────────────
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Navegador que ignora o `<link rel="icon">` pede este caminho fixo.
+
+    Sem a rota, cada página aberta rendia um 404 no log de acesso e um erro
+    no console do navegador.
+    """
+    return RedirectResponse("/static/marca.svg", status_code=301)
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -530,7 +571,11 @@ async def login_page(request: Request):
     usuario = await get_usuario_atual(request)
     if usuario:
         return RedirectResponse(url="/", status_code=302)
-    return HTMLResponse(jinja_env.get_template("login.html").render({"request": request}))
+    return HTMLResponse(
+        jinja_env.get_template("login.html").render(
+            {"request": request, "registro_aberto": get_auth().registro_publico_aberto()}
+        )
+    )
 
 
 @app.post("/api/login")
@@ -609,8 +654,12 @@ async def logout(request: Request):
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    """Página de registro."""
-    return HTMLResponse(jinja_env.get_template("register.html").render({"request": request}))
+    """Página de registro — ou o aviso de que ele está fechado."""
+    return HTMLResponse(
+        jinja_env.get_template("register.html").render(
+            {"request": request, "registro_aberto": get_auth().registro_publico_aberto()}
+        )
+    )
 
 
 @app.post("/api/register")
@@ -660,8 +709,14 @@ async def api_register(request: Request):
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    """Dashboard principal (requer autenticação)."""
+async def dashboard(request: Request, ecd_id: int | None = Query(None)):
+    """Dashboard principal (requer autenticação).
+
+    `?ecd_id=` escolhe a escrituração exibida — é para onde o seletor do
+    cabeçalho navega.  Sem ele, vale a importada por último.  A busca passa
+    pelo escopo do escritório: id de outro escritório responde 404, igual a
+    id que não existe.
+    """
     usuario = await get_usuario_atual(request)
     if not usuario:
         return RedirectResponse(url="/login", status_code=302)
@@ -672,13 +727,18 @@ async def dashboard(request: Request):
 
         latest_stmt = select(ECD).join(Empresa)
         latest_stmt = aplicar_escopo_empresas(latest_stmt, usuario)
+        if ecd_id is not None:
+            latest_stmt = latest_stmt.where(ECD.id == ecd_id)
         ecd = session.execute(
             latest_stmt.order_by(desc(ECD.importado_em)).limit(1)
         ).scalar_one_or_none()
+        if ecd_id is not None and ecd is None:
+            return HTMLResponse("ECD não encontrada", status_code=404)
 
         if ecd:
             svc = DashboardService(session, ecd.id)
             data = svc.get_dashboard_data()
+            destaques = gerar_destaques(data)
             evolucao = svc.get_evolucao_patrimonial()
             composicao = svc.get_composicao_ativo()
             dre_waterfall = svc.get_dre_waterfall()
@@ -687,6 +747,7 @@ async def dashboard(request: Request):
             comparativo = svc.get_comparativo_empresas(usuario) if len(ecds) > 1 else None
         else:
             data = None
+            destaques = []
             evolucao = None
             composicao = None
             dre_waterfall = None
@@ -699,6 +760,7 @@ async def dashboard(request: Request):
                     "request": request,
                     "usuario": usuario,
                     "data": data,
+                    "destaques": destaques,
                     "evolucao": evolucao,
                     "composicao": composicao,
                     "dre_waterfall": dre_waterfall,
@@ -1067,13 +1129,16 @@ async def api_audit_limpar(
 @app.post("/api/upload-async")
 async def api_upload_async(request: Request, file: UploadFile = File(...)):
     """Upload assíncrono de ECD com importação incremental e polling."""
-    from src.async_jobs import get_async_job_service, init_async_job_service
+    from src.async_jobs import get_async_job_service
 
     saved = await save_upload(file, (".txt", ".ecd"))
     escritorio_id = request.state.usuario.escritorio_id
     db_path = _db_reference()
-    init_async_job_service(db_path)
-    job_service = get_async_job_service()
+    # `get`, não `init`: o serviço guarda em memória o progresso e o token de
+    # cancelamento dos jobs em andamento.  Reinicializá-lo a cada upload
+    # trocava o serviço por um vazio, e o job que já rodava voltava a 0% e
+    # não podia mais ser cancelado.
+    job_service = get_async_job_service(db_path)
     job = job_service.criar(
         tipo="ecd_import",
         parametros={
@@ -1293,7 +1358,13 @@ async def api_export_xlsx(
     tipo: str = Query("balanco"),
     visao: str = Query("hierarquica"),
 ):
-    """Exporta relatório para XLSX."""
+    """Exporta relatório para XLSX e entrega o arquivo na própria resposta.
+
+    A rota gravava num caminho fixo, `/workspace/outputs/`, que não existe
+    em nenhuma instalação: toda exportação respondia 500.  E mesmo onde o
+    diretório existisse, nada servia o arquivo depois.  Agora o XLSX é
+    montado em memória e baixado, como o PDF.
+    """
     session = get_session(_get_engine())
     try:
         from src.db.models import ECD, Empresa
@@ -1312,7 +1383,7 @@ async def api_export_xlsx(
             periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}" if ecd else "",
         )
 
-        output_path = f"/workspace/outputs/{tipo}_{ecd_id}.xlsx"
+        buffer = io.BytesIO()
 
         if tipo == "balanco":
             balanco = BalancoPatrimonial(session, ecd_id)
@@ -1333,7 +1404,7 @@ async def api_export_xlsx(
                         }
                     )
             colunas = ["secao", "cod_cta", "nome_cta", "saldo_atual"]
-            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
         elif tipo == "dre":
             dre = DRE(session, ecd_id)
@@ -1344,7 +1415,7 @@ async def api_export_xlsx(
                 for ln in linhas
             ]
             colunas = ["tipo", "descricao", "valor_atual"]
-            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
         elif tipo == "dfc":
             dfc = DFC(session, ecd_id)
@@ -1354,7 +1425,7 @@ async def api_export_xlsx(
                 {"tipo": ln.tipo, "descricao": ln.descricao, "valor": ln.valor} for ln in linhas
             ]
             colunas = ["tipo", "descricao", "valor"]
-            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
         else:
             return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
@@ -1367,7 +1438,11 @@ async def api_export_xlsx(
             detalhes={"tipo": tipo, "visao": visao, "formato": "xlsx"},
         )
 
-        return JSONResponse({"status": "ok", "arquivo": f"{tipo}_{ecd_id}.xlsx"})
+        return Response(
+            content=buffer.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={tipo}_{ecd_id}.xlsx"},
+        )
 
     except Exception as e:
         logger.exception("Erro ao exportar XLSX")
@@ -1397,12 +1472,21 @@ async def api_filtros_aplicar(
         criterios = FilterCriteria()
         if natureza:
             criterios.cod_nat = [n.strip() for n in natureza.split(",")]
-        if nivel_ate:
-            criterios.nivel_ate = int(nivel_ate)
-        if dt_ini:
-            criterios.dt_ini = datetime.date.fromisoformat(dt_ini)
-        if dt_fin:
-            criterios.dt_fin = datetime.date.fromisoformat(dt_fin)
+        # Nível e datas vêm digitados: valor inválido é erro de quem pediu
+        # (400 com a razão), não falha do servidor (500 sem explicação).
+        try:
+            if nivel_ate:
+                criterios.nivel_ate = int(nivel_ate)
+            if dt_ini:
+                criterios.dt_ini = datetime.date.fromisoformat(dt_ini)
+            if dt_fin:
+                criterios.dt_fin = datetime.date.fromisoformat(dt_fin)
+        except ValueError:
+            return HTMLResponse(
+                '<div class="alert alert-error">Filtro inválido: confira o nível e as '
+                "datas (AAAA-MM-DD).</div>",
+                status_code=400,
+            )
         if conta:
             criterios.cod_cta_exato = [conta]
         if nome_cta:
@@ -2096,10 +2180,14 @@ async def documento_page(request: Request, documento_id: int):
                         {
                             "item": item,
                             "numero": valores.get("numero_item"),
+                            # `itens_alterados` é indexado pelo número do item
+                            # na nota, não pelo id da linha no banco: buscar
+                            # por `item.id` só acertava na primeira nota
+                            # importada, e nas outras marcava o item errado.
                             "linhas": _linhas_de_revisao(
-                                item, valores, visao.itens_alterados.get(item.id, set())
+                                item, valores, visao.itens_alterados.get(item.numero_item, set())
                             ),
-                            "alterados": visao.itens_alterados.get(item.id, set()),
+                            "alterados": visao.itens_alterados.get(item.numero_item, set()),
                             # Sobre os valores **efetivos**: é o que vai para o
                             # arquivo.  Conferir o original mostraria um erro
                             # que já foi corrigido, e esconderia um que alguém
@@ -3186,10 +3274,13 @@ async def escrituracao_arquivo(request: Request, escrituracao_id: int):
         nome = f"{escrituracao.tipo}_{escrituracao.data_inicio:%Y%m}_{escrituracao.id}.txt"
         # O conteúdo já vem com CRLF do gerador, e vai como bytes justamente
         # para ninguém no caminho "consertar" a quebra de linha — o validador
-        # recusa o arquivo inteiro se ela mudar.
+        # recusa o arquivo inteiro se ela mudar. Em ISO-8859-1, que é o que o
+        # leiaute pede: em UTF-8 o validador lia "INDÃšSTRIA".
+        from src.escrituracoes import arquivo_para_baixar
+
         return Response(
-            content=escrituracao.conteudo.encode("utf-8"),
-            media_type="text/plain; charset=utf-8",
+            content=arquivo_para_baixar(escrituracao),
+            media_type="text/plain; charset=iso-8859-1",
             headers={"Content-Disposition": f'attachment; filename="{nome}"'},
         )
     finally:
@@ -3427,8 +3518,17 @@ async def api_redis_cache_stats(request: Request):
 
 
 @app.get("/api/health/full")
-async def api_health_full():
-    """Health check completo — verifica DB, cache, workers."""
+def api_health_full():
+    """Health check completo — verifica DB, cache, workers.
+
+    `def`, não `async def`: a checagem é toda síncrona (sessão do banco,
+    cliente Redis com timeout de 2 s), e dentro de uma corrotina ela parava o
+    event loop — com o Redis fora do ar, cada chamada a esta rota PÚBLICA
+    congelava a aplicação inteira por ~2 s.  Como `def`, o FastAPI a roda no
+    threadpool.  O cliente Redis é compartilhado (`cache_compartilhado`) em vez
+    de reconstruído a cada chamada anônima.
+    """
+    from src.cache.redis_cache import cache_compartilhado
 
     status = {"database": "ok", "cache": "unknown", "workers": "unknown"}
 
@@ -3444,7 +3544,7 @@ async def api_health_full():
     # Cache
     try:
         redis_url = get_settings().redis_url_or_local
-        cache = RedisCacheService(redis_url=redis_url, prefix="health:")
+        cache = cache_compartilhado(redis_url, prefix="health:")
         cache.set("health", "ok", ttl=10)
         if cache.get("health") == "ok":
             status["cache"] = f"ok ({cache.stats()['backend']})"

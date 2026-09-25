@@ -4,21 +4,23 @@ A partir dos saldos periódicos (I155), gera balancete com:
 - Colunas: Saldo Inicial, Débitos, Créditos, Saldo Final
 - Profundidade configurável
 - Conferência automática contra I155 (SI + D − C = SF)
+
+O saldo de cada conta vem de `src.reports.saldos.consolidar`: SI do primeiro
+I150, SF do último, centros de custo somados, sintéticas agregando as filhas
+(o I155 só existe para analítica).
 """
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import PlanoConta
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
     fmt_moeda,
     saldo_por_natureza,
-    valor_sinalizado,
 )
+from src.reports.saldos import TOLERANCIA, consolidar
 
 
 @dataclass
@@ -38,6 +40,12 @@ class LinhaBalancete:
     saldo_calculado: float = 0.0
     divergencia: float = 0.0
     tem_divergencia: bool = False
+    # Superiores da conta no plano, do mais próximo ao topo. `None` quando a
+    # linha foi montada fora do `gerar` e a hierarquia é desconhecida.
+    ancestrais: tuple[str, ...] | None = None
+    # A conta tem I155 próprio (analítica). Sintética agregada não tem: a
+    # divergência dela é a soma das divergências das filhas.
+    saldo_proprio: bool = True
 
 
 class Balancete:
@@ -62,55 +70,27 @@ class Balancete:
             apenas_sinteticas: Se True, apenas contas sintéticas
 
         Returns:
-            (contexto, linhas)
+            (contexto, linhas) — na ordem do plano de contas, cada sintética
+            antes das filhas; só contas com saldo ou movimento na subárvore.
         """
         if criterios is None:
             criterios = FilterCriteria()
 
-        # Busca saldos com filtros
-        saldos = self.engine.aplicar_saldos(criterios)
+        saldos = consolidar(self.engine, criterios)
+        plano = self.engine.plano()
 
-        # Agrupa por conta (soma todos os períodos)
-        from collections import defaultdict
-
-        por_conta: dict[str, dict] = defaultdict(lambda: {"si": 0.0, "d": 0.0, "c": 0.0, "sf": 0.0})
-
-        for s in saldos:
-            acc = por_conta[s.cod_cta]
-            acc["si"] += valor_sinalizado(s.vl_sld_ini, s.ind_dc_ini)
-            acc["d"] += s.vl_deb
-            acc["c"] += s.vl_cred
-            acc["sf"] += valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-
-        # Busca plano de contas
-        plano = {
-            c.cod_cta: c
-            for c in self.session.execute(
-                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
-            ).scalars()
-        }
-
-        # Monta linhas
         linhas = []
-        for cod_cta in sorted(por_conta.keys()):
-            pc = plano.get(cod_cta)
-            if pc is None:
+        for cod_cta in saldos.visiveis:
+            if not saldos.tem_dado(cod_cta):
                 continue
-
-            # Filtro de nível
+            pc = plano[cod_cta]
             if nivel_max is not None and pc.nivel > nivel_max:
                 continue
             if apenas_sinteticas and pc.ind_cta != "S":
                 continue
 
-            acc = por_conta[cod_cta]
-            si = acc["si"]
-            d = acc["d"]
-            c = acc["c"]
-            sf = acc["sf"]
-            sc = si + d - c  # saldo calculado
-            div = sf - sc
-
+            saldo = saldos.saldo(cod_cta)
+            div = saldo.divergencia
             linhas.append(
                 LinhaBalancete(
                     cod_cta=cod_cta,
@@ -118,13 +98,15 @@ class Balancete:
                     nivel=pc.nivel,
                     cod_nat=pc.cod_nat,
                     ind_cta=pc.ind_cta,
-                    saldo_inicial=si,
-                    debitos=d,
-                    creditos=c,
-                    saldo_final=sf,
-                    saldo_calculado=sc,
+                    saldo_inicial=saldo.si,
+                    debitos=saldo.d,
+                    creditos=saldo.c,
+                    saldo_final=saldo.sf,
+                    saldo_calculado=saldo.calculado,
                     divergencia=div,
-                    tem_divergencia=abs(div) > 0.005,
+                    tem_divergencia=abs(div) > TOLERANCIA,
+                    ancestrais=saldos.hierarquia.ancestrais(cod_cta),
+                    saldo_proprio=cod_cta in saldos.proprios,
                 )
             )
 
@@ -155,19 +137,31 @@ class Balancete:
         ]
 
     def totais(self, linhas: list[LinhaBalancete]) -> dict:
-        """Totais da listagem, somando só as linhas do menor nível presente.
+        """Totais da listagem, contando cada valor uma única vez.
 
-        Somar todas as linhas dobraria cada valor: uma conta sintética já
-        agrega as analíticas abaixo dela. As linhas do menor nível são
-        subárvores disjuntas entre si e cobrem tudo o que está listado —
-        na listagem completa, são as contas de nível 1, e o total bate com
-        a soma das analíticas quando o arquivo é consistente (a divergência
-        é assunto do :meth:`conferir`, linha a linha).
+        Entram as linhas que não têm superior **listado**: a sintética já
+        agrega as filhas, e somar as duas dobraria o valor. Uma analítica
+        cuja sintética não está na listagem (filtro por nível, só
+        analíticas) entra por si — somar só o menor nível presente, como era
+        antes, deixava de fora as analíticas mais fundas: 820.000 de débitos
+        na amostra, contra 2.980.000.
+
+        Linha montada fora do `gerar` (sem `ancestrais`) herda a superior da
+        indentação: a linha anterior de nível menor.
         """
-        if not linhas:
-            return {"saldo_inicial": 0.0, "debitos": 0.0, "creditos": 0.0, "saldo_final": 0.0}
-        topo = min(ln.nivel for ln in linhas)
-        base = [ln for ln in linhas if ln.nivel == topo]
+        listadas = {ln.cod_cta for ln in linhas}
+        pilha: list[int] = []
+        base: list[LinhaBalancete] = []
+        for ln in linhas:
+            while pilha and pilha[-1] >= ln.nivel:
+                pilha.pop()
+            if ln.ancestrais is not None:
+                coberta = any(a in listadas for a in ln.ancestrais)
+            else:
+                coberta = bool(pilha)
+            pilha.append(ln.nivel)
+            if not coberta:
+                base.append(ln)
         return {
             "saldo_inicial": round(sum(ln.saldo_inicial for ln in base), 2),
             "debitos": round(sum(ln.debitos for ln in base), 2),
@@ -176,9 +170,16 @@ class Balancete:
         }
 
     def conferir(self, linhas: list[LinhaBalancete]) -> dict:
-        """Conferência contra I155: SI + D − C = SF."""
-        total_divergencias = sum(1 for ln in linhas if ln.tem_divergencia)
-        soma_divergencias = sum(abs(ln.divergencia) for ln in linhas if ln.tem_divergencia)
+        """Conferência contra I155: SI + D − C = SF, conta a conta.
+
+        Conta só as linhas com saldo próprio: a divergência de uma sintética
+        agregada é a das filhas, e contá-la de novo multiplicaria um erro pelo
+        número de níveis acima dele. A conferência é do intervalo inteiro
+        (SI do primeiro mês, SF do último); a de cada mês é da validação (b).
+        """
+        proprias = [ln for ln in linhas if ln.saldo_proprio]
+        total_divergencias = sum(1 for ln in proprias if ln.tem_divergencia)
+        soma_divergencias = sum(abs(ln.divergencia) for ln in proprias if ln.tem_divergencia)
 
         return {
             "total_contas": len(linhas),

@@ -13,7 +13,7 @@ orquestração.
 
 | Símbolo | Para quê |
 |---|---|
-| `AuthService` | `registrar`, `login`, `logout`, `validar_token`, `get_empresas_usuario`. |
+| `AuthService` | `registrar`, `registro_publico_aberto`, `login`, `logout`, `validar_token`, `get_empresas_usuario`. |
 | `init_auth(db_path)` / `get_auth()` | Singleton do serviço, inicializado no app. |
 | `get_usuario_atual(request)` | Extrai usuário do cookie `sped_hub_session` ou de `Authorization: Bearer`. |
 | `aplicar_escopo_empresas(stmt, usuario)` | `WHERE escritorio_id = ?` (admin passa sem filtro). |
@@ -59,6 +59,9 @@ API externa).
 - **`_resolve_tenant` engole exceções** (loga e retorna `None`): falha ao
   resolver tenant vira "sem isolamento", não erro 500.
 - `Sessao.expirado` normaliza datetimes naive para UTC antes de comparar.
+- **`validar_token` confere `usuario.ativo` a cada request.** Antes só o
+  `login` conferia: desativar alguém barrava o próximo acesso, mas a sessão
+  aberta seguia valendo até expirar.
 
 ## Como testar isoladamente
 

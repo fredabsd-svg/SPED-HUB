@@ -5,6 +5,11 @@ Schema completo com strawberry-graphql:
   - Tipos: Empresa, ECD, Balanco, DRE, DFC, Diario, KPIs, Notas, Validacao
 
 Integração: app.include_router no dashboard/app.py ou standalone com uvicorn.
+
+Escopo: a credencial que passou por `requer_api_key` entra no contexto
+(`info.context["credencial"]`) e todo resolver aplica a mesma regra do REST
+v1 — chave de escritório só vê empresas e ECDs daquele escritório.  Sem
+credencial no contexto (schema executado fora do router), o resolver recusa.
 """
 
 import logging
@@ -16,7 +21,7 @@ from sqlalchemy.orm import Session
 from strawberry.fastapi import GraphQLRouter
 from strawberry.types import Info
 
-from src.api import requer_api_key
+from src.api import credencial_ve_ecd, escopo_da_credencial, requer_api_key
 from src.dashboard.services import DashboardService
 from src.db.models import (
     ECD,
@@ -47,6 +52,48 @@ def _get_session() -> Session:
     engine = obter_engine(_get_db_path())
     init_db_once(engine)
     return get_session(engine)
+
+
+# Mesmos tetos do REST v1 (`Query(le=100)` nas listagens, `le=200` no
+# diário).  Sem teto, `limite: 1000000` pedia a base inteira numa requisição.
+LIMITE_MAXIMO = 100
+LIMITE_MAXIMO_DIARIO = 200
+
+
+class NaoEncontrado(Exception):
+    """ECD inexistente ou de outro escritório — a mensagem é a mesma nos dois."""
+
+
+def _credencial(info: Info):
+    """A credencial que o router pôs no contexto.
+
+    Falha fechado: sem credencial não há escopo a aplicar, e devolver tudo
+    seria o defeito que este módulo tinha.  Só acontece com o schema
+    executado fora do router, sem `context_value`.
+    """
+    contexto = info.context
+    if isinstance(contexto, dict):
+        credencial = contexto.get("credencial")
+    else:
+        credencial = getattr(contexto, "credencial", None)
+    if credencial is None:
+        raise PermissionError("Credencial ausente no contexto GraphQL")
+    return credencial
+
+
+def _exigir_ecd(session: Session, info: Info, ecd_id: int) -> None:
+    """Recusa a ECD que a credencial não enxerga — inclusive a inexistente.
+
+    Mesma mensagem do 404 do REST; responder diferente para "de outro
+    escritório" confirmaria que ela existe.
+    """
+    if not credencial_ve_ecd(session, _credencial(info), ecd_id):
+        raise NaoEncontrado("ECD não encontrada")
+
+
+def _paginacao(pagina: int, limite: int, teto: int = LIMITE_MAXIMO) -> tuple[int, int]:
+    """Página a partir de 1 e limite entre 1 e o teto."""
+    return max(1, pagina), max(1, min(limite, teto))
 
 
 # ── Tipos GraphQL ───────────────────────────────────────────────────────────
@@ -268,12 +315,25 @@ class Query:
         pagina: int = 1,
         limite: int = 20,
     ) -> EmpresasPage:
+        credencial = _credencial(info)
+        pagina, limite = _paginacao(pagina, limite)
         session = _get_session()
         try:
-            total = session.execute(select(func.count(Empresa.id))).scalar() or 0
+            # A contagem também é escopada, como no REST: senão o total
+            # revelaria quantas empresas o vizinho tem.
+            total = (
+                session.execute(
+                    escopo_da_credencial(select(func.count(Empresa.id)), credencial)
+                ).scalar()
+                or 0
+            )
             offset = (pagina - 1) * limite
             empresas = (
-                session.execute(select(Empresa).order_by(Empresa.nome).offset(offset).limit(limite))
+                session.execute(
+                    escopo_da_credencial(select(Empresa).order_by(Empresa.nome), credencial)
+                    .offset(offset)
+                    .limit(limite)
+                )
                 .scalars()
                 .all()
             )
@@ -310,9 +370,12 @@ class Query:
 
     @strawberry.field
     def empresa(self, info: Info, id: int) -> EmpresaType | None:
+        credencial = _credencial(info)
         session = _get_session()
         try:
-            e = session.get(Empresa, id)
+            e = session.execute(
+                escopo_da_credencial(select(Empresa).where(Empresa.id == id), credencial)
+            ).scalar_one_or_none()
             if not e:
                 return None
             return EmpresaType(
@@ -342,15 +405,23 @@ class Query:
         pagina: int = 1,
         limite: int = 20,
     ) -> ECDsPage:
+        credencial = _credencial(info)
+        pagina, limite = _paginacao(pagina, limite)
         session = _get_session()
         try:
-            query_count = select(func.count(ECD.id))
+            query_count = escopo_da_credencial(
+                select(func.count(ECD.id)).join(Empresa, ECD.empresa_id == Empresa.id),
+                credencial,
+            )
             if empresa_id:
                 query_count = query_count.where(ECD.empresa_id == empresa_id)
             total = session.execute(query_count).scalar() or 0
 
             offset = (pagina - 1) * limite
-            query_ecds = select(ECD, Empresa.nome).join(Empresa).order_by(ECD.importado_em.desc())
+            query_ecds = escopo_da_credencial(
+                select(ECD, Empresa.nome).join(Empresa).order_by(ECD.importado_em.desc()),
+                credencial,
+            )
             if empresa_id:
                 query_ecds = query_ecds.where(ECD.empresa_id == empresa_id)
             ecds = session.execute(query_ecds.offset(offset).limit(limite)).all()
@@ -413,6 +484,9 @@ class Query:
     def ecd(self, info: Info, id: int) -> ECDType | None:
         session = _get_session()
         try:
+            # Mesma resposta (null) para inexistente e para de outro escritório.
+            if not credencial_ve_ecd(session, _credencial(info), id):
+                return None
             ecd = session.get(ECD, id)
             if not ecd:
                 return None
@@ -459,6 +533,7 @@ class Query:
     def balanco(self, info: Info, ecd_id: int, visao: str = "hierarquica") -> BalancoType | None:
         session = _get_session()
         try:
+            _exigir_ecd(session, info, ecd_id)
             balanco = BalancoPatrimonial(session, ecd_id)
             if visao == "publicacao":
                 ctx, grupos, totais = balanco.gerar_publicacao()
@@ -511,6 +586,7 @@ class Query:
     def dre(self, info: Info, ecd_id: int) -> DREType | None:
         session = _get_session()
         try:
+            _exigir_ecd(session, info, ecd_id)
             dre = DRE(session, ecd_id)
             ctx, linhas, totais = dre.gerar()
 
@@ -536,6 +612,7 @@ class Query:
     def dfc(self, info: Info, ecd_id: int) -> DFCType | None:
         session = _get_session()
         try:
+            _exigir_ecd(session, info, ecd_id)
             dfc = DFC(session, ecd_id)
             ctx, linhas, totais = dfc.gerar()
 
@@ -562,8 +639,10 @@ class Query:
     def diario(
         self, info: Info, ecd_id: int, pagina: int = 1, limite: int = 50
     ) -> DiarioType | None:
+        _, limite = _paginacao(pagina, limite, teto=LIMITE_MAXIMO_DIARIO)
         session = _get_session()
         try:
+            _exigir_ecd(session, info, ecd_id)
             diario = LivroDiario(session, ecd_id)
             ctx, lancamentos, totais = diario.gerar()
 
@@ -606,6 +685,7 @@ class Query:
     def kpis(self, info: Info, ecd_id: int) -> KPIsType | None:
         session = _get_session()
         try:
+            _exigir_ecd(session, info, ecd_id)
             svc = DashboardService(session, ecd_id)
             data = svc.get_dashboard_data()
 
@@ -638,6 +718,7 @@ class Query:
     def notas(self, info: Info, ecd_id: int) -> list[NotaType]:
         session = _get_session()
         try:
+            _exigir_ecd(session, info, ecd_id)
             svc = DashboardService(session, ecd_id)
             notas = svc.get_notas_explicativas()
             return [
@@ -657,6 +738,7 @@ class Query:
     def validar(self, info: Info, ecd_id: int) -> ValidacaoType:
         session = _get_session()
         try:
+            _exigir_ecd(session, info, ecd_id)
             validador = ValidadorIntegridade(session, ecd_id)
             inconsistencias = validador.validar_todas()
             relatorio = validador.relatorio(inconsistencias)
@@ -681,6 +763,7 @@ class Query:
     def evolucao_multi(self, info: Info, ecd_id: int) -> EvolucaoMultiType | None:
         session = _get_session()
         try:
+            _exigir_ecd(session, info, ecd_id)
             svc = DashboardService(session, ecd_id)
             data = svc.get_evolucao_multi_periodo()
             if not data:
@@ -699,10 +782,38 @@ class Query:
 
 # ── Schema e Router ─────────────────────────────────────────────────────────
 
-schema = strawberry.Schema(query=Query)
+
+class _Schema(strawberry.Schema):
+    def process_errors(self, errors, execution_context=None) -> None:
+        """Não loga como ERROR, com traceback, a ECD que não é da credencial.
+
+        É resposta prevista — o equivalente ao 404 do REST —, e a pedido de
+        qualquer integrador; logada, enchia o log de erro com traceback a cada
+        id alheio tentado.  Os demais erros seguem para o logger do strawberry.
+        """
+        inesperados = [e for e in errors if not isinstance(e.original_error, NaoEncontrado)]
+        super().process_errors(inesperados, execution_context)
+
+
+schema = _Schema(query=Query)
+
+
+async def contexto_graphql(credencial=Depends(requer_api_key)) -> dict:
+    """Põe no contexto a credencial que os resolvers usam para escopar.
+
+    Antes o router exigia a chave e a jogava fora: autenticava, mas nenhum
+    resolver sabia QUEM tinha autenticado, e a chave do escritório A lia
+    empresas, ECDs, balanço e KPIs do B.  `requer_api_key` é a mesma
+    dependência de `dependencies=` abaixo; o FastAPI a resolve uma vez por
+    requisição, então a chave não conta em dobro no rate limit.
+    """
+    return {"credencial": credencial}
+
+
 graphql_router = GraphQLRouter(
     schema,
     path="/api/v2/graphql",
     dependencies=[Depends(requer_api_key)],
+    context_getter=contexto_graphql,
     allow_queries_via_get=False,
 )

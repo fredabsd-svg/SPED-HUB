@@ -34,5 +34,10 @@ build/
 .DS_Store
 Thumbs.db
 
-# Uploads temporários
-/workspace/uploads/
+# Uploads temporários — o default de SPED_HUB_UPLOAD_DIR é <raiz>/uploads.
+# A linha antiga ignorava /workspace/uploads/, que não existe: o arquivo que o
+# cliente mandou (ECD, XML de nota) podia entrar num commit.
+/uploads/
+
+# Worktrees criadas por ferramentas de desenvolvimento
+.claude/worktrees/

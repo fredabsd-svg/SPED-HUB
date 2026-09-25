@@ -31,6 +31,15 @@
   {% endif %}
 </div>
 
+{% if totais.conciliado is defined and not totais.conciliado %}
+<div class="callout callout-error">
+  ⚠ Os fluxos ({{ fmt_moeda(totais.variacao_caixa) }}) não conciliam com a variação de
+  caixa e equivalentes nos saldos ({{ fmt_moeda(totais.variacao_caixa_saldos) }}).
+  Diferença: {{ fmt_moeda(totais.diferenca_conciliacao) }} — o balanço de abertura ou de
+  encerramento não fecha, ou há conta patrimonial classificada fora do lugar.
+</div>
+{% endif %}
+
 <table>
   <thead>
     <tr>

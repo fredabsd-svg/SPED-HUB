@@ -54,8 +54,12 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - EMAIL_FROM=${EMAIL_FROM:-noreply@sped-hub.local}
       - SPED_HUB_MAX_UPLOAD_MB=${SPED_HUB_MAX_UPLOAD_MB:-200}
-      # Há nginx na frente sobrescrevendo X-Forwarded-For, então aqui
-      # o cabeçalho é confiável e o limite por IP vê o cliente real.
+      # Há nginx na frente, e o deploy/nginx/proxy.conf SOBRESCREVE o
+      # X-Forwarded-For com o IP que o nginx viu ($remote_addr) — não
+      # acrescenta ao que o cliente mandou.  A aplicação lê a entrada mais à
+      # direita.  Só por isso o limite por IP vê o cliente real.  O `web` não
+      # publica porta (`expose`, não `ports`): ninguém fala com ele sem passar
+      # pelo nginx.  Se isso mudar, desligue esta variável.
       - SPED_HUB_TRUST_PROXY=true
       - SPED_HUB_LOG_JSON=${SPED_HUB_LOG_JSON:-true}
     depends_on:

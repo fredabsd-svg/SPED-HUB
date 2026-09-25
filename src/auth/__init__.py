@@ -220,6 +220,21 @@ class AuthService:
             somente_se_vazio=not get_settings().registro_aberto,
         )
 
+    def registro_publico_aberto(self) -> bool:
+        """Se o `/register` aceitaria um cadastro agora.
+
+        A tela pergunta antes de mostrar o formulário: com o registro fechado,
+        o visitante preenchia tudo e só então descobria que não havia como
+        criar a conta por ali.
+        """
+        if get_settings().registro_aberto:
+            return True
+        session = self._get_session()
+        try:
+            return session.execute(select(func.count(Usuario.id))).scalar_one() == 0
+        finally:
+            session.close()
+
     def criar_usuario(
         self,
         email: str,
@@ -355,6 +370,11 @@ class AuthService:
                 select(Sessao).where(Sessao.token == token)
             ).scalar_one_or_none()
             if not sessao or sessao.expirado:
+                return None
+            # Desativar o usuário só barrava o próximo login: a sessão aberta
+            # seguia valendo até expirar, e quem foi desligado do escritório
+            # continuava lendo tudo com o token que já tinha.
+            if not sessao.usuario.ativo:
                 return None
             return sessao.usuario
         finally:

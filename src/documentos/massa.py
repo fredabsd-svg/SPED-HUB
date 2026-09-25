@@ -34,7 +34,7 @@ from src.db.models import AjusteFiscal, DocumentoFiscal, ItemDocumentoFiscal
 from src.documentos.ajustes import (
     ORIGEM_USUARIO,
     aplicar_ajuste,
-    desserializar,
+    converter,
     novo_lote,
     valor_efetivo,
 )
@@ -353,9 +353,15 @@ def _verificar(
     if campo == "cest" and texto and not re.fullmatch(r"\d{7}", texto):
         problemas.append(f"CEST {texto!r} não tem sete dígitos")
 
+    # Dois dígitos, não "numérico": o CST "1" é o "01" cujo zero à esquerda o
+    # Excel comeu, e o campo do C170 tem tamanho fixo.  O mesmo vale para o
+    # CSOSN, que tem três.
     if campo in {"cst_icms", "cst_pis", "cst_cofins", "cst_ipi"} and texto:
-        if not texto.isdigit():
-            problemas.append(f"{campo.upper()} {texto!r} não é numérico")
+        if not re.fullmatch(r"\d{2}", texto):
+            problemas.append(f"{campo.upper()} {texto!r} não tem dois dígitos")
+
+    if campo == "csosn" and texto and not re.fullmatch(r"\d{3}", texto):
+        problemas.append(f"CSOSN {texto!r} não tem três dígitos")
 
     if campo == "cst_ibscbs" and texto and not re.fullmatch(r"\d{3}", texto):
         problemas.append(f"CST do IBS/CBS {texto!r} não tem três dígitos")
@@ -376,14 +382,16 @@ def valor_tipado(campo: str, bruto: str):
     porque a diferença entre `0.0` e `"1000"` não é numérica —, e a simulação
     existe exatamente para mostrar o impacto financeiro antes de confirmar.
 
-    A conversão é a mesma que a camada efetiva usa para ler ajustes
-    (`desserializar`): duas conversões diferentes para o mesmo campo acabariam
-    divergindo, e a que divergisse seria a menos usada.
+    A conversão é a de quem grava (`converter`), a mesma que `aplicar_ajuste`
+    aplica por último: duas conversões diferentes para o mesmo campo acabariam
+    divergindo, e a que divergisse seria a menos usada. Aceita "1.234,56" e
+    recusa com `ValueError` o que não é número — antes da simulação, e não no
+    fechamento, como acontecia quando o texto era guardado.
     """
     for modelo in (ItemDocumentoFiscal, DocumentoFiscal):
         colunas = modelo.__table__.columns
         if campo in colunas:
-            return desserializar(bruto, colunas[campo])
+            return converter(bruto, colunas[campo])
     raise ValueError(
         f"campo {campo!r} não existe em documento nem em item — "
         "alteração em massa com nome errado não alcançaria nada"
@@ -424,17 +432,66 @@ def simular(
             _simular_alvo(documento, item, alteracoes, dos_ajustes, simulacao)
 
     if recompor_totais:
-        tocados = {m.documento_id for m in simulacao.mudancas if m.item_id is not None}
-        if tocados:
-            recalculadas, avisos = recalcular(
-                session,
-                [d for d in documentos if d.id in tocados],
-                mudancas=simulacao.mudancas,
-            )
-            simulacao.mudancas.extend(recalculadas)
-            simulacao.avisos.extend(avisos)
+        recompor_cabecalhos(session, documentos, simulacao)
 
     return simulacao
+
+
+def recompor_cabecalhos(
+    session: Session, documentos: Sequence[DocumentoFiscal], simulacao: Simulacao
+) -> None:
+    """Acrescenta à simulação os totais do cabeçalho que os itens mudaram.
+
+    Só do documento que teve item mexido — ver `recalcular`. Separado de
+    `simular` para que a volta da planilha passe pelo mesmo caminho: sem
+    isso, o C100 continuava com o total de antes e o C190 somava o novo.
+    """
+    tocados = {m.documento_id for m in simulacao.mudancas if m.item_id is not None}
+    if not tocados:
+        return
+    recalculadas, avisos = recalcular(
+        session,
+        [d for d in documentos if d.id in tocados],
+        mudancas=simulacao.mudancas,
+    )
+    simulacao.mudancas.extend(recalculadas)
+    simulacao.avisos.extend(avisos)
+
+
+def proteger(
+    documento: DocumentoFiscal,
+    item: ItemDocumentoFiscal | None,
+    campo: str,
+    valor: Any,
+) -> list[Aviso]:
+    """Os avisos impeditivos de uma mudança — formato e documento cancelado.
+
+    A mesma lista para a alteração em massa e para a planilha: as duas
+    propõem uma `Simulacao` que `confirmar` grava, e uma proteção que só uma
+    delas tivesse seria contornada pela outra.
+    """
+    numero_item = item.numero_item if item is not None else None
+    avisos = [
+        Aviso(
+            documento_id=documento.id,
+            numero_item=numero_item,
+            campo=campo,
+            problema=problema,
+            impeditivo=True,
+        )
+        for problema in _verificar(campo, valor, documento, item)
+    ]
+    if documento.situacao == "cancelado":
+        avisos.append(
+            Aviso(
+                documento_id=documento.id,
+                numero_item=numero_item,
+                campo=campo,
+                problema="documento cancelado — alterá-lo gera arquivo que o Fisco rejeita",
+                impeditivo=True,
+            )
+        )
+    return avisos
 
 
 def _simular_alvo(
@@ -470,27 +527,7 @@ def _simular_alvo(
         if str(anterior or "") == str(alteracao.valor or ""):
             continue
 
-        for problema in _verificar(alteracao.campo, alteracao.valor, documento, item):
-            simulacao.avisos.append(
-                Aviso(
-                    documento_id=documento.id,
-                    numero_item=item.numero_item if item is not None else None,
-                    campo=alteracao.campo,
-                    problema=problema,
-                    impeditivo=True,
-                )
-            )
-
-        if documento.situacao == "cancelado":
-            simulacao.avisos.append(
-                Aviso(
-                    documento_id=documento.id,
-                    numero_item=item.numero_item if item is not None else None,
-                    campo=alteracao.campo,
-                    problema="documento cancelado — alterá-lo gera arquivo que o Fisco rejeita",
-                    impeditivo=True,
-                )
-            )
+        simulacao.avisos.extend(proteger(documento, item, alteracao.campo, alteracao.valor))
 
         simulacao.mudancas.append(
             Mudanca(

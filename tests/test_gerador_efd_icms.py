@@ -301,7 +301,12 @@ class TestBlocoC:
             return sum(float(c[indice].replace(",", ".") or 0) for c in c170)
 
         consolidado = c190[0]
-        assert float(consolidado[3].replace(",", ".")) == pytest.approx(soma(5)), "valor"
+        # O VL_OPR não é a soma dos VL_ITEM: o Guia (C190, campo 05) soma frete,
+        # seguro, outras despesas, ICMS-ST, FCP-ST e IPI e tira o desconto. Sem
+        # frete nem ST no fixture, sobram o item e o IPI (campo 23 do C170).
+        assert float(consolidado[3].replace(",", ".")) == pytest.approx(
+            soma(5) + soma(22) - soma(6)
+        ), "valor da operação"
         assert float(consolidado[4].replace(",", ".")) == pytest.approx(soma(11)), "base"
         assert float(consolidado[5].replace(",", ".")) == pytest.approx(soma(13)), "ICMS"
 
@@ -602,20 +607,28 @@ class TestVersaoDoLeiaute:
         assert cod_ver(fim) == esperado
 
     def test_e_o_dt_fin_que_decide_nao_o_dt_ini(self, sessao, empresa):
-        """Período que atravessa a virada do ano usa a versão do fim.
+        """A versão sai do `DT_FIN` do arquivo gerado.
 
-        É contra o `DT_FIN` que o validador confere; escolher pelo início
-        daria `019` num arquivo de janeiro de 2026.
+        É contra o `DT_FIN` que o validador confere. Período que atravessa a
+        virada do ano já não é gerado — o arquivo é mensal e `conferir_periodo`
+        o recusa —, então o que se confere aqui é o gerador de cada lado dela.
         """
-        resultado = GeradorEFDICMS(
-            sessao,
-            empresa=empresa,
-            data_inicio=datetime.date(2025, 12, 1),
-            data_fim=datetime.date(2026, 1, 31),
-        ).gerar()
+        for inicio, fim, versao in (
+            (datetime.date(2025, 12, 1), datetime.date(2025, 12, 31), "019"),
+            (datetime.date(2026, 1, 1), datetime.date(2026, 1, 31), "020"),
+        ):
+            resultado = GeradorEFDICMS(
+                sessao, empresa=empresa, data_inicio=inicio, data_fim=fim
+            ).gerar()
+            assert _primeiro(_linhas(resultado), "0000")[0] == versao
 
-        campos = _primeiro(_linhas(resultado), "0000")
-        assert campos[0] == "020"
+        with pytest.raises(ValueError, match="atravessa o mês"):
+            GeradorEFDICMS(
+                sessao,
+                empresa=empresa,
+                data_inicio=datetime.date(2025, 12, 1),
+                data_fim=datetime.date(2026, 1, 31),
+            ).gerar()
 
     def test_periodo_anterior_ao_leiaute_mais_antigo_levanta(self):
         """Devolver `018` para 2020 repetiria o defeito em menor escala.

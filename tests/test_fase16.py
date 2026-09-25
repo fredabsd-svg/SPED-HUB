@@ -182,6 +182,23 @@ class TestMonitoringEndpoints:
         assert client.get("/api/monitoring/summary").status_code == 403
         os.environ.pop("SPED_HUB_DB", None)
 
+    def test_tamanho_do_banco_sqlite_e_medido(self, app_client, db_path):
+        """O painel mostrava 0 byte para todo banco.
+
+        A rota passa a URL (`sqlite:////tmp/x.db`), e `_database_size` a
+        tratava como caminho de arquivo — que não existe, então somava zero.
+        """
+        register_and_login(app_client, "tamanho@fase16.test")
+
+        dados = app_client.get("/api/monitoring/summary").json()["database"]
+
+        tamanho_real = Path(db_path).stat().st_size
+        assert tamanho_real > 0, "o cenário precisa de um banco com conteúdo em disco"
+        assert dados["size_bytes"] >= tamanho_real, (
+            f"o monitoramento informa {dados['size_bytes']} bytes para um banco de "
+            f"{tamanho_real} bytes em disco"
+        )
+
     def test_reset_endpoint_only_resets_http_window(self, app_client):
         register_and_login(app_client, "reset@fase16.test")
         before = app_client.get("/api/monitoring/summary").json()

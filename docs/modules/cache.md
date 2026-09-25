@@ -15,8 +15,10 @@ Ambas expõem `get`, `set`, `delete`, `invalidate_prefix`, `clear` e `stats`.
 | `CacheEntry` | Entrada com `expires_at` em `time.monotonic()`. |
 | `CacheService(max_entries=10000, cleanup_interval=300)` | Cache em memória com lock, TTL por entrada, limpeza periódica e contadores (hits, misses, sets, evictions). |
 | `init_cache(max_entries)` / `get_cache()` | Instância global do `CacheService`. |
-| `cached(ttl=300, prefix="")` | Decorator: chave = SHA-256 de nome da função + args/kwargs, truncado a 32 hex, com prefixo. |
+| `cached(ttl=300, prefix="")` | Decorator: chave = SHA-256 de módulo e nome qualificado da função + args/kwargs, truncado a 32 hex, com prefixo. |
 | `RedisCacheService(redis_url, max_entries, prefix="sped:")` | Redis com fallback para memória; `stats()` inclui `"backend": "redis"` ou `"memory"`. |
+| `cache_compartilhado(redis_url, prefix)` | Instância reaproveitada por URL e prefixo; no fallback, nova tentativa de conexão no máximo a cada `RECONEXAO_SEGUNDOS` (30 s). |
+| `url_sem_senha(url)` | URL do Redis com a senha trocada por `***`, para log. |
 
 ## Depende de / quem depende
 
@@ -35,6 +37,15 @@ Consumido por: `dashboard.app` (`/api/cache/stats`, `/api/redis/cache/stats`,
   fora do ar de propósito — o CI não tem Redis.
 - **Redis quebrado não derruba nada**: a conexão usa timeout de 2 s e o
   construtor apenas loga warning. É o desenho para deploy progressivo.
+- **Construir conecta — e bloqueia.** O construtor faz `ping` síncrono com
+  timeout de 2 s. Quem precisa do Redis numa rota usa `cache_compartilhado`
+  em vez de construir a cada chamada: o `/api/health/full`, público, fazia
+  isso e cada chamada anônima pagava a conexão. Como o fallback de uma
+  instância é definitivo, `cache_compartilhado` troca a instância que está em
+  memória por uma nova depois de `RECONEXAO_SEGUNDOS`, para perceber o Redis
+  que voltou.
+- **A URL vai para o log sem a senha** (`url_sem_senha`). Antes o
+  `Redis conectado: <REDIS_URL>` levava a senha a cada conexão.
 - **Os dois lados do fallback não são espelhos.** O fallback em memória do
   `RedisCacheService` não tem lock (o `CacheService` tem), e os valores
   passam por JSON (`default=str`): tuplas viram listas, objetos viram string.
@@ -42,6 +53,14 @@ Consumido por: `dashboard.app` (`/api/cache/stats`, `/api/redis/cache/stats`,
 - **Eviction por limite não é FIFO nem LRU**: remove a entrada com menor
   `expires_at` — a mais próxima de expirar. Com TTLs heterogêneos, uma
   entrada recém-gravada com TTL curto sai antes de uma antiga com TTL longo.
+- **`@cached` recusa argumento sem chave estável.** Argumento que o JSON não
+  serializa entra na chave por `__cache_key__()`, se o objeto o define, ou por
+  `str()`. Se o `str()` é o padrão `<... object at 0x...>` — só o endereço na
+  memória —, a chamada levanta `TypeError`. Em método decorado, `self` entrava
+  assim na chave, e o endereço de objeto coletado é reaproveitado pelo
+  próximo: o serviço de uma ECD receberia o resultado cacheado de outra.
+  Método decorado precisa de `__cache_key__` na classe. Nenhum código de
+  `src/` usa `@cached` hoje.
 - **`@cached` não cacheia `None`**: `get` devolve `None` tanto para miss
   quanto para valor ausente, então função que retorna `None` executa sempre.
 - **Invalidação do `@cached` só funciona pelo prefixo.** A chave é um hash:
@@ -57,6 +76,7 @@ Consumido por: `dashboard.app` (`/api/cache/stats`, `/api/redis/cache/stats`,
 pytest tests/test_fase14.py -k "Cache or cached" -q            # CacheService e @cached
 pytest tests/test_fase15.py -k RedisCacheService -q            # fallback, TTL, prefixo
 pytest tests/test_review_regressions.py -k cached_prefix -q    # invalidação por prefixo
+pytest tests/test_saude_publica.py -q                         # cache_compartilhado, url_sem_senha
 ```
 
 Os testes de `RedisCacheService` passam sem Redis rodando — é o fallback em

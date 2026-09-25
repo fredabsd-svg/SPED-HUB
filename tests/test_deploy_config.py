@@ -138,6 +138,39 @@ class TestLimiteDeUpload:
         )
 
 
+class TestOrigemDaRequisicaoAtrasDoNginx:
+    """`SPED_HUB_TRUST_PROXY=true` só vale se o nginx não repassar o que o cliente escreveu.
+
+    O proxy.conf usava `$proxy_add_x_forwarded_for`, que ACRESCENTA o IP visto
+    pelo nginx ao `X-Forwarded-For` enviado pelo cliente. Com a aplicação
+    lendo a primeira entrada, o atacante escolhia o próprio IP a cada
+    tentativa de login. O comportamento da aplicação diante de um cabeçalho
+    acrescentado está em `tests/test_hardening.py::TestLimitePorIPPelaAplicacao`;
+    aqui, o lado do nginx.
+    """
+
+    @pytest.fixture
+    def cabecalhos(self) -> dict[str, str]:
+        proxy = (REPO_ROOT / "deploy" / "nginx" / "proxy.conf").read_text("utf-8")
+        return dict(re.findall(r"^\s*proxy_set_header\s+(\S+)\s+(\S+);", proxy, re.M))
+
+    def test_x_forwarded_for_e_sobrescrito_com_o_ip_visto_pelo_nginx(self, cabecalhos):
+        assert cabecalhos.get("X-Forwarded-For") == "$remote_addr", (
+            f"proxy.conf manda X-Forwarded-For {cabecalhos.get('X-Forwarded-For')!r}: "
+            "qualquer coisa além de $remote_addr carrega o que o cliente escreveu, "
+            "e o limite de login por IP vira decoração"
+        )
+
+    def test_trust_proxy_so_com_o_web_fora_da_rede_publica(self, compose):
+        """Com a porta do `web` publicada, o cliente falaria com ele sem o nginx."""
+        web = compose["services"]["web"]
+        if _env(compose, "web").get("SPED_HUB_TRUST_PROXY", "").lower() == "true":
+            assert not web.get("ports"), (
+                "o web confia em X-Forwarded-For e publica porta: quem chega "
+                "direto nele escreve o próprio cabeçalho"
+            )
+
+
 def _env(compose: dict, servico: str) -> dict[str, str]:
     """Normaliza a lista ``KEY=value`` do compose em dicionário."""
     entradas = compose["services"][servico].get("environment", [])

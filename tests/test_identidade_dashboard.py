@@ -84,14 +84,22 @@ class TestPaletaUnica:
         )
 
     def test_tinta_e_a_cor_primaria_em_todas_as_paginas(self):
-        """base.html + as quatro avulsas: todas com --primary na tinta."""
+        """base.html + as quatro avulsas carregam o design system, e é nele
+        que a tinta é a cor primária.
+
+        Até o redesenho cada página declarava a paleta no próprio `<style>`;
+        agora os tokens vivem num arquivo só (`app-shell.css`), carregado
+        depois dos estilos locais — página que não o carregasse ficaria fora
+        do tema inteiro, não só da cor."""
+        css = (REPO / "src" / "dashboard" / "static" / "app-shell.css").read_text("utf-8")
+        assert "--primary: #0C3A30;" in css, "o design system perdeu a tinta como cor primária"
         paginas = ["base.html", "webhooks.html", "comparar.html", "layout.html", "api_keys.html"]
         fora = [
             nome
             for nome in paginas
-            if "--primary: #0C3A30;" not in (TEMPLATES / nome).read_text("utf-8")
+            if 'href="/static/app-shell.css"' not in (TEMPLATES / nome).read_text("utf-8")
         ]
-        assert not fora, f"páginas fora da paleta da identidade: {fora}"
+        assert not fora, f"páginas fora do design system: {fora}"
 
 
 class TestGraficosAcessiveis:
@@ -100,8 +108,8 @@ class TestGraficosAcessiveis:
 
         assert dashboard.count('class="chart-data-details"') == 5
         assert 'data-chart-data="dfc"' in dashboard
-        assert '<th scope="col">Ativo total</th>' in dashboard
-        assert '<th scope="col">Resultado</th>' in dashboard
+        assert re.search(r'<th scope="col"[^>]*>Ativo total</th>', dashboard)
+        assert re.search(r'<th scope="col"[^>]*>Resultado</th>', dashboard)
 
     def test_paginas_da_area_privada_nao_sao_indexadas(self):
         paginas = [TEMPLATES / "base.html"] + [

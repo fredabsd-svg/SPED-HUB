@@ -36,7 +36,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 from src.escrituracoes.arquivadas import TIPOS
-from src.escrituracoes.base import Registro, ResultadoGeracao
+from src.escrituracoes.base import COD_SIT_CANCELADO, Registro, ResultadoGeracao
 from src.escrituracoes.leiaute import POR_OBRIGACAO
 
 # O mesmo formato dos relatórios e da CLI — 1.234.567,89.  Escrever outra
@@ -104,6 +104,9 @@ class LinhaDocumento:
     valor_mercadorias: float
     itens: int
     soma_dos_itens: float
+    # O `COD_SIT` do C100.  O cancelado sai sem valor e sem item nenhum, e sem
+    # dizer por quê o espelho o mostraria como uma nota de valor zero.
+    situacao: str = "00"
 
 
 @dataclass
@@ -143,6 +146,8 @@ class Espelho:
             # Imprimir "0 item(ns)" numa nota que tem itens faria quem lê
             # procurar um defeito que não existe.
             itens = f"{doc.itens} item(ns)" if doc.itens else "itens só no C190"
+            if doc.situacao == COD_SIT_CANCELADO:
+                itens = "CANCELADO — só a identificação, fora da apuração"
             linhas.append(
                 f"  {doc.sentido:7} mod {doc.modelo} sér {doc.serie or '-'} "
                 f"nº {doc.numero:<10} {doc.data}  {doc.participante:<18} "
@@ -276,6 +281,7 @@ class _Leitor:
                     valor_mercadorias=_valor(self.campo(c100, "VL_MERC")),
                     itens=len(itens),
                     soma_dos_itens=sum(_valor(self.campo(i, "VL_ITEM")) for i in itens),
+                    situacao=self.campo(c100, "COD_SIT"),
                 )
             )
         return linhas
@@ -478,7 +484,9 @@ class _Leitor:
                 problemas.append(f"contribuição: {_moeda(declarado)} × {_moeda(debito)}")
 
             declarado_credito = _valor(self.campo(m, "VL_TOT_CRED_DESC"))
-            esperado_credito = 0.0 if cumulativo else credito
+            # O crédito descontado vai só até a contribuição do período (Guia,
+            # M200, campo 03); o que passa disso é saldo, não desconto.
+            esperado_credito = 0.0 if cumulativo else min(credito, debito)
             if abs(declarado_credito - esperado_credito) > MEIO_CENTAVO:
                 problemas.append(
                     f"créditos: {_moeda(declarado_credito)} × {_moeda(esperado_credito)}"

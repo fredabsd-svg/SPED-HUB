@@ -10,6 +10,11 @@ sobre o total do documento concordar com um documento que a SEFAZ recusaria.
 
 Não usa arquivo de cliente: XML real de NF-e traz CNPJ, endereço e produtos de
 terceiros, que não podem ser versionados.
+
+O endereço do emitente e o do destinatário ficam em municípios diferentes do
+`cMunFG` de propósito quando a nota é venda: o 0150 do participante leva o
+município **dele**, e um fixture em que os três coincidissem esconderia quem
+lesse o campo errado.
 """
 
 from __future__ import annotations
@@ -52,8 +57,18 @@ def nfe_xml(
         data_saida
         or (datetime.date.fromisoformat(data_emissao) + datetime.timedelta(days=1)).isoformat()
     )
+    # O frete do documento é rateado entre os itens, como a NF-e faz: o
+    # `vFrete` do `ICMSTot` é a soma dos `vFrete` de cada `prod`.  Sem o
+    # rateio, quem soma pelo item — o C190 — não enxergaria frete nenhum.
+    frete_item = round(valor_frete / itens, 2) if itens else 0.0
     corpo_itens = "".join(
-        _item(n, com_reforma=com_reforma, is_especifico=is_especifico, beneficios=beneficios)
+        _item(
+            n,
+            com_reforma=com_reforma,
+            is_especifico=is_especifico,
+            beneficios=beneficios,
+            valor_frete=frete_item,
+        )
         for n in range(1, itens + 1)
     )
     total_prod = 1000.00 * itens
@@ -104,13 +119,21 @@ def nfe_xml(
       <emit>
         <CNPJ>{emitente_cnpj}</CNPJ>
         <xNome>INDUSTRIA EXEMPLO LTDA</xNome>
-        <enderEmit><xMun>SAO PAULO</xMun><UF>SP</UF></enderEmit>
+        <enderEmit>
+          <xLgr>RUA DAS INDUSTRIAS</xLgr><nro>100</nro><xBairro>MOOCA</xBairro>
+          <cMun>3550308</cMun><xMun>SAO PAULO</xMun><UF>SP</UF><CEP>03101000</CEP>
+          <cPais>1058</cPais><xPais>BRASIL</xPais>
+        </enderEmit>
         <IE>110042490114</IE>
       </emit>
       <dest>
         <CNPJ>{destinatario_cnpj}</CNPJ>
         <xNome>COMERCIO EXEMPLO LTDA</xNome>
-        <enderDest><xMun>PALMAS</xMun><UF>TO</UF></enderDest>
+        <enderDest>
+          <xLgr>AVENIDA JK</xLgr><nro>1500</nro><xCpl>SALA 2</xCpl>
+          <xBairro>PLANO DIRETOR SUL</xBairro><cMun>1721000</cMun><xMun>PALMAS</xMun>
+          <UF>TO</UF><CEP>77001000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais>
+        </enderDest>
         <IE>293456789</IE>
       </dest>
 {corpo_itens}
@@ -143,7 +166,15 @@ def nfe_xml(
 """.encode()
 
 
-def _item(numero: int, *, com_reforma: bool, is_especifico: bool, beneficios: bool = False) -> str:
+def _item(
+    numero: int,
+    *,
+    com_reforma: bool,
+    is_especifico: bool,
+    beneficios: bool = False,
+    valor_frete: float = 0.0,
+) -> str:
+    frete = f"\n          <vFrete>{valor_frete:.2f}</vFrete>" if valor_frete else ""
     reforma = ""
     if com_reforma:
         seletivo = (
@@ -230,7 +261,7 @@ def _item(numero: int, *, com_reforma: bool, is_especifico: bool, beneficios: bo
           <uCom>UN</uCom>
           <qCom>10.0000</qCom>
           <vUnCom>100.0000000000</vUnCom>
-          <vProd>1000.00</vProd>
+          <vProd>1000.00</vProd>{frete}
           <vDesc>0.00</vDesc>
         </prod>
         <imposto>

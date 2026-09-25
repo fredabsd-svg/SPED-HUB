@@ -1,44 +1,55 @@
 {% extends "base.html" %}
-{% block title %}Registrar — SPED-HUB{% endblock %}
+{% block title %}Criar conta — SPED-HUB{% endblock %}
 
 {% block content %}
-<div style="max-width:400px;margin:60px auto;">
-    <div class="card">
-        <h1 class="card-header" style="text-align:center;font-size:1.1rem;">Criar conta</h1>
-        <div class="card-body">
-            <form id="register-form"
-                  method="post" action="/api/register"
-                  hx-post="/api/register"
-                  hx-target="#register-result"
-                  hx-swap="innerHTML">
-                <div style="margin-bottom:16px;">
-                    <label style="display:block;font-size:.8rem;font-weight:600;color:var(--gray-600);margin-bottom:4px;">Nome</label>
-                    <input type="text" name="nome" required
-                           style="width:100%;padding:10px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:.9rem;"
-                           placeholder="Seu nome completo">
-                </div>
-                <div style="margin-bottom:16px;">
-                    <label style="display:block;font-size:.8rem;font-weight:600;color:var(--gray-600);margin-bottom:4px;">Email</label>
-                    <input type="email" name="email" required
-                           style="width:100%;padding:10px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:.9rem;"
-                           placeholder="seu@email.com">
-                </div>
-                <div style="margin-bottom:20px;">
-                    <label style="display:block;font-size:.8rem;font-weight:600;color:var(--gray-600);margin-bottom:4px;">Senha (mínimo 6 caracteres)</label>
-                    <input type="password" name="senha" required minlength="6"
-                           style="width:100%;padding:10px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:.9rem;"
-                           placeholder="••••••">
-                </div>
-                <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
-                    <span class="htmx-indicator"><span class="spinner"></span></span>
-                    Criar Conta
-                </button>
-            </form>
-            <div id="register-result" style="margin-top:12px;"></div>
-            <div style="text-align:center;margin-top:16px;font-size:.8rem;color:var(--gray-500);">
-                Já tem conta? <a href="/login" style="color:var(--primary);">Faça login</a>
-            </div>
+<section class="auth-shell" aria-labelledby="auth-title">
+    {% include "partials/auth_brand.html" %}
+
+    <div class="auth-card">
+        <div class="auth-card-logo sidebar-brand">
+            <img src="/static/marca.svg" alt="" width="32" height="32">
+            <span class="brand-wordmark">SPED<span>-HUB</span></span>
         </div>
+        <h1 id="auth-title">Criar conta</h1>
+        {% if registro_aberto %}
+        <p class="auth-subtitle">A primeira conta criada numa instalação nova é a do administrador, que depois cria os acessos da equipe.</p>
+
+        <form id="register-form"
+              method="post" action="/api/register"
+              hx-post="/api/register"
+              hx-target="#register-result"
+              hx-swap="innerHTML">
+            <div class="field">
+                <label for="register-nome">Nome</label>
+                <input class="input" id="register-nome" type="text" name="nome" required
+                       autocomplete="name" placeholder="Seu nome completo">
+            </div>
+            <div class="field">
+                <label for="register-email">E-mail</label>
+                <input class="input" id="register-email" type="email" name="email" required
+                       autocomplete="email" inputmode="email" placeholder="seu@escritorio.com.br">
+            </div>
+            <div class="field">
+                <label for="register-senha">Senha <span class="field-hint">— mínimo de 6 caracteres</span></label>
+                <input class="input" id="register-senha" type="password" name="senha" required
+                       minlength="6" autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">
+                <span class="htmx-indicator"><span class="spinner"></span></span>
+                Criar conta
+            </button>
+        </form>
+        <div id="register-result" class="auth-result" role="status" aria-live="polite"></div>
+
+        {% else %}
+        {# Registro fechado: o aviso vem antes do formulário, não depois de
+           preenchido.  É o mesmo texto que a API devolve ao recusar. #}
+        <div class="alert alert-info" role="status">
+            O registro público está fechado nesta instalação. Peça a um
+            administrador para criar sua conta (<code>sped-hub usuario criar</code>).
+        </div>
+        {% endif %}
+        <p class="auth-switch">Já tem conta? <a href="/login">Entrar</a></p>
     </div>
-</div>
+</section>
 {% endblock %}

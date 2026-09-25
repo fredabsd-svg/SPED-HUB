@@ -2,7 +2,7 @@
 {% block title %}Auditoria — SPED-HUB{% endblock %}
 
 {% block content %}
-<div x-data="auditApp()" x-init="init()">
+<div x-data="auditApp()">
     <!-- Header -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
         <div>
@@ -41,7 +41,7 @@
     <!-- Filtros -->
     <div class="card" style="margin-bottom: 16px;">
         <div class="card-body" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
-            <select class="form-select" x-model="filtroAcao" @change="carregarLogs()" style="min-width: 200px;">
+            <select class="form-select" x-model="filtroAcao" @change="offset = 0; carregarLogs()" style="min-width: 200px;">
                 <option value="">Todas as ações</option>
                 <option value="api.acesso">API Acesso</option>
                 <option value="api.rate_limited">Rate Limited</option>
@@ -55,7 +55,7 @@
                 <option value="webhook.create">Webhook Criado</option>
                 <option value="webhook.delete">Webhook Removido</option>
             </select>
-            <button class="btn btn-primary btn-sm" @click="carregarLogs()">🔍 Filtrar</button>
+            <button class="btn btn-primary btn-sm" @click="offset = 0; carregarLogs()">🔍 Filtrar</button>
             <span style="margin-left: auto; color: var(--gray-400); font-size: .8rem;" x-text="totalLogs + ' registros'"></span>
         </div>
     </div>

@@ -17,9 +17,13 @@ registra auditoria quando bloqueada.
 | `verificar_api_key(chave, hash)` | `__init__.py` | Comparação com `hmac.compare_digest`. |
 | `validar_requisicao_api(request, db_path)` | `__init__.py` | Valida chave, expiração e rate limit; aceita sessão admin do dashboard como fallback. |
 | `requer_api_key(request)` | `__init__.py` | Dependência FastAPI de todas as rotas protegidas. |
+| `escopo_da_credencial(stmt, credencial)` | `__init__.py` | Restringe query com `Empresa` ao escritório da credencial. Regra única do REST e do GraphQL. |
+| `credencial_ve_ecd(session, credencial, ecd_id)` | `__init__.py` | `False` para ECD de outro escritório **e** para inexistente. |
+| `credencial_de_instancia(credencial)` / `requer_credencial_de_instancia` | `__init__.py` | Chave sem escritório ou sessão de admin; a dependência responde 403 à chave de escritório. |
 | `ApiKeyService` | `__init__.py` | `criar`, `listar`, `revogar`, `excluir`. |
 | `router` (`/api/v1`) | `routes.py` | `/health`, `/empresas`, `/ecds`, `/ecds/{id}/{balanco,dre,dfc,diario,kpis,notas,validar,evolucao-multi}`, `/webhooks/*`, `/api-keys/*`, `/audit/*`. |
 | `schema`, `graphql_router` | `graphql.py` | Queries `health`, `empresas`, `ecds`, `balanco`, `dre`, `dfc`, `diario`, `kpis`, `notas`, `validar`, `evolucaoMulti`. |
+| `contexto_graphql` | `graphql.py` | `context_getter` do router: põe a credencial em `info.context["credencial"]`. |
 
 ## Depende de / quem depende
 
@@ -48,6 +52,33 @@ Consumido por `dashboard.app`, que monta os dois routers na aplicação.
   escritório já é informação; a resposta é idêntica à de ECD inexistente.
 - **A contagem também é escopada.** Total sem escopo anunciaria empresas que a
   página nunca mostra, e revelaria quantas o vizinho tem.
+- **O detalhe de empresa também é escopado.** `GET /empresas/{id}` usava
+  `session.get` puro, e a chave do A lia cadastro e lista de ECDs de qualquer
+  empresa do B pelo id. Hoje responde 404, igual à empresa inexistente.
+- **O GraphQL aplica a mesma regra do REST, pela credencial do contexto.** O
+  router exigia a chave e a jogava fora: nenhum resolver sabia quem tinha
+  autenticado, e a chave do A lia empresas, ECDs, balanço e KPIs do B.
+  `contexto_graphql` põe a credencial no contexto; as listagens passam por
+  `escopo_da_credencial` e todo resolver por id, por `credencial_ve_ecd`.
+  `ecd(id)`/`empresa(id)` alheias devolvem `null`; os relatórios por `ecdId`
+  devolvem o erro `ECD não encontrada` — o mesmo para id inexistente. Esse
+  erro não é logado como ERROR (`_Schema.process_errors`): é o 404 do GraphQL.
+- **O schema falha fechado.** Executado fora do router sem `context_value`
+  com credencial, todo resolver (menos `health`) recusa com erro, em vez de ler
+  tudo. Teste que chama `schema.execute_sync` passa a credencial no contexto.
+- **O GraphQL tem teto de paginação.** `limite` fica entre 1 e 100 nas
+  listagens e entre 1 e 200 no `diario`, os mesmos tetos do REST; `pagina`
+  menor que 1 vira 1. Antes `limite: 1000000` pedia a base inteira.
+- **Webhooks e auditoria exigem credencial de instância.** O registro de
+  webhook não tem escritório dono e todo evento de importação vai para todos os
+  inscritos; a auditoria é uma tabela só. Com qualquer chave, o integrador do A
+  listava, redirecionava para um endereço seu e apagava os webhooks do B, e lia
+  e apagava (`/audit/limpar`) a trilha da instância. Hoje `/webhooks*` (menos
+  `/webhooks/eventos`, catálogo estático) e `/audit/*` passam por
+  `requer_credencial_de_instancia`: chave de escritório recebe **403** — não
+  404, porque não há recurso alheio a esconder, é a rota que não é para ela.
+  Chave sem escritório e sessão de admin (a tela `/webhooks` do dashboard)
+  seguem funcionando.
 
 - **A chave nunca é armazenada em claro.** Só o SHA-256 vai ao banco; a
   comparação usa `hmac.compare_digest`. A chave completa aparece uma única
@@ -64,11 +95,13 @@ Consumido por `dashboard.app`, que monta os dois routers na aplicação.
   `Retry-After` e registra `api.rate_limited` antes de recusar; sucesso
   grava `ultimo_uso` e incrementa `total_requisicoes`.
 - **GraphQL não aceita query via GET** (`allow_queries_via_get=False`) e o
-  router inteiro exige `requer_api_key` — sem chave nem sessão, 401.
+  router inteiro exige `requer_api_key` — sem chave nem sessão, 401. A mesma
+  dependência alimenta o `context_getter`; o FastAPI a resolve uma vez por
+  requisição, então a consulta conta uma vez no uso e no rate limit da chave.
 - **A query `ecds` do GraphQL faz 3 counts por ECD dentro do loop** — N+1
   deliberadamente simples; com muitas ECDs por página o custo cresce linear.
-- **Cada request abre engine nova** (`criar_engine` + `init_db` por chamada)
-  — não há pool compartilhado no nível do módulo.
+- **A engine é reaproveitada por URL** (`obter_engine` + `init_db_once`);
+  cada request abre só uma sessão nova.
 
 ## Como testar isoladamente
 
@@ -78,6 +111,8 @@ pytest tests/test_fase9.py -q      # GraphQL
 pytest tests/test_fase12.py -q     # ApiKeyService (CRUD)
 pytest tests/test_fase13.py -q     # rate limit por chave
 pytest tests/test_review_regressions.py -k ApiKey -q   # expiração naive
+pytest tests/test_escopo_de_api_key.py -q              # escopo REST por escritório
+pytest tests/test_isolamento_api.py -q                 # GraphQL, empresa, webhooks, auditoria
 ```
 
 ## O que não faz
@@ -87,5 +122,10 @@ pytest tests/test_review_regressions.py -k ApiKey -q   # expiração naive
 - Não escopa chave **sem dono** (`escritorio_id` nulo): ela lê tudo. É o
   comportamento de toda chave criada antes da coluna existir, preservado para
   não invalidar integração em produção. Chave nova deve ser criada com dono.
+- Não dá webhook por escritório: o registro não tem dono, então a chave de
+  escritório não gere webhook nenhum (403) e não recebe eventos por conta
+  própria. Webhook é configuração da instância.
+- Não aceita GraphQL por WebSocket: o schema não tem subscription e a
+  dependência de credencial não resolve fora de requisição HTTP.
 - Não pagina o Livro Diário no banco: a paginação é em memória.
 - Não versiona schema GraphQL nem oferece mutations — só queries.

@@ -139,14 +139,108 @@ class TestOrigemDaRequisicao:
         )
 
     def test_com_trust_proxy_o_cabecalho_vale(self, monkeypatch):
+        """O nginx do projeto sobrescreve o cabeçalho com o IP que ele viu."""
         monkeypatch.setenv("SPED_HUB_TRUST_PROXY", "true")
         reset_settings_cache()
-        req = self._Req("10.0.0.1", {"X-Forwarded-For": "1.2.3.4, 10.0.0.9"})
-        assert ip_do_request(req) == "1.2.3.4"
+        req = self._Req("10.0.0.1", {"X-Forwarded-For": "203.0.113.7"})
+        assert ip_do_request(req) == "203.0.113.7"
+        reset_settings_cache()
+
+    def test_com_trust_proxy_vale_a_entrada_que_o_proxy_escreveu(self, monkeypatch):
+        """Numa cadeia, só a última entrada foi escrita pelo proxy confiável.
+
+        Proxy que acrescenta entrega ``<o que o cliente mandou>, <IP real>``.
+        Ler a primeira entrada deixava o cliente escolher o próprio IP.
+        """
+        monkeypatch.setenv("SPED_HUB_TRUST_PROXY", "true")
+        reset_settings_cache()
+        req = self._Req("10.0.0.1", {"X-Forwarded-For": "1.2.3.4, 203.0.113.7"})
+        assert ip_do_request(req) == "203.0.113.7", (
+            "a primeira entrada é escrita pelo cliente: usá-la deixa o atacante "
+            "trocar de IP a cada tentativa de senha"
+        )
         reset_settings_cache()
 
     def test_trust_proxy_e_desligado_por_padrao(self):
         assert with_overrides().trust_proxy is False
+
+
+class TestLimitePorIPPelaAplicacao:
+    """O limite de login pela aplicação montada, do jeito que o nginx a alcança."""
+
+    REAL = "203.0.113.7"
+
+    @pytest.fixture
+    def cliente(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from src.audit import init_audit_service
+        from src.auth import init_auth
+        from src.ratelimit import get_ip_limiter, init_limiter
+
+        referencia = f"sqlite:///{tmp_path / 'limite.db'}"
+        monkeypatch.setenv("DATABASE_URL", referencia)
+        monkeypatch.delenv("SPED_HUB_DB", raising=False)
+        monkeypatch.setenv("SPED_HUB_TRUST_PROXY", "true")
+        reset_settings_cache()
+        init_auth(referencia)
+        init_audit_service(referencia)
+        init_limiter(referencia)
+        get_ip_limiter().reset()
+        from src.dashboard.app import app
+
+        yield TestClient(app)
+        get_ip_limiter().reset()
+        reset_settings_cache()
+
+    def _login(self, cliente, cabecalhos=None):
+        return cliente.post(
+            "/api/login", data={"email": "ninguem@x.local", "senha": "errada"}, headers=cabecalhos
+        ).status_code
+
+    def test_x_forwarded_for_forjado_nao_escapa_do_limite_de_login(self, cliente):
+        """A auditoria mostrou 40 tentativas sem nenhum 429 trocando o cabeçalho.
+
+        O cabeçalho é o que um proxy que ACRESCENTA entregaria: o forjado pelo
+        cliente à esquerda, o IP que o proxy viu à direita.
+        """
+        codigos = [
+            self._login(cliente, {"X-Forwarded-For": f"10.9.{i}.1, {self.REAL}"}) for i in range(15)
+        ]
+
+        assert 429 in codigos, (
+            f"15 tentativas de senha, cada uma com X-Forwarded-For forjado diferente, "
+            f"e nenhuma barrada ({sorted(set(codigos))}): varrer senhas não custa nada"
+        )
+
+    def test_clientes_distintos_segundo_o_proxy_tem_cotas_distintas(self, cliente):
+        """A correção não pode juntar todo mundo numa cota só."""
+        for _ in range(12):
+            self._login(cliente, {"X-Forwarded-For": self.REAL})
+
+        assert self._login(cliente, {"X-Forwarded-For": "198.51.100.20"}) == 401
+
+    @pytest.mark.parametrize(
+        "variavel_janela,variavel_limite,rota",
+        [
+            ("SPED_HUB_RATE_LIMIT_LOGIN_WINDOW", "SPED_HUB_RATE_LIMIT_LOGIN", "/api/login"),
+            ("SPED_HUB_RATE_LIMIT_IP_WINDOW", "SPED_HUB_RATE_LIMIT_IP", "/api/v1/health"),
+        ],
+    )
+    def test_janela_zero_nao_desliga_o_limite(
+        self, cliente, monkeypatch, variavel_janela, variavel_limite, rota
+    ):
+        """Janela 0 fazia toda requisição abrir contagem nova — limite nenhum."""
+        monkeypatch.setenv(variavel_janela, "0")
+        monkeypatch.setenv(variavel_limite, "3")
+        reset_settings_cache()
+
+        if rota == "/api/login":
+            codigos = [self._login(cliente) for _ in range(6)]
+        else:
+            codigos = [cliente.get(rota).status_code for _ in range(6)]
+
+        assert 429 in codigos, f"{variavel_janela}=0 desligou o limite por IP de {rota}: {codigos}"
 
 
 class TestSaneamentoDePII:
@@ -178,6 +272,64 @@ class TestSaneamentoDePII:
     def test_texto_sem_pii_passa_intacto(self):
         mensagem = "Importação concluída: 23 contas, 9 lançamentos"
         assert sanitizar(mensagem) == mensagem
+
+    @pytest.mark.parametrize(
+        "entrada,esperado",
+        [
+            ("Redis conectado: redis://:S3nhaRedis!@redis:6379/0", "redis://:***@redis:6379/0"),
+            (
+                "DB: postgresql+psycopg://sped:SenhaPg123@db:5432/sped",
+                "postgresql+psycopg://sped:***@db:5432/sped",
+            ),
+            # Senha com `@`: a máscara vai até o último `@` antes do host.
+            ("amqp://fila:p@ss@broker:5672/", "amqp://fila:***@broker:5672/"),
+            # Senha que também parece e-mail (`senha@host.com.br`).
+            (
+                "smtp://contador:Segredo1@smtp.escritorio.com.br:587",
+                "smtp://contador:***@smtp.escritorio.com.br:587",
+            ),
+        ],
+    )
+    def test_senha_dentro_de_url_nao_sobrevive(self, entrada, esperado):
+        """`DATABASE_URL` e `REDIS_URL` carregam a senha, e iam para o log inteiras."""
+        saida = sanitizar(entrada)
+        assert esperado in saida, f"senha da URL sobreviveu no log: {saida!r}"
+
+    def test_url_sem_senha_passa_intacta(self):
+        """Porta e caminho não são senha — mascarar ali só atrapalharia o diagnóstico."""
+        mensagem = "GET https://sped.escritorio.com.br:8443/api/v1/health redis://redis:6379/0"
+        assert sanitizar(mensagem) == mensagem
+
+    def test_traceback_em_formato_texto_sai_sanitizado(self):
+        """O formato padrão montava o traceback depois do filtro, e ele saía inteiro.
+
+        A mensagem de exceção é onde o dado digitado pelo usuário aparece
+        ("CNPJ ... inválido"). Só o formato JSON sanitizava a exceção.
+        """
+        from src.logging_config import configurar_logging
+
+        configurar_logging(forcar_json=False)
+        handler = next(h for h in logging.getLogger().handlers if getattr(h, "_sped_hub", False))
+        saida = io.StringIO()
+        anterior = handler.setStream(saida)
+        try:
+            try:
+                raise ValueError(
+                    "CNPJ 12.345.678/0001-95 do contador joao.silva@escritorio.com.br inválido"
+                )
+            except ValueError:
+                logging.getLogger("teste.pii").exception("falha ao importar")
+            logging.getLogger("teste.pii").warning(
+                "banco: %s", "postgresql+psycopg://sped:SenhaPg123@db:5432/sped"
+            )
+        finally:
+            handler.setStream(anterior)
+
+        texto = saida.getvalue()
+        assert "Traceback" in texto, "o traceback precisa continuar no log"
+        assert "0001-95" in texto, "a cauda do CNPJ fica, para a investigação"
+        for vazado in ("12.345.678", "joao.silva", "SenhaPg123"):
+            assert vazado not in texto, f"{vazado!r} saiu no log em formato texto:\n{texto}"
 
     def test_filtro_aplica_no_registro_de_log(self):
         registro = logging.LogRecord(

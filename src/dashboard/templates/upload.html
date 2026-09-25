@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% import "partials/icones.html" as ic %}
 {% block title %}Upload — SPED-HUB{% endblock %}
 
 {% block head %}
 <style>
-    .upload-page { width: min(100%, 720px); margin: 0 auto; }
+    .upload-page { width: min(100%, 760px); margin: 0; }
     .upload-page .tabs { margin-bottom: 20px; }
     .upload-page .tab-btn { min-height: 44px; }
     .upload-page .upload-zone {
@@ -52,9 +53,11 @@
 
 {% block content %}
 <div class="upload-page">
+    <p class="eyebrow">Contábil</p>
     <h1 class="page-title">Importar arquivos SPED</h1>
-    <p style="color:var(--gray-500);font-size:.875rem;margin-bottom:24px;">
-        Faça upload de arquivos ECD, EFD-Contribuições ou ECF para processar e visualizar os dados.
+    <p class="page-lede" style="margin-bottom:var(--s-6);">
+        Envie a ECD para montar o painel e as demonstrações, ou a EFD-Contribuições e a ECF
+        para conferir o resumo da apuração.
     </p>
 
     <!-- ── Tabs de formato ── -->
@@ -62,13 +65,13 @@
         <div class="tabs" role="tablist" aria-label="Tipo de arquivo SPED">
             <button type="button" class="tab-btn" id="tab-ecd" role="tab" aria-controls="panel-ecd"
                     :aria-selected="formato === 'ecd'" :class="{ active: formato === 'ecd' }"
-                    @click="formato = 'ecd'">📗 ECD</button>
+                    @click="formato = 'ecd'">ECD</button>
             <button type="button" class="tab-btn" id="tab-efd" role="tab" aria-controls="panel-efd"
                     :aria-selected="formato === 'efd'" :class="{ active: formato === 'efd' }"
-                    @click="formato = 'efd'">📘 EFD-Contribuições</button>
+                    @click="formato = 'efd'">EFD-Contribuições</button>
             <button type="button" class="tab-btn" id="tab-ecf" role="tab" aria-controls="panel-ecf"
                     :aria-selected="formato === 'ecf'" :class="{ active: formato === 'ecf' }"
-                    @click="formato = 'ecf'">📙 ECF</button>
+                    @click="formato = 'ecf'">ECF</button>
         </div>
 
         <!-- ECD -->
@@ -83,7 +86,7 @@
                        @dragleave.prevent="dragging = false"
                        @drop.prevent="dragging = false; const file = $event.dataTransfer.files[0]; if(file) { const input = document.getElementById('file-ecd'); const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }"
                        :class="{ 'dragover': dragging }">
-                    <div class="upload-icon">📁</div>
+                    <div class="upload-icon" aria-hidden="true">{{ ic.icone("importar") }}</div>
                     <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo ECD aqui</div>
                     <div class="upload-hint">Formatos: .txt, .ecd — Leiaute 9</div>
                     <input type="file" id="file-ecd" name="file" accept=".txt,.ecd"
@@ -98,7 +101,7 @@
                     <button type="submit" id="btn-ecd" class="btn btn-primary" disabled
                             data-upload-submit>
                         <span class="spinner" data-upload-spinner hidden aria-hidden="true"></span>
-                        🚀 Processar ECD
+                        Processar ECD
                     </button>
                     <button type="button" class="btn btn-outline" data-upload-cancel hidden>
                         Cancelar importação
@@ -121,7 +124,7 @@
                        @dragleave.prevent="dragging = false"
                        @drop.prevent="dragging = false; const file = $event.dataTransfer.files[0]; if(file) { const input = document.getElementById('file-efd'); const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }"
                        :class="{ 'dragover': dragging }">
-                    <div class="upload-icon">📁</div>
+                    <div class="upload-icon" aria-hidden="true">{{ ic.icone("importar") }}</div>
                     <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo EFD aqui</div>
                     <div class="upload-hint">Formatos: .txt, .efd — EFD-Contribuições (PIS/COFINS)</div>
                     <input type="file" id="file-efd" name="file" accept=".txt,.efd"
@@ -133,7 +136,7 @@
                     <button type="submit" id="btn-efd" class="btn btn-primary" disabled
                             hx-indicator="#upload-spinner-efd">
                         <span class="htmx-indicator" id="upload-spinner-efd"><span class="spinner"></span></span>
-                        🚀 Processar EFD
+                        Processar EFD
                     </button>
                 </div>
             </form>
@@ -153,7 +156,7 @@
                        @dragleave.prevent="dragging = false"
                        @drop.prevent="dragging = false; const file = $event.dataTransfer.files[0]; if(file) { const input = document.getElementById('file-ecf'); const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }"
                        :class="{ 'dragover': dragging }">
-                    <div class="upload-icon">📁</div>
+                    <div class="upload-icon" aria-hidden="true">{{ ic.icone("importar") }}</div>
                     <div class="upload-text"><strong>Clique para selecionar</strong> ou arraste o arquivo ECF aqui</div>
                     <div class="upload-hint">Formatos: .txt, .ecf — ECF (IRPJ/CSLL)</div>
                     <input type="file" id="file-ecf" name="file" accept=".txt,.ecf"
@@ -165,7 +168,7 @@
                     <button type="submit" id="btn-ecf" class="btn btn-primary" disabled
                             hx-indicator="#upload-spinner-ecf">
                         <span class="htmx-indicator" id="upload-spinner-ecf"><span class="spinner"></span></span>
-                        🚀 Processar ECF
+                        Processar ECF
                     </button>
                 </div>
             </form>
@@ -175,14 +178,14 @@
     <div id="upload-result" class="upload-status" role="status" aria-live="polite" aria-atomic="true"></div>
 
     <!-- ── Instruções ── -->
-    <div class="card" style="margin-top:32px;">
-        <div class="card-header">ℹ️ Formatos Suportados</div>
-        <div class="card-body" style="font-size:.875rem;color:var(--gray-600);line-height:1.6;">
-            <p><strong>📗 ECD</strong> — Escrituração Contábil Digital: Livro Diário, Razão, Balancetes, Balanço Patrimonial, DRE.</p>
-            <p><strong>📘 EFD-Contribuições</strong> — PIS/COFINS: apuração de créditos e débitos, receita bruta, regime cumulativo e não-cumulativo.</p>
-            <p><strong>📙 ECF</strong> — Escrituração Contábil Fiscal: IRPJ e CSLL, lucro real, presumido ou arbitrado, e-Lalur e e-Lacs.</p>
+    <section class="card" style="margin-top:var(--s-8);" aria-labelledby="formatos-titulo">
+        <div class="card-header"><h2 id="formatos-titulo" style="font-size:var(--fs-md);">Formatos aceitos</h2></div>
+        <div class="card-body formatos">
+            <p><span class="badge">ECD</span> Escrituração Contábil Digital — Livro Diário, Razão, balancetes, Balanço Patrimonial e DRE.</p>
+            <p><span class="badge">EFD-Contribuições</span> PIS/COFINS — créditos e débitos, receita bruta, regimes cumulativo e não cumulativo.</p>
+            <p><span class="badge">ECF</span> Escrituração Contábil Fiscal — IRPJ e CSLL, lucro real, presumido ou arbitrado, e-Lalur e e-Lacs.</p>
         </div>
-    </div>
+    </section>
 </div>
 {% endblock %}
 

@@ -47,6 +47,10 @@ existisse.
 | `GeradorEFDContribuicoes(session, empresa=, data_inicio=, data_fim=, tipo_escrituracao=)` | Monta a EFD-Contribuições do período. |
 | `.gerar()` | Devolve `ResultadoGeracao`; levanta `CampoObrigatorioAusente`. |
 | `ResultadoGeracao.texto()` | O arquivo, com CRLF. |
+| `ResultadoGeracao.em_bytes()` / `codificar(texto)` | O arquivo em ISO-8859-1, como vai para o disco e para o validador. |
+| `para_latin1(texto)` | O texto só com caracteres do Latin-1; o resto é transliterado sempre do mesmo jeito. |
+| `texto(valor)` | O valor como vai para um campo: sem `\|` nem caractere de controle, aparado, em Latin-1. |
+| `arquivo_para_baixar(escrituracao)` | Os bytes do arquivo guardado, em ISO-8859-1 (a rota de download usa). |
 | `ResultadoGeracao.avisos` | O que a apuração não cobre — para ser lido antes de transmitir. |
 | `ResultadoGeracao.contagem_por_tipo()` | Quantos registros de cada tipo. |
 | `GeradorBase` | O que os geradores compartilham; base de um gerador novo. Precisa declarar `LEIAUTE`. |
@@ -55,8 +59,11 @@ existisse.
 | `MODALIDADES_DE_FRETE` | Os códigos válidos de `modFrete` / `IND_FRT`. |
 | `Registro` | Uma linha, com os campos ainda em lista. |
 | `formatar_valor` / `formatar_data` | Vírgula decimal e `ddmmaaaa`. |
+| `formatar_quantidade` | A QTD do C170: até cinco casas, sempre preenchida. |
+| `conferir_periodo(inicio, fim)` / `PeriodoInvalido` | Recusa período invertido ou que atravessa o mês. |
 | `CampoObrigatorioAusente` | Falta cadastro sem o qual o arquivo sairia errado. |
 | `COD_VER` | Versão do leiaute da EFD ICMS/IPI declarada no 0000. |
+| `valor_da_operacao(item)` / `PARCELAS_DO_VL_OPR` | O `VL_OPR` do C190 por item, pela fórmula do Guia. |
 | `REGIMES` | Os valores válidos de `cod_inc_trib` (registro 0110). |
 | `CST_ENTRADA_COM_CREDITO` / `CST_ENTRADA_SEM_CREDITO` | Quais aquisições geram crédito (tabela 4.3.4). |
 | `CST_SAIDA_TRIBUTADA` / `CST_SAIDA_SEM_DEBITO` | Quais saídas geram contribuição (tabela 4.3.3). |
@@ -102,15 +109,19 @@ Muito, e é preciso saber antes de usar.
 
 - **bloco A (serviços/NFS-e)** — a Central ainda não importa NFS-e;
 - **blocos D (transporte), F (demais operações) e I (financeiras)**;
-- **créditos extemporâneos, ajustes e o bloco 1 inteiro**;
+- **créditos extemporâneos, ajustes e o bloco 1 inteiro** — inclusive o
+  saldo de crédito que passa da contribuição do mês (M100/1100): o M200 só
+  desconta até a contribuição, e a sobra sai num aviso;
 - **bases próprias do monofásico e da alíquota por unidade** — o CST já decide
   se o valor destacado entra na apuração, mas a apuração usa o valor
   destacado, não uma base calculada;
 - **retenções na fonte**.
 
-A apuração da EFD ICMS/IPI soma os documentos, carrega o saldo credor da
-escrituração transmitida do período anterior e aplica os ajustes cadastrados
-(E111). A da EFD-Contribuições é soma direta, respeitando o CST de cada item.
+A apuração da EFD ICMS/IPI soma os documentos autorizados, carrega o saldo
+credor da escrituração transmitida do período anterior e aplica os ajustes
+cadastrados (E111). A da EFD-Contribuições é soma direta dos autorizados,
+respeitando o CST de cada item. Cancelado e denegado ficam fora das duas — e
+da apuração do IBS/CBS.
 Em ambas, o `ResultadoGeracao` traz aviso explícito do que não cobre.
 
 ## Depende de / quem depende
@@ -178,6 +189,19 @@ a porta de entrada humana de tudo isto.
   não presumido: o leiaute 006 vale para períodos a partir de abril de 2021.
 
 
+- **A situação do documento decide se ele entra, não só o `COD_SIT`.** Até a
+  correção, a nota cancelada e a denegada saíam com C170/C190 e somavam no
+  E110, no M200 e na apuração do IBS/CBS — uma venda autorizada, uma
+  cancelada e uma denegada apuravam o triplo do ICMS. Hoje, pela situação
+  **efetiva**: a cancelada sai no C100 só com os campos da Exceção 1 do C100
+  do Guia Prático da EFD ICMS/IPI 3.2.2 (IND_OPER, IND_EMIT, COD_MOD, COD_SIT,
+  SER, NUM_DOC, CHV_NFE), sem registro filho e fora de toda apuração — e o
+  participante que só aparece nela não vira 0150, porque o COD_PART dela sai
+  vazio. A denegada **não entra no arquivo**, com aviso nomeando o número: o
+  COD_SIT 04 foi descontinuado em 01/2023 e o Guia manda não informar
+  documento denegado; como o leiaute mais antigo que o gerador conhece é de
+  2024, não existe período em que o 04 valha. O mesmo C100 serve à
+  EFD-Contribuições, cujo Guia delega o registro e também veda os filhos.
 - **O espelho é lido dos registros, não do banco.** É a decisão que dá sentido
   ao módulo. Um espelho montado a partir dos documentos responderia "o que eu
   acredito que vai sair" — e concordaria com o banco mesmo quando o gerador
@@ -251,6 +275,29 @@ a porta de entrada humana de tudo isto.
   destacada num item cujo CST diz que não há está inconsistente, e quem fecha o
   mês precisa saber antes de transmitir. Descarte de valor zero não vira aviso:
   repeti-lo em todo item monofásico afogaria os que importam.
+- **O crédito descontado no M200/M600 não passa da contribuição.** O Guia
+  Prático da EFD-Contribuições 1.35 (M200, campo 03) valida que
+  "VL_TOT_CRED_DESC + VL_TOT_CRED_DESC_ANT" seja menor ou igual a
+  "VL_TOT_CONT_NC_PER", e o gerador descontava o crédito inteiro: com compra
+  maior que venda, o arquivo dizia ter descontado mais do que devia. O desconto
+  vai até a contribuição, a contribuição devida sai `0,00`, e a sobra é
+  avisada com o valor — ela é saldo, que mora no M100/1100, que este gerador
+  não escreve.
+- **Os treze campos do M200/M600 saem preenchidos.** São todos "S" no Guia, que
+  manda informar 0 no regime que não se aplica; saíam vazios. É a mesma
+  exceção ao "zero vira vazio" que o Bloco E da EFD ICMS/IPI já fazia
+  (`formatar_valor_obrigatorio`).
+- **C010, 0110 e C100 da EFD-Contribuições no que o Guia não deixa dúvida.**
+  `IND_ESCRI` do C010 saía "0", fora da tabela (1 ou 2): sai `2`, apuração
+  pelo registro individualizado (C100/C170), que é o que o arquivo é. O
+  `IND_REG_CUM` do 0110 sai `9` (escrituração detalhada nos blocos A, C, D e F)
+  quando `COD_INC_TRIB` é `2` — o campo é o critério de quem está só no
+  cumulativo, e este arquivo não tem F500 nem F550. O `IND_PGTO` do C100 é o
+  mesmo `_ind_pgto` da EFD ICMS/IPI. **Ficaram como estavam**, por o Guia não
+  decidir: `COD_TIPO_CONT` do 0110 (não obrigatório; preenchê-lo afirmaria
+  que não há alíquota diferenciada, e o gerador não sabe) e o `1` do
+  `IND_APRO_CRED` (o Guia o exige só quando há crédito comum a mais de um
+  tipo de receita).
 - **No regime cumulativo não há crédito.** A empresa que apura pelo lucro
   presumido paga PIS e Cofins sobre a receita e não desconta nada das compras.
   Um gerador que somasse os créditos das entradas ali produziria contribuição a
@@ -296,6 +343,33 @@ a porta de entrada humana de tudo isto.
   entre o que se apurou e o que se recolhe; somá-la no saldo daria o mesmo
   total a recolher e um `VL_SLD_APURADO` errado — que é o número conferido
   contra os E111.
+- **Dedução maior que o devedor vai para o saldo credor a transportar.** Ela
+  sumia: o `VL_SLD_CREDOR_TRANSPORTAR` só recebia o saldo credor da
+  apuração. Pelo Guia (E110, campos 13 e 14), o campo 14 é o valor absoluto
+  da expressão inteira — deduções incluídas — quando ela é negativa; com saldo
+  credor, a dedução se soma a ele. O resultado avisa, porque o mesmo Guia
+  manda "verificar se a legislação da UF permite que dedução seja maior que o
+  saldo devedor".
+- **O 0150 leva o endereço do participante, lido do XML original.** O
+  `COD_MUN` vinha do `cMunFG`, que numa venda é o município **da empresa** — e
+  o validador confere a IE do participante contra a UF do `COD_MUN` —, e
+  `COD_PAIS` e `END`, obrigatórios, saíam vazios. Agora vêm do `enderEmit`
+  (entrada) ou do `enderDest` (saída), via `documentos.endereco_da_parte`, com
+  os tamanhos do Guia. É leitura da primeira camada, como a convenção do ICMS
+  desonerado: o endereço não é classificação que alguém corrija, e assim vale
+  para todo documento já importado. Sem endereço no XML, a entrada cai no
+  `cMunFG` (o município de quem emitiu), e o participante entra num aviso.
+- **QTD do C170 com até cinco casas.** O campo é "N - 05" e obrigatório;
+  `formatar_valor` fazia `0,004` virar vazio e `2,12345` virar `2,12`.
+  `formatar_quantidade` tira os zeros à direita até sobrarem duas casas, e a
+  quantidade inteira continua saindo `10,00`.
+- **O período é um mês civil ou fração, e em ordem.** A CLI gerava e
+  arquivava `--de 2026-07-31 --ate 2026-07-01`, e períodos de dois meses. O
+  Guia diz que o arquivo "tem periodicidade mensal" e que o `DT_FIN` pertence
+  ao mesmo mês/ano do `DT_INI`; a fração vale (início ou encerramento de
+  atividade). `conferir_periodo` levanta `PeriodoInvalido` antes de gerar,
+  nos dois geradores e em `criar_ajuste` — que casa com a geração por
+  igualdade de período.
 - **O período do ajuste casa por igualdade, não por sobreposição.** Um mês
   fechado e uma quinzena começam no mesmo dia; aproximar faria o mesmo valor
   entrar em duas apurações.
@@ -318,9 +392,28 @@ a porta de entrada humana de tudo isto.
   gera dois C170 idênticos. Perguntar "esta linha continua no arquivo?"
   responderia que sim quando uma das duas mudou, e o resumo diria que o C170
   está intacto justamente quando não está.
-- **O hash é do texto com CRLF.** Normalizar antes de somar daria o mesmo hash
-  para dois arquivos que o validador do Fisco trata de forma diferente — e o
-  hash existe justamente para conferir contra o arquivo entregue.
+- **O hash é do texto com CRLF, nos bytes do Latin-1.** Normalizar antes de
+  somar daria o mesmo hash para dois arquivos que o validador do Fisco trata
+  de forma diferente — e o hash existe justamente para conferir contra o
+  arquivo entregue. Até o arquivo sair em Latin-1 o hash era do UTF-8; para
+  texto só ASCII os dois coincidem, e a escrituração antiga com acento guarda
+  o hash do UTF-8 que saiu na época. Por isso `comparar` compara o **texto**,
+  e não o hash: comparar o hash antigo com o de agora acusaria divergência,
+  com diff vazio, num arquivo intocado.
+- **O arquivo sai em ISO-8859-1.** O leiaute pede "ASCII - ISO 8859-1
+  (Latin-1)" (Guia Prático da EFD-Contribuições 1.35, 2.1), e o arquivo saía
+  em UTF-8 — na CLI e no download da tela —, com o validador lendo
+  "INDÃšSTRIA". Caractere fora do Latin-1 (travessão, aspa curva, emoji) não
+  cabe nele e é transliterado por `para_latin1`, sempre do mesmo jeito — o
+  mesmo texto dá o mesmo arquivo, que é o que permite comparar gerações —; o
+  que não tem equivalente vira "?". O download da escrituração arquivada serve
+  os mesmos bytes (`arquivo_para_baixar`).
+- **Texto da nota não quebra o registro.** "PARAFUSO 1/4 | ACO" com um CR/LF
+  no meio partia o C170 em duas linhas físicas — campos a mais numa, a menos
+  na outra, e o `9999` contando menos linhas do que o arquivo tinha. O Guia
+  Prático da EFD ICMS/IPI 3.2.2 (Seção 3) veda `|` e os caracteres 00 a 31 em
+  campo alfanumérico, e espaço nas pontas; `texto()`, por onde todo campo
+  passa em `_add`, troca-os por um espaço e apara.
 - **As contagens do bloco 9 se contam.** O `9900` conta os registros do próprio
   bloco 9, inclusive os `9900` que ainda vão ser escritos, o `9990` e o `9999`;
   o `X990` de cada bloco conta a si mesmo; o `9999` conta a própria linha. É o
@@ -330,6 +423,16 @@ a porta de entrada humana de tudo isto.
 - **O C190 sai dos mesmos valores que alimentaram os C170.** O validador
   confere o consolidado contra a soma dos itens; uma segunda leitura poderia
   divergir da primeira.
+- **O `VL_OPR` do C190 é o valor da operação, não o das mercadorias.** Era só
+  a soma do `vProd`: uma venda de 1.000,00 com 30,00 de frete e 50,00 de IPI
+  saía com `VL_DOC` 1080,00 e `VL_OPR` 1000,00, e no leiaute 019 (2025) o
+  validador ainda confere um contra o outro. Pelo Guia Prático da EFD
+  ICMS/IPI 3.2.2 (C190, campo 05) é mercadorias + frete + seguro + outras
+  despesas + ICMS-ST + FCP-ST + IPI destacado − desconto, sem CBS, IBS nem
+  IS — `PARCELAS_DO_VL_OPR`, somadas por item. O FCP-ST passou a ser lido por
+  item (`vFCPST`, coluna `valor_fcp_st`) para isso; documento importado antes
+  da coluna tem o FCP-ST só no total, sai sem ele no `VL_OPR` e o resultado
+  avisa com o número de cada um.
 - **Zero vira campo vazio.** O leiaute trata ausente e zero como a mesma coisa
   na maioria dos campos, e `0,00` onde se espera vazio gera advertência.
 - **Arredondamento é meio para cima, não para o par.** O padrão do
@@ -352,6 +455,19 @@ a porta de entrada humana de tudo isto.
 - **`IND_NAT_PJ` sai fixo como `00`** (sociedade empresária em geral).
   Cooperativa (`01`) e entidade que apura o PIS/Pasep sobre a folha de salários
   (`02`) precisam de correção à mão — o resultado avisa em toda geração.
+- **Item do Simples Nacional sai com CST de três dígitos, e com aviso.** O
+  item traz CSOSN e não CST, e o gerador escrevia só a origem no CST_ICMS
+  ("0", num campo N 003*). O Guia Prático da EFD ICMS/IPI 3.2.2 (C170, campo
+  10) diz que o CSOSN "não é utilizado no registro das mercadorias nas
+  entradas" — a entrada leva o CST do Convênio SN/70 "sob o enfoque do
+  declarante", que só quem escritura sabe. Como no IND_PGTO, sai o código que
+  menos afirma: `60` para CSOSN 201, 202, 203 e 500 (ICMS já cobrado por ST —
+  o exemplo 2 do mesmo campo) e `90` (outros) no resto, com aviso que nomeia
+  os documentos e aponta `fiscal alterar --campo cst_icms`; o CST da camada
+  efetiva sempre vence. Na **saída** o Guia manda o declarante optante usar a
+  Tabela B do CSOSN, e isto **não** está resolvido: o sistema não tem o regime
+  da empresa, e o campo tem três posições para um código de três dígitos mais
+  a origem. Sai o mesmo 60/90, com aviso próprio dizendo isso.
 - **Participantes, unidades e itens são derivados dos documentos.** Já estão
   dentro das notas; pedir recadastro seria pedir para divergir. Quando o mesmo
   código aparece com descrições diferentes, prevalece a **primeira** ocorrência
@@ -362,5 +478,10 @@ a porta de entrada humana de tudo isto.
 
 ```bash
 pytest tests/test_gerador_efd_icms.py tests/test_gerador_efd_contribuicoes.py \
-       tests/test_escrituracao_arquivada.py -q
+       tests/test_escrituracao_arquivada.py \
+       tests/test_documentos_cancelados_e_denegados.py \
+       tests/test_arquivo_sped_em_latin1.py \
+       tests/test_c190_valor_da_operacao.py \
+       tests/test_participante_quantidade_periodo_e_deducao.py \
+       tests/test_efd_contribuicoes_conforme_o_guia.py -q
 ```

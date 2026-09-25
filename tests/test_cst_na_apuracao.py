@@ -108,6 +108,17 @@ def importar(sessao, empresa, *, saida: bool, cst: str, **kwargs) -> DocumentoFi
     return documento
 
 
+def venda_que_absorve_o_credito(sessao, empresa) -> None:
+    """Uma venda tributada (CST 01) maior que a compra de um item.
+
+    O crédito descontado no M200 vai só até a contribuição do período (Guia,
+    M200, campo 03). Sem uma venda que o absorva, o desconto de uma compra
+    sozinha seria zero com qualquer CST — e o teste deixaria de dizer se o CST
+    decidiu alguma coisa.
+    """
+    importar(sessao, empresa, saida=True, cst="01", numero="99", chave="9" * 44, itens=3)
+
+
 def gerar(sessao, empresa):
     return GeradorEFDContribuicoes(
         sessao, empresa=empresa, data_inicio=INICIO, data_fim=FIM
@@ -135,6 +146,7 @@ def test_entrada_com_cst_de_credito_gera_credito(sessao, empresa, cst):
     não distingue tabela completa de tabela furada.
     """
     importar(sessao, empresa, saida=False, cst=cst)
+    venda_que_absorve_o_credito(sessao, empresa)
     resultado = gerar(sessao, empresa)
 
     assert m200(resultado, "VL_TOT_CRED_DESC") == "16,50"
@@ -145,8 +157,10 @@ def test_entrada_com_cst_de_credito_gera_credito(sessao, empresa, cst):
 def test_entrada_sem_direito_a_credito_nao_gera_credito(sessao, empresa, cst):
     """Somar aqui produz contribuição a MENOR, e o validador aceita."""
     importar(sessao, empresa, saida=False, cst=cst)
+    venda_que_absorve_o_credito(sessao, empresa)
 
-    assert m200(gerar(sessao, empresa), "VL_TOT_CRED_DESC") == ""
+    # Zero, e escrito: os campos do M200 são todos obrigatórios (Guia 1.35).
+    assert m200(gerar(sessao, empresa), "VL_TOT_CRED_DESC") == "0,00"
 
 
 def test_o_valor_descartado_e_dito_em_voz_alta(sessao, empresa):
@@ -182,7 +196,7 @@ def test_descarte_sem_valor_destacado_nao_vira_aviso(sessao, empresa):
 
     resultado = gerar(sessao, empresa)
 
-    assert m200(resultado, "VL_TOT_CONT_NC_PER") == ""
+    assert m200(resultado, "VL_TOT_CONT_NC_PER") == "0,00"
     assert not avisos_sobre(resultado, "DESCARTADO")
 
 
@@ -203,7 +217,7 @@ def test_saida_sem_incidencia_nao_gera_debito(sessao, empresa, cst):
     """Monofásica já foi paga no início da cadeia; as outras não incidem."""
     importar(sessao, empresa, saida=True, cst=cst)
 
-    assert m200(gerar(sessao, empresa), "VL_TOT_CONT_NC_PER") == ""
+    assert m200(gerar(sessao, empresa), "VL_TOT_CONT_NC_PER") == "0,00"
 
 
 # ── O CST do outro sentido ─────────────────────────────────────────────────
@@ -212,6 +226,7 @@ def test_saida_sem_incidencia_nao_gera_debito(sessao, empresa, cst):
 def test_entrada_com_cst_de_saida_soma_e_aponta_a_classificacao(sessao, empresa):
     """É o estado de toda nota recém-importada: o CST é o do fornecedor."""
     importar(sessao, empresa, saida=False, cst="01")
+    venda_que_absorve_o_credito(sessao, empresa)
 
     resultado = gerar(sessao, empresa)
 
@@ -313,13 +328,14 @@ def test_cada_contribuicao_le_o_seu_proprio_cst(sessao, empresa):
             origem=ORIGEM_USUARIO,
         )
     sessao.commit()
+    venda_que_absorve_o_credito(sessao, empresa)
 
     resultado = gerar(sessao, empresa)
     m600 = next(r for r in resultado.registros if r.tipo == "M600")
 
     assert m200(resultado, "VL_TOT_CRED_DESC") == "16,50", "PIS com CST 50: crédito"
     assert (
-        m600.campos[EFD_CONTRIBUICOES["M200"].index("VL_TOT_CRED_DESC")] == ""
+        m600.campos[EFD_CONTRIBUICOES["M200"].index("VL_TOT_CRED_DESC")] == "0,00"
     ), "Cofins com CST 70: sem crédito"
 
 
@@ -346,5 +362,6 @@ def test_no_cumulativo_o_credito_some_mesmo_com_cst_de_credito(sessao):
     sessao.add(empresa)
     sessao.commit()
     importar(sessao, empresa, saida=False, cst="50")
+    venda_que_absorve_o_credito(sessao, empresa)
 
-    assert m200(gerar(sessao, empresa), "VL_TOT_CRED_DESC") == ""
+    assert m200(gerar(sessao, empresa), "VL_TOT_CRED_DESC") == "0,00"

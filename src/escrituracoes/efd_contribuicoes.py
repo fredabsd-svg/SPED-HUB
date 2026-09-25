@@ -41,11 +41,17 @@ from sqlalchemy.orm import Session, selectinload
 from src.db.models import AjusteFiscal, DocumentoFiscal, Empresa
 from src.documentos.ajustes import valor_efetivo
 from src.escrituracoes.base import (
+    COD_SIT_REGULAR,
     CampoObrigatorioAusente,
     GeradorBase,
     ResultadoGeracao,
+    cancelado,
+    conferir_periodo,
+    denegado,
     formatar_data,
+    formatar_quantidade,
     formatar_valor,
+    formatar_valor_obrigatorio,
 )
 from src.escrituracoes.base import texto as _texto
 from src.escrituracoes.leiaute import EFD_CONTRIBUICOES
@@ -63,6 +69,13 @@ REGIMES = {
 
 # Regimes em que a empresa desconta crédito das aquisições.
 _COM_CREDITO = {"1", "3"}
+CUMULATIVO = "2"
+
+# IND_REG_CUM do 0110: escrituração detalhada nos blocos A, C, D e F.
+REGIME_DE_COMPETENCIA_DETALHADO = "9"
+
+# IND_ESCRI do C010: apuração pelo registro individualizado (C100/C170).
+ESCRITURACAO_INDIVIDUALIZADA = "2"
 
 # IND_ATIV do registro 0000.  O nome traz a obrigação de propósito: existe um
 # `ATIVIDADES_ICMS` com o MESMO nome de campo e outra tabela, e chamar um dos
@@ -160,21 +173,26 @@ class GeradorEFDContribuicoes(GeradorBase):
     # ── Entrada ────────────────────────────────────────────────────────────
 
     def gerar(self) -> ResultadoGeracao:
+        conferir_periodo(self.data_inicio, self.data_fim)
         self._conferir_cadastro()
         documentos = self._documentos()
-        visoes = [self._visao(d) for d in documentos]
+        todas = [self._visao(d) for d in documentos]
 
-        self._reiniciar([d.id for d in documentos])
+        self._reiniciar([v["documento"].id for v in todas if not denegado(v["cabecalho"])])
+        visoes = self._no_arquivo(todas)
         self._bloco_0(visoes)
         self._bloco_c(visoes)
         self._bloco_m(visoes)
         self._bloco_9()
 
-        if not documentos:
+        if not visoes:
             self._resultado.avisos.append(
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
         self._avisar_frete_sem_modalidade()
+        self._avisar_pagamento_sem_indicador()
+        self._avisar_csosn_convertido()
+        self._avisar_participante_sem_endereco()
         return self._resultado
 
     def _natureza_pj(self) -> str:
@@ -258,7 +276,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             itens.append(
                 {c.name: valor_efetivo(item, c.name, do_item) for c in item.__table__.columns}
             )
-        return {"cabecalho": cabecalho, "itens": itens}
+        return {"documento": documento, "cabecalho": cabecalho, "itens": itens}
 
     # ── Bloco 0 ────────────────────────────────────────────────────────────
 
@@ -282,7 +300,18 @@ class GeradorEFDContribuicoes(GeradorBase):
         )
         self._add("0001", "0")
         # O registro que declara o regime — e portanto se há crédito.
-        self._add("0110", e.cod_inc_trib, "1" if self._tem_credito else "", "", "")
+        # O campo 05 (IND_REG_CUM) é o critério de escrituração de quem está
+        # "exclusivamente no regime cumulativo (COD_INC_TRIB = 2)", e "9" é o
+        # da "escrituração detalhada, com base nos registros dos Blocos A, C, D
+        # e F" (Guia Prático 1.35, 0110) — que é o que este arquivo é: C100 e
+        # C170, sem F500 nem F550. Nos outros regimes o campo não se aplica.
+        self._add(
+            "0110",
+            e.cod_inc_trib,
+            "1" if self._tem_credito else "",
+            "",
+            REGIME_DE_COMPETENCIA_DETALHADO if e.cod_inc_trib == CUMULATIVO else "",
+        )
         self._add("0140", e.cnpj, e.nome, e.cnpj, e.uf, _texto(e.ie), _texto(e.cod_mun), "", "")
 
         for campos in self._participantes(visoes):
@@ -298,33 +327,50 @@ class GeradorEFDContribuicoes(GeradorBase):
         vistos: dict[str, list[str]] = {}
         for visao in visoes:
             c = visao["cabecalho"]
+            # O C100 do cancelado não cita participante: não há o que cadastrar.
+            if cancelado(c):
+                continue
             entrada = c["sentido"] == "entrada"
             cnpj = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
             nome = c["emitente_nome"] if entrada else c["destinatario_nome"]
             if not cnpj or cnpj in vistos:
                 continue
+            # O mesmo endereço do 0150 da EFD ICMS/IPI: o do participante, e
+            # não o `cMunFG`. COD_PAIS é obrigatório aqui também (Guia 1.35).
+            endereco = self._endereco_0150(visao)
             vistos[cnpj] = [
                 cnpj,
                 _texto(nome),
-                "",  # COD_PAIS
+                endereco["COD_PAIS"],
                 cnpj if len(cnpj) == 14 else "",
                 cnpj if len(cnpj) == 11 else "",
                 "",  # IE
-                _texto(c["municipio_codigo"]),
+                endereco["COD_MUN"],
                 "",  # SUFRAMA
-                "",  # ENDERECO
-                "",
-                "",
-                "",
+                endereco["END"],
+                endereco["NUM"],
+                endereco["COMPL"],
+                endereco["BAIRRO"],
             ]
         return list(vistos.values())
 
     def _unidades(self, visoes: Sequence[dict]) -> list[str]:
-        return sorted({i["unidade"] for v in visoes for i in v["itens"] if i["unidade"]})
+        # Só as dos itens que vão para o C170 — o cancelado não leva nenhum.
+        return sorted(
+            {
+                i["unidade"]
+                for v in visoes
+                if not cancelado(v["cabecalho"])
+                for i in v["itens"]
+                if i["unidade"]
+            }
+        )
 
     def _itens(self, visoes: Sequence[dict]) -> list[list[str]]:
         vistos: dict[str, list[str]] = {}
         for visao in visoes:
+            if cancelado(visao["cabecalho"]):
+                continue
             for item in visao["itens"]:
                 codigo = item["codigo"]
                 if not codigo or codigo in vistos:
@@ -355,13 +401,21 @@ class GeradorEFDContribuicoes(GeradorBase):
         self._add("C001", "0" if visoes else "1")
         if visoes:
             e = self.empresa
-            self._add("C010", e.cnpj, "0")  # IND_ESCRI: 0 = escrituração completa
+            # IND_ESCRI só aceita 1 (consolidado, C180/C190) ou 2 (individualizado,
+            # C100/C170) — Guia 1.35, C010, campo 03. Saía "0", fora da tabela.
+            self._add("C010", e.cnpj, ESCRITURACAO_INDIVIDUALIZADA)
             for visao in visoes:
                 self._documento_c100(visao)
         self._encerrar_bloco("C", "C990")
 
     def _documento_c100(self, visao: dict) -> None:
         c = visao["cabecalho"]
+        if cancelado(c):
+            # "Não devem ser escriturados os registros filhos de C100" para a
+            # nota cancelada (Guia Prático da EFD-Contribuições 1.35, C100).  O
+            # registro em si é o da EFD ICMS/IPI, a que o Guia delega.
+            self._c100_cancelado(c)
+            return
         entrada = c["sentido"] == "entrada"
         participante = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
 
@@ -371,14 +425,16 @@ class GeradorEFDContribuicoes(GeradorBase):
             "1" if entrada else "0",
             _texto(participante),
             _texto(c["modelo"]),
-            "00" if c["situacao"] == "autorizado" else "02",
+            COD_SIT_REGULAR,
             _texto(c["serie"]),
             _texto(c["numero"]),
             _texto(c["chave"]),
             formatar_data(c["data_emissao"]),
             formatar_data(c["data_entrada_saida"] or c["data_emissao"]),
             formatar_valor(c["valor_total"]),
-            "",  # IND_PGTO
+            # Obrigatório ("S") e saía vazio. O C100 é o da EFD ICMS/IPI, a que o
+            # Guia delega, e o `_ind_pgto` é o mesmo de lá.
+            self._ind_pgto(c),
             formatar_valor(c["valor_desconto"]),
             "",  # VL_ABAT_NT
             formatar_valor(c["valor_produtos"]),
@@ -397,21 +453,21 @@ class GeradorEFDContribuicoes(GeradorBase):
             "",
         )
         for item in visao["itens"]:
-            self._item_c170(item)
+            self._item_c170(item, c)
 
-    def _item_c170(self, item: dict) -> None:
+    def _item_c170(self, item: dict, cabecalho: dict) -> None:
         """O item, com o detalhamento de PIS e Cofins que interessa aqui."""
         self._add(
             "C170",
             _texto(item["numero_item"]),
             _texto(item["codigo"]),
             _texto(item["descricao"]),
-            formatar_valor(item["quantidade"]),
+            formatar_quantidade(item["quantidade"]),
             _texto(item["unidade"]),
             formatar_valor(item["valor_total"]),
             formatar_valor(item["valor_desconto"]),
             "0",  # IND_MOV
-            f"{_texto(item['origem_mercadoria']) or '0'}{_texto(item['cst_icms'])}",
+            self._cst_icms(item, cabecalho),
             _texto(item["cfop"]),
             "",  # COD_NAT
             formatar_valor(item["base_icms"]),
@@ -523,6 +579,8 @@ class GeradorEFDContribuicoes(GeradorBase):
         self._descartados: list[tuple[str, float]] = []
 
         for visao in visoes:
+            if cancelado(visao["cabecalho"]):
+                continue  # venda cancelada não é receita, nem compra cancelada é crédito
             saida = visao["cabecalho"]["sentido"] == "saida"
             pis = sum(self._somar_item(i, "valor_pis", i["cst_pis"], saida) for i in visao["itens"])
             cofins = sum(
@@ -544,8 +602,17 @@ class GeradorEFDContribuicoes(GeradorBase):
                 "porque nesse regime não há crédito a descontar"
             )
 
-        self._consolidacao("M200", debito_pis, credito_pis)
-        self._consolidacao("M600", debito_cofins, credito_cofins)
+        sobra_pis = self._consolidacao("M200", debito_pis, credito_pis)
+        sobra_cofins = self._consolidacao("M600", debito_cofins, credito_cofins)
+        if sobra_pis or sobra_cofins:
+            self._resultado.avisos.append(
+                "o crédito do período passou da contribuição: ficaram SEM desconto "
+                f"{formatar_valor_obrigatorio(sobra_pis)} de PIS e "
+                f"{formatar_valor_obrigatorio(sobra_cofins)} de Cofins. O M200/M600 só "
+                "desconta até a contribuição do período (Guia, M200, campo 03); o saldo "
+                "a usar depois vai no M100 e no 1100, que este gerador NÃO escreve — "
+                "controle-o à mão até lá"
+            )
         self._resultado.avisos.append(
             "apuração dos blocos M é a soma direta dos documentos: não inclui créditos "
             "extemporâneos, ajustes, retenções nem regimes especiais — confira antes "
@@ -584,21 +651,43 @@ class GeradorEFDContribuicoes(GeradorBase):
                 "— confira a origem antes de transmitir"
             )
 
-    def _consolidacao(self, tipo: str, debito: float, credito: float) -> None:
-        """M200 (PIS) e M600 (Cofins) têm o mesmo desenho de campos."""
-        devido = max(debito - credito, 0.0)
-        self._add(
-            tipo,
-            formatar_valor(debito if self._tem_credito else 0.0),  # NÃO cumulativa
-            formatar_valor(credito),  # VL_TOT_CRED_DESC
-            "",  # VL_TOT_CRED_DESC_ANT
-            formatar_valor(devido if self._tem_credito else 0.0),
-            "",  # VL_RET_NC
-            "",  # VL_OUT_DED_NC
-            formatar_valor(devido if self._tem_credito else 0.0),
-            formatar_valor(debito if not self._tem_credito else 0.0),  # cumulativa
-            "",  # VL_RET_CUM
-            "",  # VL_OUT_DED_CUM
-            formatar_valor(debito if not self._tem_credito else 0.0),
-            formatar_valor(devido if self._tem_credito else debito),  # VL_TOT_CONT_REC
-        )
+    def _consolidacao(self, tipo: str, debito: float, credito: float) -> float:
+        """M200 (PIS) e M600 (Cofins), que têm o mesmo desenho de campos.
+
+        Devolve o crédito que sobrou sem desconto.
+
+        Guia Prático da EFD-Contribuições 1.35, M200:
+
+          * os treze campos são obrigatórios ("S"), e no regime que não se
+            aplica "o valor do campo deverá ser igual a 0" — zero se escreve,
+            não se omite (`formatar_valor_obrigatorio`);
+          * campo 03: "o somatório dos campos VL_TOT_CRED_DESC e
+            VL_TOT_CRED_DESC_ANT deve ser menor ou igual ao valor do campo
+            VL_TOT_CONT_NC_PER". Descontava-se o crédito inteiro, e com compra
+            maior que venda o arquivo dizia ter descontado mais do que devia.
+            O desconto vai até a contribuição; o resto é saldo, que mora no
+            M100/1100.
+        """
+        if self._tem_credito:
+            descontado = min(credito, debito)
+            devido = debito - descontado
+            valores = (
+                debito,  # VL_TOT_CONT_NC_PER
+                descontado,  # VL_TOT_CRED_DESC
+                0.0,  # VL_TOT_CRED_DESC_ANT
+                devido,  # VL_TOT_CONT_NC_DEV
+                0.0,  # VL_RET_NC
+                0.0,  # VL_OUT_DED_NC
+                devido,  # VL_CONT_NC_REC
+                0.0,  # VL_TOT_CONT_CUM_PER
+                0.0,  # VL_RET_CUM
+                0.0,  # VL_OUT_DED_CUM
+                0.0,  # VL_CONT_CUM_REC
+                devido,  # VL_TOT_CONT_REC
+            )
+            sobra = credito - descontado
+        else:
+            valores = (0.0,) * 7 + (debito, 0.0, 0.0, debito, debito)
+            sobra = 0.0
+        self._add(tipo, *(formatar_valor_obrigatorio(v) for v in valores))
+        return sobra

@@ -287,8 +287,10 @@ def test_no_nao_cumulativo_o_credito_das_entradas_e_esperado(sessao, empresa):
     lido = dict(visao.apuracao)
 
     assert visao.divergencias() == []
-    # A entrada tem dois itens, 16,50 de PIS cada.
-    assert lido["PIS — créditos descontados"] == 33.0
+    # A entrada tem dois itens, 16,50 de PIS cada — 33,00 de crédito —, e a
+    # saída, 16,50 de PIS. O desconto vai só até a contribuição (Guia, M200,
+    # campo 03); os outros 16,50 são saldo, e o espelho confere isso.
+    assert lido["PIS — créditos descontados"] == 16.5
 
 
 def test_no_cumulativo_o_credito_nao_e_esperado_nem_exibido(sessao):

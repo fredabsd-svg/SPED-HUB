@@ -36,7 +36,9 @@ from src.db.models import (
     SaldoPeriodico,
     SaldoResultado,
 )
+from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import valor_sinalizado
+from src.reports.saldos import consolidar_periodos, saldos_por_periodo
 
 
 def encontrar_ciclos(sup: dict[str, str | None]) -> list[list[str]]:
@@ -187,7 +189,13 @@ class ValidadorIntegridade:
         return inconsistencias
 
     def _validar_saldo_si_d_c_sf(self) -> list[Inconsistencia]:
-        """(b) SI + D − C = SF por conta (recomputado vs I155)."""
+        """(b) SI + D − C = SF por (conta, período) do I155.
+
+        Por período, não pela soma dos períodos: somados, +100 de erro em
+        janeiro e −100 em fevereiro se anulavam e a validação dizia OK sobre
+        dois meses errados. Os centros de custo da mesma conta no mesmo
+        período são somados — são partes do mesmo saldo.
+        """
         inconsistencias = []
 
         saldos = list(
@@ -196,30 +204,28 @@ class ValidadorIntegridade:
             ).scalars()
         )
 
-        por_conta = defaultdict(lambda: {"si": 0.0, "d": 0.0, "c": 0.0, "sf": 0.0})
-        for s in saldos:
-            acc = por_conta[s.cod_cta]
-            acc["si"] += valor_sinalizado(s.vl_sld_ini, s.ind_dc_ini)
-            acc["d"] += s.vl_deb
-            acc["c"] += s.vl_cred
-            acc["sf"] += valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-
-        for cod_cta, acc in por_conta.items():
-            sc = acc["si"] + acc["d"] - acc["c"]
-            div = acc["sf"] - sc
+        por_periodo = saldos_por_periodo(saldos)
+        for (cod_cta, (dt_ini, dt_fin)), saldo in sorted(por_periodo.items()):
+            sc = saldo.calculado
+            div = saldo.divergencia
             if abs(div) > 0.005:
                 inconsistencias.append(
                     Inconsistencia(
                         tipo="saldo_inconsistente",
                         severidade="erro",
-                        descricao=f"Conta {cod_cta}: SI+D−C = {sc:,.2f} ≠ SF I155 = {acc['sf']:,.2f}",
+                        descricao=(
+                            f"Conta {cod_cta} em {dt_ini:%d/%m/%Y} a {dt_fin:%d/%m/%Y}: "
+                            f"SI+D−C = {sc:,.2f} ≠ SF I155 = {saldo.sf:,.2f}"
+                        ),
                         detalhes={
                             "cod_cta": cod_cta,
-                            "si": round(acc["si"], 2),
-                            "debitos": round(acc["d"], 2),
-                            "creditos": round(acc["c"], 2),
+                            "dt_ini": dt_ini.isoformat(),
+                            "dt_fin": dt_fin.isoformat(),
+                            "si": round(saldo.si, 2),
+                            "debitos": round(saldo.d, 2),
+                            "creditos": round(saldo.c, 2),
                             "sf_calculado": round(sc, 2),
-                            "sf_i155": round(acc["sf"], 2),
+                            "sf_i155": round(saldo.sf, 2),
                             "diferenca": round(div, 2),
                         },
                     )
@@ -334,37 +340,27 @@ class ValidadorIntegridade:
         return inconsistencias
 
     def _validar_ativo_passivo_pl(self) -> list[Inconsistencia]:
-        """(e) Ativo = Passivo + PL."""
+        """(e) Ativo = Passivo + PL, no saldo final do último período.
+
+        Usa a consolidação dos relatórios: SF do último I150 de cada conta,
+        centros de custo somados (antes ficava um só, e o balanço com o
+        caixa dividido entre duas lojas "não fechava"), e só as contas com
+        saldo próprio sem superior que também tenha — sintética com I155
+        próprio não dobra o valor das filhas.
+        """
         inconsistencias = []
 
-        plano = {
-            c.cod_cta: c
-            for c in self.session.execute(
-                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
-            ).scalars()
-        }
-
-        saldos = list(
-            self.session.execute(
-                select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == self.ecd_id)
-            ).scalars()
-        )
-
-        por_conta = {}
-        for s in saldos:
-            key = s.cod_cta
-            if key not in por_conta or s.dt_fin > por_conta[key].dt_fin:
-                por_conta[key] = s
+        engine = FilterEngine(self.session, self.ecd_id)
+        plano = engine.plano()
+        proprios = consolidar_periodos(engine.linhas_de_saldo(FilterCriteria()))
 
         ativo = 0.0
         passivo = 0.0
         pl = 0.0
 
-        for cod_cta, s in por_conta.items():
-            pc = plano.get(cod_cta)
-            if pc is None:
-                continue
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
+        for cod_cta in engine.hierarquia().contas_base(proprios):
+            pc = plano[cod_cta]
+            vl = proprios[cod_cta].sf
             if pc.cod_nat == "01":
                 ativo += vl
             elif pc.cod_nat == "02":

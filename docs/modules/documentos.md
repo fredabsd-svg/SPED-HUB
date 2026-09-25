@@ -23,12 +23,16 @@ As três camadas que a suíte separa:
 | `registrar_adaptador(a)` | Põe um adaptador na fila; o primeiro que reconhecer vence. |
 | `DocumentoNormalizado` / `ItemNormalizado` | A estrutura única para onde toda origem converge. |
 | `carregar_xml(conteudo)` | Lê o XML recusando `DOCTYPE`; levanta `XMLPerigoso`. |
+| `endereco_da_parte(xml_original, parte)` / `Endereco` | O endereço do emitente ou do destinatário, lido do original — para o 0150. |
 | `ImportadorDeDocumentos(session, escritorio_id=, politica=)` | Grava, deduplica e resolve o sentido. |
 | `.importar(conteudo)` / `.importar_lote(arquivos)` | Um documento ou vários; devolve `Ocorrencia` / `ResultadoImportacao`. |
 | `PoliticaDeDuplicidade` | `IGNORAR` (padrão), `SUBSTITUIR`, `ERRO`. |
 | `Desfecho` | `importado`, `duplicado`, `substituido`, `rejeitado`. |
 | `Sentido` | `entrada` / `saida`, relativo à empresa que escritura. |
 | `valor_efetivo(alvo, campo, ajustes)` | O valor que vai para o SPED. Recebe os ajustes já carregados. |
+| `ajustes.converter(texto, coluna)` / `ajustes.tipar(valor, coluna)` | Valor de fora no tipo da coluna; levanta `ValueError` quando não é. Aceita "1.234,56". |
+| `ajustes.numero_digitado(bruto, campo=)` | "1.234,56", "190,00" ou "1234.56" → `float`; o resto levanta, nomeando o campo. |
+| `valor_tipado(campo, bruto)` | O texto do terminal ou da tela no tipo da coluna — `converter`, achando a coluna pelo nome. |
 | `efetivo(session, documento)` | `VisaoEfetiva` do documento inteiro, numa consulta só. |
 | `aplicar_ajuste(session, ...)` | Registra a alteração; devolve `None` se o valor já era o efetivo. |
 | `desfazer_lote(session, lote)` | Apaga os ajustes do lote; devolve quantos saíram. |
@@ -51,7 +55,9 @@ As três camadas que a suíte separa:
 | `Simulacao` | Contagens, `impacto_total` em reais, `por_campo()`, `avisos`. |
 | `Aviso` | Problema detectado, com `impeditivo` separando recusa de sinalização. |
 | `exportar(session, selecao)` | Os itens do recorte como `.xlsx`, com a camada **efetiva** aplicada. |
-| `reimportar(session, conteudo)` | Lê a planilha corrigida e devolve o que ela mudaria — **sem gravar**. |
+| `reimportar(session, conteudo)` | Lê a planilha corrigida e devolve o que ela mudaria — **sem gravar**, com as travas e o recálculo de `simular`. |
+| `massa.proteger(documento, item, campo, valor)` | Os avisos impeditivos de uma mudança (formato, documento cancelado). |
+| `massa.recompor_cabecalhos(session, documentos, simulacao)` | Acrescenta à simulação os totais do cabeçalho que os itens mudaram. |
 | `Reimportacao` | `simulacao` (a mesma de `simular`), `divergencias` e `linhas_lidas`. |
 | `Divergencia` | Linha que não virou alteração, com o número da linha e o motivo. |
 | `COLUNAS` / `EDITAVEIS` | As colunas da planilha, e quais delas a volta aceita. |
@@ -154,6 +160,13 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   planilha que gravasse ao ser lida seria a única escrita do sistema sem que
   ninguém visse o que vai mudar, e é a que mais tem como dar errado: passou
   por um programa que não é este.
+- **A volta da planilha passa pelas mesmas travas de `simular`.** Até a
+  correção, `reimportar` montava as mudanças sem `_verificar`, sem a trava de
+  documento cancelado e sem `recalcular`: NCM de sete dígitos e CST "1" — o
+  zero à esquerda que o Excel come — passavam, e o ICMS de um item mudava sem
+  o C100 acompanhar (360,00 no cabeçalho, 430,00 nos C190, e o espelho dizia
+  "ok"). Hoje as duas usam `massa.proteger` e `massa.recompor_cabecalhos`:
+  uma trava que só uma delas tivesse seria contornada pela outra.
 - **A identidade viaja e é reconferida.** Cada linha leva `documento_id` e
   `item_id`, e a volta confere a chave da nota contra o banco. Planilha
   reordenada, com linha apagada ou colada de outro mês é o caso normal, não o
@@ -178,8 +191,22 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 - **`valor_anterior` é o efetivo, não o normalizado.** O segundo ajuste de um
   campo parte de onde o primeiro deixou; gravar o normalizado faria o
   histórico mentir.
-- **Valor de ajuste que não converte para o tipo da coluna vira aviso, não
-  exceção.** Um ajuste corrompido não pode impedir o mês inteiro de sair.
+- **Valor que não converte é recusado na gravação, e só tolerado na leitura.**
+  Até a correção, "190,00" digitado num campo de valor virava ajuste de
+  **texto**: o recálculo do cabeçalho o lia como zero, e a geração quebrava
+  no fechamento (`TypeError` na EFD ICMS/IPI, `InvalidOperation` na
+  EFD-Contribuições). Hoje `converter`/`tipar` aceitam o formato brasileiro
+  ("1.234,56", "190,00") e o ponto decimal ("1234.56"), e levantam
+  `ValueError` com o campo e o valor para o resto — no terminal, na tela, na
+  planilha (a linha é recusada inteira, com o motivo), na ação de regra
+  (`RegraInvalida` no cadastro) e, por último, em `aplicar_ajuste`, por onde
+  toda escrita passa. O ajuste é gravado já convertido (`"190.0"`). A
+  leitura (`desserializar`) continua tolerante: entende o `"190,00"` que o
+  defeito gravou, e o que nem assim converte vira aviso no log, não exceção —
+  um ajuste antigo corrompido não pode impedir o mês inteiro de sair.
+- **A ação de regra é comparada já no tipo da coluna.** Como texto, "180" e o
+  `180.0` do banco pareciam diferentes e a regra sugeria trocar o ICMS por
+  ele mesmo; e a sugestão em texto não tinha impacto em reais.
 - **O recálculo recompõe o que é soma de parcela e para aí.** Alterar em massa
   o valor dos itens sem mexer no cabeçalho gera um arquivo em que o `C100` diz
   uma coisa e a soma dos `C170` diz outra — que é justamente o que o validador
@@ -231,6 +258,12 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 - **`SUBSTITUIR` apaga os ajustes do documento antigo** (cascade). Por isso o
   padrão é `IGNORAR`: reimportar uma pasta com a política errada descartaria
   horas de classificação sem avisar.
+- **`SUBSTITUIR` não substitui documento que já entrou em arquivo.** Apagá-lo
+  apagaria a resposta a "esta nota entrou em qual arquivo?", e o banco recusa
+  o `DELETE` com `IntegrityError` — que o lote não trata: a importação inteira
+  abortava no meio, levando os arquivos seguintes. O documento escriturado
+  vira `rejeitado`, com o número das escriturações no motivo, e o lote segue.
+  A correção dele é pela camada efetiva, e o arquivo novo, outra geração.
 - **Condições e ações de regra são JSON estruturado, não expressão avaliada.**
   Um campo de texto que o sistema executasse transformaria a tabela de regras
   em superfície de execução de código no servidor — quem escrevesse nela
@@ -243,7 +276,16 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 - **Empate de prioridade no mesmo campo é conflito, não escolha.** Decidir por
   ordem de chegada faria a mesma importação produzir resultados diferentes
   entre execuções, sem ninguém desconfiar. O motor denuncia e deixa o campo
-  como está.
+  como está. Duas regras empatadas que dizem **o mesmo** valor não disputam
+  nada, e não são conflito.
+- **A regra de cima já cumprida continua segurando o campo.** O motor pulava a
+  regra cujo valor já era o atual *antes* de registrar que ela reivindicava o
+  campo, e a de prioridade menor virava sugestão: um CFOP certo era
+  "corrigido" para o errado por uma regra que ninguém mandou valer ali. A
+  reivindicação agora é registrada primeiro; só não vira sugestão.
+- **`em` e `nao_em` aceitam lista ou texto com vírgulas.** Pela CLI a condição
+  chega como texto (`cfop:em:5102,6102`), que era lido como um valor só — e
+  nunca casava. Código fiscal não tem vírgula dentro.
 - **A regra lê o efetivo, não o normalizado.** Uma regra que roda depois de
   outra precisa enxergar o que a primeira decidiu, senão a ordem das regras
   deixa de significar o que aparenta.
@@ -266,19 +308,37 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   `desfazer_lote` seria a única saída depois do estrago.
 - **As proteções são deliberadamente poucas.** Só o que dá para checar sem
   cadastro que ainda não existe: CFOP contra o sentido do documento, formato de
-  NCM/CEST/CST, documento cancelado. CSOSN em empresa não optante exigiria o
+  NCM (oito dígitos), CEST (sete), CST (dois) e CSOSN (três), documento
+  cancelado. CSOSN em empresa não optante exigiria o
   regime tributário cadastrado — fingir que verifica seria pior que não
   verificar.
+- **O IPI vem em um de dois grupos.** `IPITrib` (tributado, com valor) ou
+  `IPINT` (não tributado, só com o CST). O CST era procurado só no primeiro, e
+  o `CST 53` do `IPINT` virava `None` — o C170 saía sem CST_IPI.
+- **A NF-e é reconhecida pelo namespace, não pelo texto da tag.** O mesmo
+  documento pode vir com o namespace padrão ou prefixado (`<ns0:nfeProc
+  xmlns:ns0="…/nfe">`), que é o que sai de qualquer programa que reserializa o
+  XML com ElementTree; procurar o texto `<NFe` recusava esse como origem
+  desconhecida. `reconhece` acha a tag raiz com o prefixo que tiver e confere
+  que ele aponta para `http://www.portalfiscal.inf.br/nfe` — sem parsear, porque
+  o reconhecimento não pode levantar e o XML ainda não passou por
+  `carregar_xml`.
 - **O ICMS vem embrulhado na variante** (`ICMS00`, `ICMS60`, `ICMSSN102`…). O
   adaptador desce no primeiro filho em vez de listar as ~20 formas, que mudam
-  a cada nota técnica.
+  a cada nota técnica. De lá sai também o FCP-ST do item (`vFCPST`, coluna
+  `valor_fcp_st`), que o `VL_OPR` do C190 soma por item; o total do documento
+  não diz de qual item ele é.
 
 ## Como testar isoladamente
 
 ```bash
 pytest tests/test_documentos_fiscais.py -q  # adaptador, reforma, XML hostil, duplicidade
+pytest tests/test_substituir_documento_escriturado.py -q  # SUBSTITUIR recusa o que já foi escriturado
+pytest tests/test_nfe_casos_de_borda.py -q  # IPINT, CSOSN, namespace prefixado
 pytest tests/test_camada_efetiva.py -q      # ajustes, tipos, reversão por lote
+pytest tests/test_valor_digitado_no_formato_brasileiro.py -q  # "1.234,56" aceito, texto recusado
 pytest tests/test_classificacao_fiscal.py -q  # regras, prioridade, conflito, vigência
+pytest tests/test_classificacao_prioridade_e_listas.py -q  # regra cumprida segura o campo; `em` pela CLI
 pytest tests/test_alteracoes_em_massa.py -q   # seleção, simulação, proteções, reversão
 pytest tests/test_migrations.py -q          # o schema da migração bate com os modelos
 pytest tests/test_tabelas_ibscbs.py -q      # geração, conteúdo oficial e conferência

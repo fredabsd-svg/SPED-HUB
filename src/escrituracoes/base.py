@@ -10,12 +10,15 @@ acertá-la numa escrituração e errá-la na seguinte.
 from __future__ import annotations
 
 import datetime
+import re
+import unicodedata
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from src.documentos.adaptadores import Endereco, endereco_da_parte
 from src.escrituracoes.leiaute import conferir
 
 
@@ -67,13 +70,149 @@ def formatar_valor_obrigatorio(valor: float | Decimal | None) -> str:
     return formatado or "0,00"
 
 
+def formatar_quantidade(valor: float | Decimal | None) -> str:
+    """A quantidade do C170: até cinco casas, e sempre preenchida.
+
+    O campo QTD é "N - 05" e obrigatório ("O") nas duas colunas do Guia
+    Prático da EFD ICMS/IPI 3.2.2. Com `formatar_valor`, `0,004` virava campo
+    vazio e `2,12345` virava `2,12`. Os zeros à direita saem até restarem duas
+    casas — a quantidade inteira continua `10,00`, como sempre saiu, e dois
+    arquivos do mesmo mês não divergem por causa disto.
+    """
+    numero = Decimal(str(valor or 0)).quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+    inteiro, decimais = f"{numero:.5f}".split(".")
+    return f"{inteiro},{decimais.rstrip('0').ljust(2, '0')}"
+
+
+class PeriodoInvalido(ValueError):
+    """Período que a escrituração não admite — invertido ou de mais de um mês."""
+
+
+def conferir_periodo(inicio: datetime.date, fim: datetime.date) -> None:
+    """Levanta `PeriodoInvalido` se o período não cabe num arquivo.
+
+    "Os arquivos da EFD-ICMS/IPI têm periodicidade mensal e devem apresentar
+    informações relativas a um mês civil ou fração", e o `DT_FIN` "pertence
+    ao mesmo mês/ano da data informada no campo DT_INI" (Guia Prático 3.2.2,
+    Seção 4 e 0000); o Guia da EFD-Contribuições diz o mesmo do 0000 dela.
+    A fração vale — início ou encerramento de atividade —, então o que se
+    confere é a ordem e o mês, não o primeiro e o último dia.
+
+    Até aqui a CLI gerava e **arquivava** `--de 2026-07-31 --ate 2026-07-01`:
+    um arquivo que o validador recusa, no histórico como se valesse.
+    """
+    if fim < inicio:
+        raise PeriodoInvalido(
+            f"período invertido: o fim ({fim:%d/%m/%Y}) é anterior ao começo "
+            f"({inicio:%d/%m/%Y})"
+        )
+    if (inicio.year, inicio.month) != (fim.year, fim.month):
+        raise PeriodoInvalido(
+            f"período de {inicio:%d/%m/%Y} a {fim:%d/%m/%Y} atravessa o mês: a "
+            "escrituração é mensal, e o fim precisa estar no mesmo mês do começo "
+            "(gere um arquivo por mês)"
+        )
+
+
 def formatar_data(data: datetime.date | None) -> str:
     """ddmmaaaa — o formato do leiaute, sem separador."""
     return data.strftime("%d%m%Y") if data else ""
 
 
+# O arquivo é "ASCII - ISO 8859-1 (Latin-1)" (Guia da EFD-Contribuições 1.35,
+# 2.1; a EFD ICMS/IPI usa o mesmo).  Caractere fora dele não pode ser gravado,
+# e a nota traz de tudo: travessão, aspa curva, reticências tipográficas,
+# emoji.  A troca é fixa — o mesmo texto vira sempre o mesmo arquivo, que é o
+# que permite comparar duas gerações — e o que não tem equivalente vira "?",
+# que ao menos mostra que havia algo ali.
+CODIFICACAO = "latin-1"
+
+_TRANSLITERACAO = str.maketrans(
+    {
+        "‐": "-",  # hífen
+        "‑": "-",  # hífen que não quebra
+        "‒": "-",  # traço numérico
+        "–": "-",  # meia-risca
+        "—": "-",  # travessão
+        "―": "-",  # barra horizontal
+        "−": "-",  # sinal de menos
+        "‘": "'",
+        "’": "'",
+        "‚": "'",
+        "‛": "'",
+        "′": "'",
+        "“": '"',
+        "”": '"',
+        "„": '"',
+        "‟": '"',
+        "″": '"',
+        "…": "...",
+        "•": "-",  # marcador
+        "€": "EUR",
+        "™": "TM",
+        # Invisíveis: somem, em vez de virar "?" no meio da palavra.
+        "​": "",  # espaço de largura zero
+        "‌": "",
+        "‍": "",  # o "junta" dos emoji compostos
+        "⁠": "",
+        "︎": "",  # seletores de variação (texto/emoji)
+        "️": "",
+        "﻿": "",  # BOM
+    }
+)
+
+
+def para_latin1(valor: str) -> str:
+    """O texto só com caracteres do ISO-8859-1, trocando o resto sempre igual.
+
+    Acento que existe no Latin-1 fica ("AÇÚCAR"); letra que só se escreve
+    fora dele perde o diacrítico ("Ő" vira "O"); o que não tem letra de base
+    vira "?". Ver `_TRANSLITERACAO` para os sinais tipográficos.
+    """
+    if valor.isascii():
+        return valor
+    saida = []
+    for caractere in valor.translate(_TRANSLITERACAO):
+        if ord(caractere) <= 0xFF:
+            saida.append(caractere)
+            continue
+        base = "".join(
+            c
+            for c in unicodedata.normalize("NFKD", caractere)
+            if ord(c) <= 0xFF and not unicodedata.combining(c)
+        )
+        saida.append(base or "?")
+    return "".join(saida)
+
+
+def codificar(conteudo: str) -> bytes:
+    """O arquivo em bytes, como ele sai — ISO-8859-1, sem falhar."""
+    return para_latin1(conteudo).encode(CODIFICACAO)
+
+
+# "Para campos alfanuméricos [...] podem ser usados todos os caracteres da
+# Tabela ASCII, exceto os caracteres '|' (Pipe, código 124) e os
+# não-imprimíveis (caracteres 00 a 31). [...] Não poderão ser informados
+# espaços 'em branco' no início ou ao final da informação." — Guia Prático da
+# EFD ICMS/IPI 3.2.2, Seção 3.  O pipe é o separador de campo e o CR/LF o de
+# registro: um deles dentro da descrição parte a linha, desloca os campos e faz
+# o `9999` contar menos linhas do que o arquivo tem.
+_PROIBIDOS_NO_CAMPO = re.compile(r"\s*[\x00-\x1f|]+\s*")
+
+
 def texto(valor: Any) -> str:
-    return "" if valor is None else str(valor)
+    """O valor como ele pode ir para um campo do arquivo.
+
+    Todo campo passa por aqui (ver `_add`), então é aqui que o texto da nota
+    deixa de poder quebrar o registro: `|` e caractere de controle viram um
+    espaço, as pontas são aparadas e o resto é levado ao Latin-1.
+    """
+    if valor is None:
+        return ""
+    bruto = str(valor)
+    if _PROIBIDOS_NO_CAMPO.search(bruto):
+        bruto = _PROIBIDOS_NO_CAMPO.sub(" ", bruto)
+    return para_latin1(bruto).strip()
 
 
 @dataclass
@@ -121,6 +260,10 @@ class ResultadoGeracao:
         """
         return "\r\n".join(r.linha() for r in self.registros) + "\r\n"
 
+    def em_bytes(self) -> bytes:
+        """O arquivo como vai para o disco e para o validador: ISO-8859-1."""
+        return codificar(self.texto())
+
 
 # `modFrete` da NF-e e `IND_FRT` do C100 têm a mesma tabela desde 01/01/2018:
 # 0 e 3 por conta do remetente, 1 e 4 por conta do destinatário, 2 de
@@ -135,6 +278,58 @@ SEM_FRETE = "9"
 INDICADORES_DE_PAGAMENTO = {"0", "1", "2", "9"}
 PAGAMENTO_OUTROS = "2"
 
+# A situação do documento — o que o protocolo da SEFAZ disse — e o que ela faz
+# com a escrituração.  Não é só o `COD_SIT`: é se o documento entra no arquivo
+# e na apuração.
+#
+#   * **cancelado** entra no C100 só com os campos da Exceção 1 do Guia
+#     Prático da EFD ICMS/IPI 3.2.2 (REG, IND_OPER, IND_EMIT, COD_MOD, COD_SIT,
+#     SER, NUM_DOC e CHV_NFE), sem registro filho, e fora da apuração;
+#   * **denegado** não entra no arquivo: "a partir de janeiro de 2023, os
+#     códigos de situação de documento 04 (NF-e denegada) e 05 [...] serão
+#     descontinuados", e o B020/C100 dizem que "não deverão ser informados os
+#     documentos fiscais eletrônicos denegados".  O leiaute mais antigo que o
+#     gerador conhece é de 2024, então não há período em que o 04 valha.
+# COD_PAIS do Brasil na tabela de países do 0150.
+BRASIL = "1058"
+
+CANCELADO = "cancelado"
+DENEGADO = "denegado"
+COD_SIT_REGULAR = "00"
+COD_SIT_CANCELADO = "02"
+
+
+# O item do Simples Nacional traz CSOSN e não CST.  O CST_ICMS do C170/C190 é
+# "N 003*" — origem mais os dois dígitos da Tabela B —, e escrever só a origem
+# ("0") dava um campo de um caractere, recusado pelo validador.
+#
+# O Guia Prático da EFD ICMS/IPI 3.2.2 (C170, campo 10) diz que o CSOSN "é
+# utilizado somente na emissão da NF-e, não é utilizado no registro das
+# mercadorias nas entradas": a entrada leva o CST do Convênio SN/70 "sob o
+# enfoque do declarante", que só quem escritura sabe.  O gerador escreve o
+# código que menos afirma e avisa — a mesma decisão do IND_PGTO e do IND_FRT:
+#
+#   * `60` quando o CSOSN diz que o ICMS já foi cobrado por substituição
+#     tributária (201, 202 e 203 com cobrança por ST; 500 cobrado
+#     anteriormente) — é o exemplo 2 do mesmo campo: "aquisição de mercadorias
+#     para comercialização com ICMS retido por ST - informar código 60";
+#   * `90` (outros) no resto — o exemplo 1 usa o 90 para a aquisição sem
+#     crédito, e o item do Simples não traz ICMS destacado.
+#
+# O CST gravado na camada efetiva (classificação, `alterar`) sempre vence.
+CSOSN_COM_ST_COBRADA = {"201", "202", "203", "500"}
+CST_DE_ST_COBRADA = "60"
+CST_OUTRAS = "90"
+
+
+def cancelado(cabecalho: dict) -> bool:
+    """O documento foi cancelado — pela camada efetiva, não pelo XML."""
+    return cabecalho.get("situacao") == CANCELADO
+
+
+def denegado(cabecalho: dict) -> bool:
+    return cabecalho.get("situacao") == DENEGADO
+
 
 class GeradorBase:
     """A mecânica de montar registros e fechar as contagens."""
@@ -147,6 +342,8 @@ class GeradorBase:
     def __init__(self) -> None:
         self._resultado = ResultadoGeracao()
         self._frete_sem_modalidade: list[str] = []
+        self._csosn_convertido: set[tuple[str, str]] = set()
+        self._participante_sem_endereco: set[str] = set()
 
     def _reiniciar(self, documentos_ids: list[int]) -> None:
         """Zera o estado de uma geração.
@@ -158,6 +355,134 @@ class GeradorBase:
         self._resultado = ResultadoGeracao(documentos_ids=documentos_ids)
         self._frete_sem_modalidade = []
         self._pagamento_sem_indicador: list[str] = []
+        self._csosn_convertido = set()
+        self._participante_sem_endereco = set()
+
+    def _endereco_0150(self, visao: dict) -> dict[str, str]:
+        """COD_PAIS, COD_MUN, END, NUM, COMPL e BAIRRO do participante.
+
+        Do endereço **do participante** no XML — `enderEmit` numa entrada,
+        `enderDest` numa saída —, e não do `cMunFG`, que numa venda é o
+        município da própria empresa: o validador confere a IE do participante
+        contra a UF do `COD_MUN`, e a venda interestadual saía com o cliente
+        no estado errado. `COD_PAIS` e `END` são obrigatórios no 0150 da EFD
+        ICMS/IPI ("informar, inclusive, quando o participante for estabelecido
+        no Brasil (01058 ou 1058)"), e saíam vazios.
+
+        Os tamanhos são os do Guia (END, COMPL e BAIRRO com 60, NUM com 10).
+        Documento sem endereço no XML cai no `cMunFG` só na entrada — onde ele
+        é o município de quem emitiu — e entra no aviso.
+        """
+        c = visao["cabecalho"]
+        entrada = c["sentido"] == "entrada"
+        documento = visao.get("documento")
+        endereco = (
+            endereco_da_parte(
+                getattr(documento, "xml_original", None), "emitente" if entrada else "destinatario"
+            )
+            or Endereco()
+        )
+        cod_mun = endereco.cod_mun or (c.get("municipio_codigo") if entrada else None)
+        if not endereco.cod_mun or not endereco.logradouro:
+            participante = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
+            self._participante_sem_endereco.add(texto(participante))
+        return {
+            "COD_PAIS": texto(endereco.cod_pais) or BRASIL,
+            "COD_MUN": texto(cod_mun),
+            "END": texto((endereco.logradouro or "")[:60]),
+            "NUM": texto((endereco.numero or "")[:10]),
+            "COMPL": texto((endereco.complemento or "")[:60]),
+            "BAIRRO": texto((endereco.bairro or "")[:60]),
+        }
+
+    def _avisar_participante_sem_endereco(self) -> None:
+        if not self._participante_sem_endereco:
+            return
+        self._resultado.avisos.append(
+            "participante(s) sem município ou logradouro no XML: "
+            f"{', '.join(sorted(self._participante_sem_endereco))}. O 0150 saiu com o "
+            "que havia — END e COD_MUN são obrigatórios; complete antes de transmitir"
+        )
+
+    def _cst_icms(self, item: dict, cabecalho: dict) -> str:
+        """O CST_ICMS do item: origem + Tabela B, com três dígitos.
+
+        Do CST quando o item tem um (o efetivo: a classificação vence o XML);
+        do CSOSN, convertido como descrito em `CSOSN_COM_ST_COBRADA`, quando
+        só tem CSOSN — e aí o documento entra no aviso.
+        """
+        origem = texto(item.get("origem_mercadoria")) or "0"
+        cst = texto(item.get("cst_icms"))
+        if cst:
+            return f"{origem}{cst}"
+        csosn = texto(item.get("csosn"))
+        if not csosn:
+            return f"{origem}{cst}"
+        tabela_b = CST_DE_ST_COBRADA if csosn in CSOSN_COM_ST_COBRADA else CST_OUTRAS
+        self._csosn_convertido.add(
+            (texto(cabecalho.get("sentido")), texto(cabecalho.get("numero")) or "sem número")
+        )
+        return f"{origem}{tabela_b}"
+
+    def _avisar_csosn_convertido(self) -> None:
+        """Um aviso por sentido, com os documentos nomeados."""
+        entradas = sorted(n for s, n in self._csosn_convertido if s == "entrada")
+        saidas = sorted(n for s, n in self._csosn_convertido if s != "entrada")
+        if entradas:
+            self._resultado.avisos.append(
+                "item(ns) de fornecedor do Simples Nacional (CSOSN, sem CST) saíram com "
+                f"CST_ICMS {CST_DE_ST_COBRADA} (ICMS cobrado por ST) ou {CST_OUTRAS} "
+                f"(outros) nos documentos {', '.join(entradas)}. O Guia manda escriturar "
+                "a entrada com o CST do Convênio SN/70 sob o enfoque de quem escritura — "
+                "classifique com `sped-hub fiscal alterar --campo cst_icms` antes de "
+                "transmitir"
+            )
+        if saidas:
+            self._resultado.avisos.append(
+                "item(ns) de saída com CSOSN e sem CST saíram com CST_ICMS "
+                f"{CST_DE_ST_COBRADA} ou {CST_OUTRAS} nos documentos {', '.join(saidas)}. "
+                "Para o declarante optante pelo Simples, o Guia manda usar a Tabela B "
+                "do CSOSN nas saídas; o sistema não tem o regime da empresa — confira "
+                "antes de transmitir"
+            )
+
+    def _no_arquivo(self, visoes: Sequence[dict]) -> list[dict]:
+        """Os documentos que entram no arquivo — todos menos os denegados.
+
+        O denegado sai com aviso nomeando o documento: sumir do arquivo em
+        silêncio faria parecer que a importação o perdeu. Chamar depois de
+        `_reiniciar`, que zera os avisos.
+        """
+        denegados = [v for v in visoes if denegado(v["cabecalho"])]
+        if denegados:
+            numeros = ", ".join(texto(v["cabecalho"].get("numero")) or "?" for v in denegados)
+            self._resultado.avisos.append(
+                f"{len(denegados)} documento(s) denegado(s) ficaram FORA do arquivo "
+                f"(nº {numeros}): o COD_SIT 04 foi descontinuado em 01/2023 e o Guia "
+                "Prático manda não informar documento denegado. O XML continua na Central"
+            )
+        return [v for v in visoes if not denegado(v["cabecalho"])]
+
+    def _c100_cancelado(self, cabecalho: dict) -> None:
+        """O C100 da Exceção 1 do Guia: só a identificação, sem valor nenhum.
+
+        Monta pelo NOME dos campos do leiaute, não pela posição: são sete
+        campos preenchidos entre vinte e oito, e um deslocamento aqui não seria
+        visto por ninguém — é justamente o erro que `leiaute.py` existe para
+        impedir.
+        """
+        entrada = cabecalho["sentido"] == "entrada"
+        campos = dict.fromkeys(self.LEIAUTE["C100"], "")
+        campos.update(
+            IND_OPER="0" if entrada else "1",
+            IND_EMIT="1" if entrada else "0",
+            COD_MOD=texto(cabecalho["modelo"]),
+            COD_SIT=COD_SIT_CANCELADO,
+            SER=texto(cabecalho["serie"]),
+            NUM_DOC=texto(cabecalho["numero"]),
+            CHV_NFE=texto(cabecalho["chave"]),
+        )
+        self._add("C100", *campos.values())
 
     def _ind_frt(self, cabecalho: dict) -> str:
         """O `IND_FRT` do C100 — do documento, não de dedução.
@@ -248,6 +573,8 @@ class GeradorBase:
         """
         somas: dict[str, float] = {}
         for visao in visoes:
+            if cancelado(visao["cabecalho"]):
+                continue  # não houve operação, e portanto não há tributo de fora
             for item in visao["itens"]:
                 for campo, rotulo in self.FORA_DA_EFD.items():
                     if valor := item.get(campo) or 0.0:

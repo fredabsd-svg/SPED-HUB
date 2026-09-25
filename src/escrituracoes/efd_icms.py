@@ -47,10 +47,15 @@ from src.escrituracoes.arquivadas import (
     ultima_transmitida_antes,
 )
 from src.escrituracoes.base import (
+    COD_SIT_REGULAR,
     CampoObrigatorioAusente,
     GeradorBase,
     ResultadoGeracao,
+    cancelado,
+    conferir_periodo,
+    denegado,
     formatar_data,
+    formatar_quantidade,
     formatar_valor,
     formatar_valor_obrigatorio,
 )
@@ -103,7 +108,8 @@ def cod_ver(data_fim: datetime.date) -> str:
     """A versão do leiaute válida para o período que termina em `data_fim`.
 
     É o `DT_FIN` que decide, não o `DT_INI`: é contra ele que o validador
-    confere.  Um período que atravessa a virada do ano usa a versão do fim.
+    confere.  (Período que atravessa o mês — e portanto a virada do ano — nem
+    chega aqui: `conferir_periodo` o recusa antes de gerar.)
 
     Período anterior a 2024 **levanta**, em vez de cair na versão mais antiga
     conhecida.  Devolver `018` para um arquivo de 2020 seria repetir em menor
@@ -164,12 +170,49 @@ def leva_itens_no_arquivo(cabecalho: dict) -> bool:
     terceiros".  É a entrada que pede o item, não a saída.
 
     Emissão própria aqui é a saída, como no `IND_EMIT` do `C100`.
+
+    Documento cancelado não leva item nenhum: a Exceção 1 do mesmo `C100`
+    manda "não informar registros filhos".
     """
+    if cancelado(cabecalho):
+        return False
     if cabecalho["modelo"] == NFCE:
         return False
     if cabecalho["modelo"] == "55":
         return cabecalho["sentido"] == "entrada"
     return True
+
+
+# As parcelas do `VL_OPR` do C190, com o sinal de cada uma.  Guia Prático da
+# EFD ICMS/IPI 3.2.2, C190, campo 05: "o valor das mercadorias somadas aos
+# valores de fretes, seguros e outras despesas acessórias e os valores de
+# ICMS_ST, FCP_ST e IPI (somente quando o IPI está destacado na NF), subtraídos
+# o desconto incondicional e o abatimento não tributado e não comercial. Não
+# devem ser incluídos neste campo os valores relativos a CBS, IBS e IS".
+#
+# O IPI do item é o destacado (`vIPI` do `IPITrib`), então entra como está. O
+# abatimento não tributado não existe no modelo — o `VL_ABAT_NT` sai vazio —,
+# e por isso não aparece aqui.
+PARCELAS_DO_VL_OPR = (
+    ("valor_total", 1),  # vProd: as mercadorias
+    ("valor_frete", 1),
+    ("valor_seguro", 1),
+    ("valor_outras", 1),
+    ("valor_icms_st", 1),
+    ("valor_fcp_st", 1),
+    ("valor_ipi", 1),
+    ("valor_desconto", -1),
+)
+
+
+def valor_da_operacao(item: dict) -> float:
+    """O `VL_OPR` de um item, pela fórmula do Guia.
+
+    Era só o `vProd`: numa venda de 1.000,00 com 30,00 de frete e 50,00 de
+    IPI o C100 dizia 1080,00 e o C190 1000,00 — e no leiaute 019 (2025) o
+    validador ainda confere um contra o outro.
+    """
+    return sum(sinal * (item.get(campo) or 0.0) for campo, sinal in PARCELAS_DO_VL_OPR)
 
 
 class GeradorEFDICMS(GeradorBase):
@@ -196,24 +239,53 @@ class GeradorEFDICMS(GeradorBase):
     # ── Entrada ────────────────────────────────────────────────────────────
 
     def gerar(self) -> ResultadoGeracao:
+        conferir_periodo(self.data_inicio, self.data_fim)
         self._conferir_cadastro()
         documentos = self._documentos()
-        visoes = [self._visao(d) for d in documentos]
+        todas = [self._visao(d) for d in documentos]
 
-        self._reiniciar([d.id for d in documentos])
+        # O denegado não entra no arquivo, e por isso também não entra na lista
+        # do que foi escriturado: a terceira camada responde "em que arquivo esta
+        # nota entrou", e a resposta para ele é "em nenhum".
+        self._reiniciar([v["documento"].id for v in todas if not denegado(v["cabecalho"])])
+        visoes = self._no_arquivo(todas)
         self._bloco_0(visoes)
         self._bloco_c(visoes)
         self._bloco_e(visoes)
         self._bloco_9()
 
-        if not documentos:
+        if not visoes:
             self._resultado.avisos.append(
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
         self._avisar_frete_sem_modalidade()
         self._avisar_pagamento_sem_indicador()
         self._avisar_reforma_fora_do_arquivo(visoes)
+        self._avisar_fcp_st_sem_item(visoes)
+        self._avisar_csosn_convertido()
+        self._avisar_participante_sem_endereco()
         return self._resultado
+
+    def _avisar_fcp_st_sem_item(self, visoes: Sequence[dict]) -> None:
+        """Documento com FCP-ST no total e em nenhum item.
+
+        É o documento importado antes de o `vFCPST` do item ser lido: o
+        `VL_OPR` do C190 sai sem ele, e a diferença tem a cara de um defeito
+        do gerador. Um aviso por geração, com os números.
+        """
+        sem_item = [
+            _texto(v["cabecalho"]["numero"]) or "sem número"
+            for v in visoes
+            if not cancelado(v["cabecalho"])
+            and (v["cabecalho"].get("valor_fcp_st") or 0.0) > 0
+            and not any(i.get("valor_fcp_st") for i in v["itens"])
+        ]
+        if sem_item:
+            self._resultado.avisos.append(
+                "o VL_OPR do C190 saiu SEM o FCP-ST em documento(s) cujo total tem "
+                f"FCP-ST e os itens não: {', '.join(sem_item)}. São documentos "
+                "importados antes de o FCP-ST do item ser lido — reimporte o XML"
+            )
 
     def _conferir_cadastro(self) -> None:
         faltando = []
@@ -315,6 +387,11 @@ class GeradorEFDICMS(GeradorBase):
             # `COD_PART` da NFC-e sai vazio, então não há o que referenciar.
             if c["modelo"] == NFCE:
                 continue
+            # O C100 do documento cancelado sai sem `COD_PART` (Exceção 1), e
+            # "o valor informado no campo COD_PART deve existir em, pelo menos,
+            # um registro dos demais blocos" — quem só aparece nele não entra.
+            if cancelado(c):
+                continue
             if c["sentido"] == "entrada":
                 cnpj, nome, uf, ie = (
                     c["emitente_cnpj"],
@@ -331,19 +408,22 @@ class GeradorEFDICMS(GeradorBase):
                 )
             if not cnpj or cnpj in vistos:
                 continue
+            # Prevalece a primeira ocorrência, como na descrição: o endereço é
+            # lido do XML só uma vez por participante.
+            endereco = self._endereco_0150(visao)
             vistos[cnpj] = [
                 cnpj,  # COD_PART: o próprio CNPJ, estável entre períodos
                 _texto(nome),
-                "",  # COD_PAIS
+                endereco["COD_PAIS"],
                 cnpj if len(cnpj) == 14 else "",
                 cnpj if len(cnpj) == 11 else "",
                 _texto(ie),
-                _texto(c["municipio_codigo"]),
+                endereco["COD_MUN"],
                 "",  # SUFRAMA
-                "",  # ENDERECO
-                "",  # NUM
-                "",  # COMPL
-                "",  # BAIRRO
+                endereco["END"],
+                endereco["NUM"],
+                endereco["COMPL"],
+                endereco["BAIRRO"],
             ]
             _ = uf
         return list(vistos.values())
@@ -402,6 +482,11 @@ class GeradorEFDICMS(GeradorBase):
 
     def _documento_c100(self, visao: dict) -> None:
         c = visao["cabecalho"]
+        if cancelado(c):
+            # Sem C170 nem C190, e o C190 é o que alimenta o E110: a nota
+            # cancelada não apura nada.
+            self._c100_cancelado(c)
+            return
         entrada = c["sentido"] == "entrada"
         participante = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
         # "Quando se tratar de NFC-e (modelo 65), o campo não deve ser
@@ -415,7 +500,7 @@ class GeradorEFDICMS(GeradorBase):
             "1" if entrada else "0",  # IND_EMIT: 0=própria, 1=terceiros
             _texto(participante),
             _texto(c["modelo"]),
-            "00" if c["situacao"] == "autorizado" else "02",  # COD_SIT
+            COD_SIT_REGULAR,  # cancelado e denegado já saíram acima
             _texto(c["serie"]),
             _texto(c["numero"]),
             _texto(c["chave"]),
@@ -443,22 +528,22 @@ class GeradorEFDICMS(GeradorBase):
 
         if leva_itens_no_arquivo(c):
             for item in visao["itens"]:
-                self._item_c170(item)
+                self._item_c170(item, c)
         for campos in self._analitico_c190(visao):
             self._add("C190", *campos)
 
-    def _item_c170(self, item: dict) -> None:
+    def _item_c170(self, item: dict, cabecalho: dict) -> None:
         self._add(
             "C170",
             _texto(item["numero_item"]),
             _texto(item["codigo"]),
             _texto(item["descricao"]),
-            formatar_valor(item["quantidade"]),
+            formatar_quantidade(item["quantidade"]),
             _texto(item["unidade"]),
             formatar_valor(item["valor_total"]),
             formatar_valor(item["valor_desconto"]),
             "0",  # IND_MOV: 0 = movimentação física sim
-            f"{_texto(item['origem_mercadoria']) or '0'}{_texto(item['cst_icms'])}",
+            self._cst_icms(item, cabecalho),
             _texto(item["cfop"]),
             "",  # COD_NAT
             formatar_valor(item["base_icms"]),
@@ -502,12 +587,12 @@ class GeradorEFDICMS(GeradorBase):
         )
         for item in visao["itens"]:
             chave = (
-                f"{_texto(item['origem_mercadoria']) or '0'}{_texto(item['cst_icms'])}",
+                self._cst_icms(item, visao["cabecalho"]),
                 _texto(item["cfop"]),
                 formatar_valor(item["aliquota_icms"]),
             )
             grupo = grupos[chave]
-            grupo["valor_operacao"] += item["valor_total"] or 0.0
+            grupo["valor_operacao"] += valor_da_operacao(item)
             grupo["base_icms"] += item["base_icms"] or 0.0
             grupo["valor_icms"] += item["valor_icms"] or 0.0
             grupo["base_icms_st"] += item["base_icms_st"] or 0.0
@@ -649,6 +734,8 @@ class GeradorEFDICMS(GeradorBase):
         """
         debitos = credito = 0.0
         for visao in visoes:
+            if cancelado(visao["cabecalho"]):
+                continue  # o C100 dele não tem C190, e o E110 é a soma dos C190
             valor = sum(i["valor_icms"] or 0.0 for i in visao["itens"])
             if visao["cabecalho"]["sentido"] == "saida":
                 debitos += valor
@@ -671,7 +758,24 @@ class GeradorEFDICMS(GeradorBase):
         )
         # As deduções entram DEPOIS do saldo apurado, não dentro dele: é a
         # diferença entre o que se apurou e o que se recolhe.
-        a_recolher = saldo - ajustado("VL_TOT_DED")
+        deducoes = ajustado("VL_TOT_DED")
+        apurado = saldo if saldo > 0 else 0.0
+        a_recolher = apurado - deducoes
+        # Guia Prático 3.2.2, E110: o campo 13 é "VL_SLD_APURADO − VL_TOT_DED"
+        # e, "se o resultado dessa operação for negativo, informe o valor zero
+        # neste campo, e o valor absoluto correspondente no campo
+        # VL_SLD_CREDOR_TRANSPORTAR"; o campo 14 é o valor absoluto da
+        # expressão inteira — com as deduções — quando ela é negativa. A
+        # dedução acima do devedor sumia: ia para campo nenhum.
+        credor_a_transportar = deducoes - saldo if deducoes - saldo > 0 else 0.0
+        if deducoes > apurado:
+            self._resultado.avisos.append(
+                f"as deduções do período ({formatar_valor(deducoes)}) passam do saldo "
+                f"devedor apurado ({formatar_valor_obrigatorio(apurado)}): o excedente "
+                "foi para o VL_SLD_CREDOR_TRANSPORTAR, como manda o Guia — que também "
+                "manda verificar se a legislação da UF permite dedução maior que o "
+                "saldo devedor"
+            )
 
         self._add(
             "E110",
@@ -687,10 +791,10 @@ class GeradorEFDICMS(GeradorBase):
             formatar_valor_obrigatorio(ajustado("VL_TOT_AJ_CREDITOS")),
             formatar_valor_obrigatorio(ajustado("VL_ESTORNOS_DEB")),
             formatar_valor_obrigatorio(credor_anterior),
-            formatar_valor_obrigatorio(saldo if saldo > 0 else 0.0),
-            formatar_valor_obrigatorio(ajustado("VL_TOT_DED")),
+            formatar_valor_obrigatorio(apurado),
+            formatar_valor_obrigatorio(deducoes),
             formatar_valor_obrigatorio(a_recolher if a_recolher > 0 else 0.0),
-            formatar_valor_obrigatorio(-saldo if saldo < 0 else 0.0),
+            formatar_valor_obrigatorio(credor_a_transportar),
             formatar_valor_obrigatorio(ajustado("DEB_ESP")),
         )
         self._avisar_sobre_os_ajustes(ajustes)

@@ -425,6 +425,111 @@ class TestSubidaDaAplicacao:
         assert linha.status == JobStatus.INTERRUPTED.value
 
 
+class TestSegundoUploadNaoAbandonaOPrimeiro:
+    """Um upload novo não pode apagar o estado em memória de quem já está importando.
+
+    A rota `/api/upload-async` chamava `init_async_job_service` a cada upload,
+    trocando o serviço global por um novo, vazio. O progresso ao vivo e o token
+    de cancelamento do job em andamento ficavam no serviço antigo, que ninguém
+    mais consultava: reproduzido na auditoria, o job 1 caía de 42% para 0% e o
+    cancelamento respondia 409 — "Job não está em execução neste processo" —
+    com a importação rodando.
+    """
+
+    ECD = b"|0000|LECD|01012024|31122024|X|11111111000111|\n"
+
+    @pytest.fixture
+    def cliente(self, referencia, monkeypatch, tmp_path):
+        import threading
+        import time
+
+        from fastapi.testclient import TestClient
+
+        import src.dashboard.app as modulo
+        from src.audit import init_audit_service
+        from src.auth import init_auth
+        from src.ecd_importer import ECDImportCancelled
+        from src.ratelimit import init_limiter
+        from src.settings import reset_settings_cache
+
+        monkeypatch.setenv("DATABASE_URL", referencia)
+        monkeypatch.setenv("SPED_HUB_UPLOAD_DIR", str(tmp_path / "uploads"))
+        reset_settings_cache()
+        init_auth(referencia)
+        init_audit_service(referencia)
+        init_limiter(referencia)
+
+        liberar = threading.Event()
+
+        class ImportadorLento:
+            """Reporta 42% e fica importando até ser cancelado ou liberado."""
+
+            def __init__(self, _sessao):
+                pass
+
+            def importar(self, _caminho, *, cancel_token=None, progress=None, **_kw):
+                progress(42.0, "lendo bloco I")
+                while not liberar.is_set():
+                    if cancel_token is not None and cancel_token.cancelado:
+                        raise ECDImportCancelled("cancelado pelo usuário")
+                    time.sleep(0.01)
+                raise RuntimeError("fim do teste")
+
+        monkeypatch.setattr(modulo, "ECDImportService", ImportadorLento)
+
+        cliente = TestClient(modulo.app)
+        cliente.post(
+            "/api/register", data={"email": "dois@test.local", "nome": "D", "senha": "senha123"}
+        )
+        cliente.post("/api/login", data={"email": "dois@test.local", "senha": "senha123"})
+        cliente.jobs = []
+        yield cliente
+        liberar.set()
+        # Espera as threads gravarem o desfecho antes de o banco temporário sumir.
+        for job_id in cliente.jobs:
+            self._esperar(cliente, job_id, lambda j: j["status"] in STATUS_TERMINAIS)
+
+    @staticmethod
+    def _esperar(cliente, job_id, condicao, prazo=5.0):
+        import time
+
+        limite = time.monotonic() + prazo
+        while True:
+            estado = cliente.get(f"/api/jobs/{job_id}").json()
+            if condicao(estado) or time.monotonic() > limite:
+                return estado
+            time.sleep(0.02)
+
+    def _enviar(self, cliente, nome):
+        resposta = cliente.post("/api/upload-async", files={"file": (nome, self.ECD)})
+        assert resposta.status_code == 200, resposta.text
+        job_id = resposta.json()["job_id"]
+        cliente.jobs.append(job_id)
+        return job_id
+
+    def test_progresso_e_cancelamento_do_primeiro_sobrevivem_ao_segundo(self, cliente):
+        primeiro = self._enviar(cliente, "primeira.txt")
+        antes = self._esperar(cliente, primeiro, lambda j: j["progresso"] == 42.0)
+        assert antes["progresso"] == 42.0, "o cenário precisa do job 1 em andamento"
+
+        self._enviar(cliente, "segunda.txt")
+
+        depois = cliente.get(f"/api/jobs/{primeiro}").json()
+        assert depois["progresso"] == 42.0, (
+            f"o segundo upload zerou o progresso do primeiro ({depois['progresso']}%): "
+            "quem acompanha a importação vê o job voltar para 0% no meio"
+        )
+
+        cancelamento = cliente.post(f"/api/jobs/{primeiro}/cancelar")
+        assert cancelamento.status_code == 200, (
+            f"o cancelamento do job em andamento respondeu {cancelamento.status_code} "
+            f"({cancelamento.json()}): depois de outro upload, a importação não pode "
+            "mais ser parada"
+        )
+        final = self._esperar(cliente, primeiro, lambda j: j["status"] == "cancelled")
+        assert final["status"] == "cancelled"
+
+
 def test_status_do_modelo_documenta_todos_os_estados():
     """O comentário do modelo listava 4 estados; existem 6.
 

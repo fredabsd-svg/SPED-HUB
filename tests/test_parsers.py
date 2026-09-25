@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from src.parsers.ecd import ECDParser, detectar_encoding
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ecd_sample.txt"
@@ -214,3 +216,149 @@ class TestBlocoJDoManual:
         assert j210["DESCR_COD_AGL"] == "LUCROS ACUMULADOS"
         assert j210["IND_DC_CTA_INI"] == "C"
         assert j210["IND_DC_CTA_FIN"] == "C"
+
+
+# ── Resumo da EFD-Contribuições e da ECF ───────────────────────────────────
+
+# 0000 da EFD-Contribuições (Guia Prático): REG, COD_VER, TIPO_ESCRIT,
+# IND_SIT_ESP, NUM_REC_ANTERIOR, DT_INI, DT_FIN, NOME, CNPJ, UF, COD_MUN,
+# SUFRAMA, IND_NAT_PJ, IND_ATIV.
+EFD_0000 = "|0000|006|0|||01012024|31012024|EMPRESA X LTDA|12345678000195|SP|3550308||00|1|"
+# M100: …, 08 VL_CRED = 165,00 (o 03 IND_CRED_ORI é "0").
+EFD_M100 = "|M100|101|0|10000,00|1,6500|||165,00|0,00|0,00|0,00|165,00|0|165,00|0,00|"
+# M200: 02 contribuição não cumulativa 1.000; 03 crédito descontado 300;
+# 09 cumulativa 50; 13 total a recolher 750.
+EFD_M200 = "|M200|1000,00|300,00|0,00|700,00|0,00|0,00|700,00|50,00|0,00|0,00|50,00|750,00|"
+EFD_M500 = "|M500|101|0|10000,00|7,6000|||760,00|0,00|0,00|0,00|760,00|0|760,00|0,00|"
+EFD_M600 = "|M600|4600,00|760,00|0,00|3840,00|0,00|0,00|3840,00|200,00|0,00|0,00|200,00|4040,00|"
+# 0111: 06 REC_BRU_TOTAL = 100.000 (02 a 05 somam 100.000).
+EFD_0111 = "|0111|60000,00|20000,00|10000,00|10000,00|100000,00|"
+# F100: 05 DT_OPER — a "receita bruta" antiga somava esta data.
+EFD_F100 = "|F100|1|PART1|ITEM1|15012024|5000,00|01|5000,00|1,65|82,50|01|5000,00|7,6|380,00|||||"
+
+
+class TestResumoEFDContribuicoes:
+    def _resumo(self, tmp_path, *linhas):
+        from src.parsers.efd import EFDParser
+
+        arquivo = tmp_path / "efd.txt"
+        arquivo.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+        return EFDParser().extrair_resumo(arquivo)
+
+    def test_identificacao_pelos_campos_do_0000(self, tmp_path):
+        resumo = self._resumo(tmp_path, EFD_0000)
+        assert resumo["empresa"] == {
+            "cnpj": "12345678000195",
+            "nome": "EMPRESA X LTDA",
+        }, "o CNPJ saía do campo DT_FIN (7º) em vez do CNPJ (9º)"
+        assert resumo["periodo"] == {"dt_ini": "01012024", "dt_fin": "31012024"}
+
+    def test_pis(self, tmp_path):
+        resumo = self._resumo(tmp_path, EFD_0000, EFD_M100, EFD_M200)
+        assert resumo["pis"]["debito"] == 1_050.0, (
+            f"débito de PIS {resumo['pis']['debito']}: a contribuição do período é o campo "
+            "02 (não cumulativa, 1.000) mais o 09 (cumulativa, 50); o 03 (300) é crédito "
+            "descontado"
+        )
+        assert resumo["pis"]["credito"] == 165.0, "o crédito é o 08 VL_CRED, não o IND_CRED_ORI"
+        assert resumo["pis"]["a_recolher"] == 750.0
+        assert resumo["pis"]["saldo"] == 165.0 - 1_050.0
+
+    def test_cofins(self, tmp_path):
+        resumo = self._resumo(tmp_path, EFD_0000, EFD_M500, EFD_M600)
+        assert (resumo["cofins"]["debito"], resumo["cofins"]["credito"]) == (4_800.0, 760.0)
+        assert resumo["cofins"]["a_recolher"] == 4_040.0
+
+    def test_receita_bruta_vem_do_0111(self, tmp_path):
+        resumo = self._resumo(tmp_path, EFD_0000, EFD_0111, EFD_F100)
+        assert (
+            resumo["receita_bruta"] == 100_000.0
+        ), "a receita bruta somava o DT_OPER do F100 (uma data) como se fosse valor"
+
+    def test_sem_0111_a_receita_bruta_nao_e_inventada(self, tmp_path):
+        resumo = self._resumo(tmp_path, EFD_0000, EFD_F100)
+        assert resumo["receita_bruta"] is None
+
+
+# 0000 da ECF (manual do leiaute): REG, NOME_ESC, COD_VER, CNPJ, NOME,
+# IND_SIT_INI_PER, SIT_ESPECIAL, PAT_REMAN_CIS, DT_SIT_ESP, DT_INI, DT_FIN,
+# RETIFICADORA, NUM_REC, TIP_ECF, COD_SCP.
+ECF_0000 = "|0000|LECF|0010|12345678000195|EMPRESA X LTDA|0|0|||01012024|31122024|N||0||"
+
+
+class TestResumoECF:
+    def _resumo(self, tmp_path, *linhas):
+        from src.parsers.ecf import ECFParser
+
+        arquivo = tmp_path / "ecf.txt"
+        arquivo.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+        return ECFParser().extrair_resumo(arquivo)
+
+    def test_identificacao_pelos_campos_do_0000(self, tmp_path):
+        resumo = self._resumo(tmp_path, ECF_0000)
+        assert resumo["empresa"] == {
+            "cnpj": "12345678000195",
+            "nome": "EMPRESA X LTDA",
+        }, "o CNPJ saía do PAT_REMAN_CIS e o nome do DT_SIT_ESP"
+        assert resumo["periodo"] == {"dt_ini": "01012024", "dt_fin": "31122024"}
+
+    def test_n670_e_csll_e_nao_vira_irpj(self, tmp_path):
+        resumo = self._resumo(
+            tmp_path,
+            ECF_0000,
+            "|N670|1|BASE DE CALCULO DA CSLL|100000,00|",
+            "|N670|2|CSLL 9%|9000,00|",
+            "|N670|19|CSLL A PAGAR|9000,00|",
+            "|N630|1|BASE DE CALCULO DO IRPJ|100000,00|",
+        )
+        assert resumo["irpj"] is None, (
+            f"irpj = {resumo['irpj']}: somava base, alíquota e CSLL a pagar do N670 — que é "
+            "CSLL — num número sem significado"
+        )
+        assert [linha["valor"] for linha in resumo["apuracao_csll"]] == [100000.0, 9000.0, 9000.0]
+        assert resumo["apuracao_csll"][2]["descricao"] == "CSLL A PAGAR"
+        assert [linha["codigo"] for linha in resumo["apuracao_irpj"]] == ["1"]
+
+
+class TestResumoPelaTela:
+    """O resumo que a tela de upload devolve, pela aplicação montada."""
+
+    @pytest.fixture
+    def cliente(self, tmp_path):
+        import os
+
+        from fastapi.testclient import TestClient
+
+        from src.auth import init_auth
+
+        caminho = str(tmp_path / "upload.db")
+        os.environ["SPED_HUB_DB"] = caminho
+        from src.dashboard.app import app
+
+        init_auth(caminho)
+        cliente = TestClient(app)
+        dados = {"email": "upload@test.local", "nome": "Upload", "senha": "senha123"}
+        assert cliente.post("/api/register", data=dados).status_code == 200
+        del dados["nome"]
+        assert cliente.post("/api/login", data=dados).status_code == 200
+        return cliente
+
+    def test_upload_efd(self, cliente):
+        conteudo = "\n".join([EFD_0000, EFD_M100, EFD_M200]) + "\n"
+        resposta = cliente.post(
+            "/api/upload-efd", files={"file": ("efd.txt", conteudo.encode(), "text/plain")}
+        )
+        assert resposta.status_code == 200, resposta.text
+        resumo = resposta.json()["resumo"]
+        assert resumo["empresa"]["cnpj"] == "12345678000195"
+        assert resumo["pis"]["debito"] == 1_050.0
+
+    def test_upload_ecf(self, cliente):
+        conteudo = "\n".join([ECF_0000, "|N670|2|CSLL 9%|9000,00|"]) + "\n"
+        resposta = cliente.post(
+            "/api/upload-ecf", files={"file": ("ecf.txt", conteudo.encode(), "text/plain")}
+        )
+        assert resposta.status_code == 200, resposta.text
+        resumo = resposta.json()["resumo"]
+        assert resumo["empresa"] == {"cnpj": "12345678000195", "nome": "EMPRESA X LTDA"}
+        assert resumo["irpj"] is None

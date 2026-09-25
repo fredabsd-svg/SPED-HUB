@@ -14,6 +14,7 @@ from src.db.models import PlanoConta
 from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
+    chave_num_lcto,
     fmt_data,
     valor_sinalizado,
 )
@@ -75,22 +76,30 @@ class LivroDiario:
         # Agrupa partidas por lançamento
         from collections import defaultdict
 
-        lcto_map: dict[tuple, dict] = defaultdict(
-            lambda: {"partidas": [], "ind_lcto": "N", "dt_lcto": None}
+        lcto_map: dict[int, dict] = defaultdict(
+            lambda: {"partidas": [], "ind_lcto": "N", "dt_lcto": None, "num_lcto": ""}
         )
 
         for partida, lancamento in resultados:
-            key = (lancamento.num_lcto, lancamento.dt_lcto)
+            key = lancamento.id
             lcto_map[key]["partidas"].append(partida)
             lcto_map[key]["ind_lcto"] = lancamento.ind_lcto
             lcto_map[key]["dt_lcto"] = lancamento.dt_lcto
+            lcto_map[key]["num_lcto"] = lancamento.num_lcto
 
         # Monta lançamentos
         lancamentos: list[LancamentoDiario] = []
         total_debitos = 0.0
         total_creditos = 0.0
 
-        for (num_lcto, dt_lcto), dados in sorted(lcto_map.items()):
+        # Ordem do diário: data e, no mesmo dia, o número lido como número.
+        # Como texto, o lançamento "10" vinha antes do "9".
+        ordem = sorted(
+            lcto_map.items(),
+            key=lambda item: (item[1]["dt_lcto"], chave_num_lcto(item[1]["num_lcto"]), item[0]),
+        )
+        for _id, dados in ordem:
+            num_lcto, dt_lcto = dados["num_lcto"], dados["dt_lcto"]
             partidas_diario: list[PartidaDiario] = []
             deb_lanc = 0.0
             cred_lanc = 0.0

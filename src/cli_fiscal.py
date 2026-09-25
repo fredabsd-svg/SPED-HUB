@@ -56,6 +56,7 @@ from src.documentos import (
     simular,
     valor_tipado,
 )
+from src.documentos.ajustes import numero_digitado
 from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.classificacao import criar_regra
 from src.documentos.tabelas_ibscbs import tabelas as tabelas_oficiais
@@ -81,6 +82,8 @@ from src.escrituracoes import (
     transmitidas_do_periodo,
     utilizacao,
 )
+from src.escrituracoes.base import CODIFICACAO as CODIFICACAO_SPED
+from src.escrituracoes.base import para_latin1
 
 # O mesmo formato dos relatórios — 1.234.567,89.  `f"{v:,.2f}"` daria
 # `1,234,567.89`, que num sistema fiscal brasileiro se lê como outro número.
@@ -109,7 +112,18 @@ def _empresa(sessao: Session, empresa_id: int) -> Empresa:
 
 
 def _periodo(args) -> tuple[datetime.date, datetime.date]:
-    return _data(args.de), _data(args.ate)
+    """O `--de`/`--ate`, recusando período invertido em qualquer ação.
+
+    Se cabe num arquivo — um mês civil ou fração — quem confere é o gerador
+    (`conferir_periodo`), e o ajuste de apuração, que tem de casar com ele;
+    `apurar` é só leitura e aceita mais de um mês.
+    """
+    inicio, fim = _data(args.de), _data(args.ate)
+    if fim < inicio:
+        raise ValueError(
+            f"período invertido: --ate {fim:%d/%m/%Y} é anterior a --de {inicio:%d/%m/%Y}"
+        )
+    return inicio, fim
 
 
 def _data(valor: str) -> datetime.date:
@@ -143,8 +157,14 @@ def _nome_padrao(empresa: Empresa, tipo: str, inicio: datetime.date) -> str:
     return f"{tipo}_{empresa.cnpj}_{inicio:%Y%m}.txt"
 
 
-def gravar(destino: pathlib.Path, texto: str) -> None:
+def gravar(destino: pathlib.Path, texto: str, *, codificacao: str = CODIFICACAO_SPED) -> None:
     """Escreve o arquivo SPED sem deixar o Python mexer na quebra de linha.
+
+    Em ISO-8859-1, que é o que o leiaute pede ("ASCII - ISO 8859-1
+    (Latin-1)"). Até a correção saía em UTF-8, e o validador lia "INDÚSTRIA"
+    como "INDÃšSTRIA". O que não cabe no Latin-1 é transliterado antes
+    (`para_latin1`), para a gravação nunca falhar no meio. O espelho, que é
+    prosa para gente e não arquivo para o validador, é gravado em UTF-8.
 
     `newline=""` é o que impede a tradução automática: no Windows, um `open`
     em modo texto sem ele reescreve cada `\\n` como `\\r\\n`, e o texto do
@@ -157,7 +177,9 @@ def gravar(destino: pathlib.Path, texto: str) -> None:
     foi assim que o entrypoint do nginx quebrou para quem constrói no
     Windows, com toda a verificação automática passando.
     """
-    with open(destino, "w", encoding="utf-8", newline="") as saida:
+    if codificacao == CODIFICACAO_SPED:
+        texto = para_latin1(texto)
+    with open(destino, "w", encoding=codificacao, newline="") as saida:
         saida.write(texto)
 
 
@@ -392,7 +414,7 @@ def _espelho(sessao: Session, args) -> int:
     print(texto)
 
     if args.saida:
-        gravar(pathlib.Path(args.saida), texto)
+        gravar(pathlib.Path(args.saida), texto, codificacao="utf-8")
         print(f"  espelho gravado em {args.saida}\n")
 
     return DIVERGENTE if visao.divergencias() else 0
@@ -447,14 +469,12 @@ def _ajuste(sessao: Session, args) -> int:
 
 
 def _numero_do_terminal(bruto: str) -> float:
-    """`1.234,56` ou `1234.56` — quem digita usa o formato que conhece."""
-    texto = str(bruto).strip()
-    if "," in texto:
-        texto = texto.replace(".", "").replace(",", ".")
-    try:
-        return float(texto)
-    except ValueError as erro:
-        raise ValueError(f"{bruto!r} não é um valor numérico") from erro
+    """`1.234,56` ou `1234.56` — quem digita usa o formato que conhece.
+
+    A mesma conversão de `alterar` e da planilha (`numero_digitado`): duas
+    regras para ler um número digitado acabariam aceitando coisas diferentes.
+    """
+    return numero_digitado(bruto, campo="--valor")
 
 
 def _apurar(sessao: Session, args) -> int:
@@ -918,9 +938,11 @@ def _planilha_de_volta(sessao: Session, args) -> int:
     print(f"  impacto       {fmt_moeda(simulacao.impacto_total)}")
 
     for mudanca in simulacao.mudancas[:20]:
+        # O total do cabeçalho recomposto a partir dos itens não tem item:
+        # "item None" faria parecer um item sem número.
+        onde = f"item {mudanca.numero_item}" if mudanca.numero_item else "cabeçalho (recalculado)"
         print(
-            f"    item {mudanca.numero_item}: {mudanca.campo} "
-            f"{mudanca.valor_anterior!r} → {mudanca.valor_novo!r}"
+            f"    {onde}: {mudanca.campo} " f"{mudanca.valor_anterior!r} → {mudanca.valor_novo!r}"
         )
     if simulacao.total_mudancas > 20:
         print(f"    … e mais {simulacao.total_mudancas - 20}")
@@ -930,11 +952,23 @@ def _planilha_de_volta(sessao: Session, args) -> int:
         for divergencia in resultado.divergencias:
             print(f"    · {divergencia}")
 
+    # As mesmas travas de `alterar`, e impressas do mesmo jeito: quem lê a
+    # volta precisa ver o problema antes de pedir para gravar.
+    if simulacao.avisos:
+        print("\n  avisos:")
+        for aviso in simulacao.avisos:
+            print(f"    {aviso}")
+
     if not args.confirmar:
         print("\n  nada foi gravado — use --confirmar para aplicar\n")
         return 0
 
-    lote = confirmar(sessao, simulacao, motivo=args.motivo or f"planilha {args.arquivo}")
+    lote = confirmar(
+        sessao,
+        simulacao,
+        motivo=args.motivo or f"planilha {args.arquivo}",
+        forcar=args.forcar,
+    )
     sessao.commit()
     print(f"\n  gravado no lote {lote}")
     print(f"  desfaça com: sped-hub fiscal desfazer --lote {lote}\n")

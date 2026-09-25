@@ -28,13 +28,28 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _CACHE: dict[tuple, Settings] = {}
 
 
+_VERDADEIROS = {"1", "true", "yes", "on", "y", "t"}
+_FALSOS = {"0", "false", "no", "off", "n", "f"}
+
+
 def _coerce_bool(value: str | bool | None, default: bool = False) -> bool:
-    """Converte string de env para booleano de forma tolerante."""
+    """Converte string de env para booleano; valor não reconhecido mantém o default.
+
+    Só as grafias de `_VERDADEIROS` ligam e só as de `_FALSOS` desligam.  O
+    resto — `sim`, `ligado`, erro de digitação — fica com o default do campo,
+    em vez de virar `False`: `SMTP_USE_TLS=sim` desligava o TLS do SMTP, o
+    contrário do que quem escreveu queria, e sem aviso.
+    """
     if isinstance(value, bool):
         return value
     if value is None:
         return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on", "y", "t"}
+    texto = str(value).strip().lower()
+    if texto in _VERDADEIROS:
+        return True
+    if texto in _FALSOS:
+        return False
+    return default
 
 
 _SQLITE_INLINE_URLS = {
@@ -226,10 +241,17 @@ class Settings:
 
         ``SPED_HUB_MAX_UPLOAD_BYTES`` (legado, em bytes) tem precedência sobre
         ``SPED_HUB_MAX_UPLOAD_MB``; valores não positivos caem no default.
+
+        Vale para os dois: ``SPED_HUB_MAX_UPLOAD_MB=0`` (ou negativo) dava
+        limite de 0 byte, e todo upload era recusado com 413 — a docstring já
+        prometia o default, só o override em bytes o cumpria.
         """
         if self.max_upload_bytes_override and self.max_upload_bytes_override > 0:
             return self.max_upload_bytes_override
-        return self.max_upload_mb * 1024 * 1024
+        mb = self.max_upload_mb
+        if mb <= 0:
+            mb = Settings.__dataclass_fields__["max_upload_mb"].default
+        return mb * 1024 * 1024
 
     @property
     def redis_url_or_local(self) -> str:

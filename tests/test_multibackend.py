@@ -143,6 +143,155 @@ class TestRelatoriosPortaveis:
         assert ValidadorIntegridade(sessao_com_ecd, 1).validar_todas() is not None
 
 
+@pytest.fixture
+def sessao_trimestral(backend, tmp_path):
+    """ECD com três I150 mensais, sintéticas sem I155 e centro de custo."""
+    from src.ecd_importer import ECDImportService
+    from tests.fixtures.multiperiodo import gerar_ecd_multiperiodo
+
+    session = get_session(backend)
+    try:
+        ecd_id = (
+            ECDImportService(session)
+            .importar(gerar_ecd_multiperiodo(tmp_path / "trimestral.txt"))
+            .ecd_id
+        )
+        session.ecd_id = ecd_id
+        yield session
+    finally:
+        session.close()
+
+
+class TestRelatoriosIdenticos:
+    """§6.3 — o mesmo número em qualquer banco, conferido contra o valor certo.
+
+    "Gera sem erro" nos dois bancos não prova que os números batem. Estes
+    testes conferem o valor calculado à mão para a escrituração trimestral
+    de `tests/fixtures/multiperiodo.py`, em SQLite e em PostgreSQL.
+    """
+
+    def test_balancete(self, sessao_trimestral):
+        from src.reports.balancete import Balancete
+
+        balancete = Balancete(sessao_trimestral, sessao_trimestral.ecd_id)
+        _, linhas = balancete.gerar()
+        conta = {ln.cod_cta: ln for ln in linhas}
+        assert (conta["1.1.01"].saldo_inicial, conta["1.1.01"].saldo_final) == (10_000, 18_000)
+        assert conta["1.1"].saldo_final == 121_000
+        assert balancete.totais(linhas) == {
+            "saldo_inicial": 0.0,
+            "debitos": 227_000.0,
+            "creditos": 227_000.0,
+            "saldo_final": 0.0,
+        }
+
+    def test_balanco(self, sessao_trimestral):
+        from src.reports.balanco import BalancoPatrimonial
+
+        _, grupos, totais = BalancoPatrimonial(sessao_trimestral, sessao_trimestral.ecd_id).gerar()
+        assert (totais["ativo"], totais["passivo"], totais["pl"]) == (221_000, 64_000, 157_000)
+        assert grupos["ativo"][0].cod_cta == "1" and grupos["ativo"][0].saldo_atual == 221_000
+
+    def test_dre(self, sessao_trimestral):
+        from src.reports.dre import DRE
+
+        _, _linhas, totais = DRE(sessao_trimestral, sessao_trimestral.ecd_id).gerar()
+        assert totais["resultado_liquido"] == 21_000
+        assert totais["receita_bruta"] == 48_000
+
+    def test_dfc(self, sessao_trimestral):
+        from src.reports.dfc import DFC
+
+        _, _linhas, totais = DFC(sessao_trimestral, sessao_trimestral.ecd_id).gerar()
+        assert (totais["operacional"], totais["investimento"], totais["financiamento"]) == (
+            17_000,
+            -12_000,
+            1_000,
+        )
+        assert totais["variacao_caixa"] == totais["variacao_caixa_saldos"] == 6_000
+        assert totais["conciliado"] is True
+
+    def test_razao_e_diario(self, sessao_trimestral):
+        from src.reports.diario import LivroDiario
+        from src.reports.razao import Razao
+
+        _, linhas = Razao(sessao_trimestral, sessao_trimestral.ecd_id).gerar("1.1.02")
+        assert [ln.num_lcto for ln in linhas] == ["3", "4", "6", "7", "8", "11", "14"]
+        assert linhas[0].contrapartidas == "1.1.03"
+        assert linhas[-1].saldo_corrente == 48_000
+
+        _, lancamentos, _totais = LivroDiario(sessao_trimestral, sessao_trimestral.ecd_id).gerar()
+        assert [lanc.num_lcto for lanc in lancamentos] == [str(n) for n in range(1, 16)]
+
+
+@pytest.fixture
+def sessao_auditoria(backend, tmp_path):
+    """A amostra com um lançamento de centavos (12.345,67) e um redondo abaixo do limite.
+
+    Na amostra, o lançamento 2 é de sábado (20/01/2024) e o 6 de domingo
+    (10/03/2024); os demais caem em dia útil.
+    """
+    from src.ecd_importer import ECDImportService
+
+    extras = (
+        "|I200|20|10042024|12345,67|N||\n"
+        "|I250|1.1.2||12345,67|D|||NAO REDONDO||\n"
+        "|I250|1.1.3||12345,67|C||||\n"
+        "|I200|21|11042024|9000,00|N||\n"
+        "|I250|1.1.2||9000,00|D|||REDONDO ABAIXO DO LIMITE||\n"
+        "|I250|1.1.3||9000,00|C||||\n"
+    )
+    arquivo = tmp_path / "auditoria.txt"
+    arquivo.write_text(
+        FIXTURE.read_text(encoding="utf-8").replace("|I350|", extras + "|I350|", 1),
+        encoding="utf-8",
+    )
+    session = get_session(backend)
+    try:
+        session.ecd_id = ECDImportService(session).importar(arquivo).ecd_id
+        yield session
+    finally:
+        session.close()
+
+
+class TestFiltrosDeAuditoria:
+    """Os dois flags de auditoria, com o mesmo resultado nos dois bancos.
+
+    `vl_dc % 1 == 0` é verdadeiro para qualquer valor no SQLite (o `%` de lá
+    converte para inteiro) e não existe no Postgres para `double precision`;
+    `strftime` só existe no SQLite. O filtro de valores redondos devolvia
+    tudo num banco e derrubava a consulta no outro.
+    """
+
+    @staticmethod
+    def _numeros(sessao, criterios) -> set[str]:
+        from src.filters.engine import FilterEngine
+
+        return {
+            lanc.num_lcto
+            for _p, lanc in FilterEngine(sessao, sessao.ecd_id).aplicar_lancamentos(criterios)
+        }
+
+    def test_valores_redondos(self, sessao_auditoria):
+        from src.filters.engine import FilterCriteria
+
+        numeros = self._numeros(sessao_auditoria, FilterCriteria(vl_redondo_acima=10_000.0))
+        assert (
+            "20" not in numeros
+        ), "12.345,67 tem centavos e saiu como valor redondo: `vl_dc % 1` é inteiro no SQLite"
+        assert "21" not in numeros, "9.000 está abaixo do limite de 10.000"
+        assert numeros == {str(n) for n in range(1, 10)}
+
+    def test_fins_de_semana(self, sessao_auditoria):
+        from src.filters.engine import FilterCriteria
+
+        numeros = self._numeros(sessao_auditoria, FilterCriteria(fins_de_semana=True))
+        assert numeros == {"2", "6"}, (
+            f"lançamentos de fim de semana: {sorted(numeros)}; 20/01/2024 é sábado e "
+            "10/03/2024 é domingo"
+        )
+
+
 class TestBuscaTextualCaseInsensitive:
     """`LIKE` diverge entre os backends; `ilike` uniformiza."""
 

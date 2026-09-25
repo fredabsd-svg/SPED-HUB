@@ -25,7 +25,7 @@ com os relatórios contábeis; o `cli.py` registra o parser e despacha.
 | `registrar(sub)` | Acrescenta o parser `fiscal` à CLI. |
 | `cmd_fiscal(args)` | Despacha a ação e traduz falhas em mensagem legível. |
 | `conferir_argumentos(args)` | A mensagem de erro por argumento faltando, ou `None`. |
-| `gravar(destino, texto)` | Escreve o arquivo SPED sem deixar o Python mexer na quebra de linha. |
+| `gravar(destino, texto, codificacao=)` | Escreve o arquivo SPED em ISO-8859-1 sem deixar o Python mexer na quebra de linha; o espelho passa `codificacao="utf-8"`. |
 | `_filtro(bruto)` | `campo:valor`, `campo:operador:valor` ou `campo:operador`. |
 | `_valor_tipado(campo, bruto)` | O texto do terminal no tipo que a coluna espera. |
 | `GERADORES` | Os tipos de escrituração que o comando gera. |
@@ -45,7 +45,7 @@ Ações:
 | `alterar --empresa --campo --valor [--filtro --apenas-vazios --confirmar --forcar --motivo]` | Alteração em massa. Sem `--confirmar`, **só simula**. |
 | `desfazer --lote` | Reverte um lote inteiro de ajustes. |
 | `planilha --empresa [--de --ate --filtro --saida]` | Exporta os itens do recorte em `.xlsx`, já com a camada efetiva. |
-| `planilha --arquivo [--confirmar --motivo]` | Lê a planilha corrigida. Sem `--confirmar`, **só mostra**. |
+| `planilha --arquivo [--confirmar --motivo --forcar]` | Lê a planilha corrigida, com as mesmas travas e o mesmo recálculo de cabeçalho de `alterar`. Sem `--confirmar`, **só mostra**; aviso impeditivo recusa a gravação (código 1) sem `--forcar`. |
 | `ajuste --empresa --de --ate [--codigo --valor --descricao]` | Ajustes de apuração (E111). Sem `--codigo`, lista. |
 | `apurar --empresa --de --ate` | CBS, IBS e IS do período. Só leitura: **não grava nada**. |
 | `espelho --empresa --de --ate [--tipo --saida]` | O arquivo em forma de leitura, **antes** de gerar. Não arquiva. |
@@ -103,13 +103,19 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   sempre `str`; sem converter, alterar `base_icms` para `1000` mostraria
   **impacto R$ 0,00** na simulação, porque a diferença entre `0.0` e `"1000"`
   não é numérica — e é justamente o impacto que decide se a alteração passa. A
-  conversão reusa o `desserializar` da camada efetiva: duas conversões
-  diferentes para o mesmo campo acabariam divergindo.
+  conversão é a mesma da tela, da planilha e de `aplicar_ajuste`
+  (`documentos.ajustes.converter`): duas conversões diferentes para o mesmo
+  campo acabariam divergindo. Aceita `190,00`, `1.234,56` e `1234.56`; o que
+  não é número sai com código 1 e a mensagem nomeando campo e valor, **antes**
+  de simular. Até a correção, `--valor "190,00"` era gravado como texto e a
+  geração quebrava no fechamento.
 - **Campo inexistente é recusado antes de simular.** Uma alteração em massa
   com nome errado não alcançaria nada, em silêncio, e pareceria "0 mudanças"
   — indistinguível de um filtro que não casou.
 - **O filtro usa dois-pontos, não `=`.** Valor fiscal — NCM, CFOP, CST, CNPJ —
-  não tem dois-pontos dentro; o `=` apareceria em descrição de produto.
+  não tem dois-pontos dentro; o `=` apareceria em descrição de produto. A lista
+  de `em`/`nao_em` é separada por vírgula (`cfop:em:5102,6102`), no
+  `--filtro` e no `--se`.
 - **Conflitos de classificação aparecem em bloco próprio.** O motor se recusa
   a resolver empate de prioridade por sorteio; esconder isso faria a
   classificação parecer completa quando ela parou no meio.
@@ -123,6 +129,11 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   não tem crédito — `0,00` faria parecer que tem e ficou zerado. O saldo credor
   sai na própria linha do tributo: numa linha à parte, pareceria um quarto
   tributo.
+- **Período invertido é recusado em toda ação; o que atravessa o mês, em
+  `gerar`, `espelho` e `ajuste`.** Os três saem com código 1 e a mensagem, sem
+  arquivar nada — a CLI chegou a gerar e arquivar `--de 2026-07-31 --ate
+  2026-07-01`. A escrituração é mensal (um mês civil ou fração); `apurar`, que
+  é só leitura, aceita mais de um mês.
 - **`gerar` sempre arquiva, e não existe `--sem-arquivar`.** A ausência é
   deliberada. A terceira camada existe para responder "o que você enviou", e
   um arquivo que sai do sistema sem deixar registro é exatamente o buraco que
@@ -142,6 +153,11 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   arquivo não distingue nada e o que sobra é conferir a chamada. Não é
   preciosismo: foi assim que o entrypoint do nginx quebrou para quem constrói
   no Windows, com toda a verificação automática passando.
+- **O arquivo SPED é gravado em ISO-8859-1; o espelho, em UTF-8.** O leiaute
+  pede Latin-1, e o arquivo saía em UTF-8 — o validador lia "INDÃšSTRIA". O
+  que não cabe no Latin-1 é transliterado antes de gravar (`para_latin1`),
+  para a gravação nunca falhar no meio. O espelho é prosa para gente e fica em
+  UTF-8.
 - **`importar` varre a pasta só por `.xml`.** Sem o filtro, a pasta de
   downloads do contador encheria o relatório de rejeições de PDF e planilha
   que ninguém mandou importar. Um XML ilegível vira rejeição com motivo e não

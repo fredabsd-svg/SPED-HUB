@@ -25,7 +25,13 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from src.db.models import DocumentoFiscal, ItemDocumentoFiscal, RegraFiscal
-from src.documentos.ajustes import ORIGEM_REGRA, aplicar_ajuste, novo_lote, valor_efetivo
+from src.documentos.ajustes import (
+    ORIGEM_REGRA,
+    aplicar_ajuste,
+    novo_lote,
+    tipar,
+    valor_efetivo,
+)
 from src.documentos.tabelas_ibscbs import conferir_valor
 
 logger = logging.getLogger("sped-hub.documentos")
@@ -50,8 +56,17 @@ def _texto(valor: Any) -> str:
 
 
 def _lista(valor: Any) -> list[str]:
-    if isinstance(valor, str | bytes):
-        return [_texto(valor)]
+    """Os valores de `em`/`nao_em` — lista de verdade ou texto com vírgulas.
+
+    Pela CLI a condição chega como texto: `cfop:em:5102,6102`. Lido como um
+    valor só, "5102,6102" não contém CFOP nenhum, e `em` nunca casava pela
+    linha de comando. Código fiscal não tem vírgula dentro, então separar
+    nela não parte valor nenhum.
+    """
+    if isinstance(valor, bytes):
+        valor = valor.decode()
+    if isinstance(valor, str):
+        return [parte.strip() for parte in valor.split(",")]
     if isinstance(valor, Iterable):
         return [_texto(v) for v in valor]
     return [_texto(valor)]
@@ -179,6 +194,33 @@ def validar_regra(regra: RegraFiscal) -> None:
         # com origem `regra`, sem que ninguém tenha digitado nenhuma delas.
         for problema in conferir_valor(acao["campo"], acao.get("valor")):
             raise RegraInvalida(f"ação inválida: {problema}")
+        # Pelo mesmo motivo, valor que não é do tipo da coluna é recusado
+        # aqui: "abc" num campo de valor viraria mil ajustes de texto.
+        _valor_da_acao(acao, regra)
+
+
+def _coluna_da_acao(campo: str):
+    """A coluna que a ação escreve — no item ou no cabeçalho, onde existir."""
+    for modelo in (ItemDocumentoFiscal, DocumentoFiscal):
+        if campo in modelo.__table__.columns:
+            return modelo.__table__.columns[campo]
+    return None
+
+
+def _valor_da_acao(acao: dict, regra: RegraFiscal) -> Any:
+    """O valor da ação no tipo da coluna, ou `RegraInvalida` dizendo qual regra.
+
+    Comparado como texto, "180" e o `180.0` do banco pareciam diferentes e a
+    regra sugeria trocar o ICMS por ele mesmo; e "190,00" chegava à
+    sugestão como texto, sem impacto em reais.
+    """
+    coluna = _coluna_da_acao(acao["campo"])
+    if coluna is None:
+        return acao.get("valor")
+    try:
+        return tipar(acao.get("valor"), coluna)
+    except ValueError as erro:
+        raise RegraInvalida(f"regra {regra.nome!r}, ação inválida: {erro}") from erro
 
 
 def _valor_do_campo(
@@ -290,8 +332,9 @@ class MotorDeClassificacao:
         ajustes: Sequence,
         resultado: ResultadoClassificacao,
     ) -> None:
-        # campo -> (prioridade, [regras que o disputam], sugestão vencedora)
-        vencedoras: dict[str, tuple[int, list[str], Sugestao]] = {}
+        # campo -> (prioridade, [regras que o disputam], valor reivindicado,
+        #          sugestão — ou `None` quando o valor já é o atual)
+        vencedoras: dict[str, tuple[int, list[str], Any, Sugestao | None]] = {}
 
         for regra in regras:
             if not _casa(regra, documento, item, ajustes):
@@ -306,19 +349,28 @@ class MotorDeClassificacao:
                     # tem o campo.
                     continue
                 anterior = _valor_do_campo(campo, documento, item, ajustes)
-                sugerido = acao.get("valor")
-                if _texto(anterior) == _texto(sugerido):
+                sugerido = _valor_da_acao(acao, regra)
+
+                # A reivindicação é registrada ANTES de ver se muda alguma
+                # coisa. A regra de cima que já está cumprida continua sendo a
+                # de cima: pulá-la deixava o campo livre para a de baixo, e um
+                # CFOP certo era "corrigido" para o errado por uma regra que
+                # ninguém mandou valer ali. Empate só é conflito quando as duas
+                # dizem coisas diferentes — concordar não é disputa.
+                if campo in vencedoras:
+                    prioridade, nomes, reivindicado, _ = vencedoras[campo]
+                    if regra.prioridade == prioridade and _texto(sugerido) != _texto(reivindicado):
+                        nomes.append(regra.nome)
                     continue
 
-                if campo in vencedoras:
-                    prioridade, nomes, _ = vencedoras[campo]
-                    if regra.prioridade == prioridade:
-                        nomes.append(regra.nome)
+                if _texto(anterior) == _texto(sugerido):
+                    vencedoras[campo] = (regra.prioridade, [regra.nome], sugerido, None)
                     continue
 
                 vencedoras[campo] = (
                     regra.prioridade,
                     [regra.nome],
+                    sugerido,
                     Sugestao(
                         documento_id=documento.id,
                         item_id=item.id if item is not None else None,
@@ -333,7 +385,7 @@ class MotorDeClassificacao:
                     ),
                 )
 
-        for campo, (prioridade, nomes, sugestao) in vencedoras.items():
+        for campo, (prioridade, nomes, _, sugestao) in vencedoras.items():
             if len(nomes) > 1:
                 resultado.conflitos.append(
                     Conflito(
@@ -344,7 +396,8 @@ class MotorDeClassificacao:
                     )
                 )
                 continue
-            resultado.sugestoes.append(sugestao)
+            if sugestao is not None:  # a regra que manda já está cumprida
+                resultado.sugestoes.append(sugestao)
 
 
 def aplicar(

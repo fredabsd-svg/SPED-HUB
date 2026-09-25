@@ -17,11 +17,23 @@ vem de `reports/`.
 | Grupo | Rotas |
 |---|---|
 | Autenticação | `/login`, `/register`, `POST /api/login`, `POST /api/register`, `/logout` |
-| Páginas | `/`, `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/classificar/exportar.csv`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
+| Marca | `/favicon.ico` (redireciona para `/static/marca.svg`) |
+| Páginas | `/` (aceita `?ecd_id=`), `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/classificar/exportar.csv`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
 | Upload | `POST /api/upload` (ECD síncrona, compatibilidade), `/api/upload-async` + `/api/jobs/*` (importação com progresso usada pela tela), `/api/upload-efd`, `/api/upload-ecf` (só resumo) |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
-| Exportação | `/api/export/pdf`, `/xlsx`, `/multi-formato` (ZIP), `/lote` |
-| Administração (admin) | `/api/audit/*`, `/api/email/*`, `/api/worker/status`, `/api/monitoring/*`, `/api/health/full` |
+| Exportação | `/api/export/pdf`, `/xlsx` (os dois devolvem o arquivo como download), `/multi-formato` (ZIP), `/lote` |
+| Administração (admin) | `/api/audit/*`, `/api/email/*`, `/api/worker/status`, `/api/monitoring/*` |
+| Saúde (pública, sem login) | `/api/health/full` |
+
+`destaques.py` — `gerar_destaques(data)`: as frases do cartão "Destaques"
+(fechamento do balanço, resultado e margem, endividamento, variação contra o
+exercício anterior, movimento), calculadas sobre o mesmo `DashboardData` dos
+cartões.
+
+`static/app-shell.css` — o design system (tokens e componentes) e o shell
+com menu lateral; `static/app-shell.js` recolhe o menu em tela estreita;
+`templates/partials/icones.html` — os ícones de traço, em SVG inline
+(ADR 0010).
 
 `services.py` — `DashboardService` (KPIs, evolução patrimonial e
 multi-período, composição do ativo, waterfall DRE, DFC, comparativos, notas
@@ -43,7 +55,12 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
 - **Multi-tenancy por `escritorio_id`**: o middleware extrai
   `ecd_id`/`ecd_ids` da query string e valida com
   `usuario_pode_acessar_ecd`; ECD de outro escritório responde **404, não
-  403** — não vaza que ela existe. Listagens passam por
+  403** — não vaza que ela existe. **Todo** valor é conferido (`getlist`) e
+  só dígito ASCII passa; o resto é 400. O filtro era `str.isdigit()`, e
+  `+2`, `2.0` ou `2_0` escapavam dele sem escapar do FastAPI, que os
+  converte para `2`: a rota servia a ECD do outro escritório. Rota nova que
+  receba id de ECD por outro nome de parâmetro não está coberta — confira o
+  escopo nela. Listagens passam por
   `aplicar_escopo_empresas`; o upload grava o `escritorio_id` do usuário
   logado.
 - **O escopo do cadastro fiscal é aplicado na consulta, não conferido depois.**
@@ -57,6 +74,39 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   `name=` divergindo do que a rota lê — e aí os dois passam com a página
   quebrada. `tests/test_formularios_batem_com_as_rotas.py` lê o formulário da
   página e envia o que ele declara.
+- **`/` escolhe a ECD por `?ecd_id=`, com o escopo na consulta.** O seletor
+  do cabeçalho é um `GET` comum para essa URL e recarrega o painel inteiro;
+  trocar só os cartões por HTMX deixava gráficos e abas mostrando a ECD
+  anterior. A rota `/` não passa pelo middleware de `/api/`, por isso o
+  `where` do id vai junto com `aplicar_escopo_empresas`.
+- **Gráfico do Chart.js mora numa `.chart-box` de altura fixa.** Com
+  `maintainAspectRatio: false` ele assume a altura do pai; sem pai fixo, o
+  canvas crescia até o fim da coluna do grid (o painel chegou a 14.000 px no
+  celular). `tests/test_e2e_playwright.py::TestE2EPainelRevisado` mede.
+- **Exportação é link, não `hx-get`.** Download não é swap: `hx-target`
+  apontando para `_blank` fazia o htmx acusar erro e não pedir nada. O XLSX é
+  montado em memória (`export_xlsx_to_buffer`); antes era gravado num
+  `/workspace/outputs/` que não existe em instalação nenhuma.
+- **Valores da tela saem no formato brasileiro.** Moeda por `fmt_moeda`,
+  percentual pelo filtro `percentual`, CNPJ pelo filtro `cnpj`
+  (`src.cnpj.formatar`) e período pelo filtro `periodo` (ISO → DD/MM/AAAA).
+  O JSON da API continua em ISO: a conversão é só de apresentação.
+- **Alpine chama `init()` sozinho.** `x-data` com objeto que tem `init()` já o
+  executa; `x-init="init()"` repetia a chamada e, no monitoramento, criava
+  dois laços de consulta ao servidor.
+- **O login e o cadastro sabem se o registro público está aberto**
+  (`AuthService.registro_publico_aberto`). Fechado, a tela avisa antes do
+  formulário e o login deixa de oferecer "Criar conta".
+- **A cor do cartão vem de `tom`, não de `tendencia`.** `tendencia` está na
+  API e tem sentido diferente em cada cartão ("down" é bom no endividamento e
+  ruim no PL); colorir por ela pintava de vermelho um endividamento de 31%.
+  `tom` e `variacao` existem só para a tela.
+- **A receita chega da DRE com sinal de crédito (negativa).** O cartão de
+  margem exigia `receita_bruta > 0` e nunca aparecia; KPIs e destaques usam
+  o valor absoluto. O JSON da API segue com o sinal contábil.
+- **Os destaques são conta, não estimativa.** O único caso interpretado é o
+  balanço que não fecha pelo valor exato do resultado: vira "resultado ainda
+  fora do PL" (saldos anteriores ao encerramento) em vez de erro.
 - **O menu só mostra o que o usuário pode abrir.** Link que devolve 403 é pior
   que link ausente: a mensagem fala de permissão, e quem clicou não pediu
   permissão nenhuma.
@@ -170,26 +220,46 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   quatro páginas que não herdam o `base.html` declaram as fontes por conta
   própria; cor de dado (gráficos) segue a identidade, badge de estado
   (sucesso/erro) mantém o verde/vermelho semântico.
-- **`get_composicao_ativo` tem trava de ciclo** ao subir a hierarquia do
-  plano de contas. A hierarquia vem do arquivo do cliente; um ciclo A→B→A
-  fazia o laço rodar para sempre e o dashboard inteiro parava para todos os
-  usuários (event loop único).
+- **`get_composicao_ativo` usa o saldo agregado do grupo logo abaixo do
+  topo** (ATIVO CIRCULANTE, ATIVO NÃO CIRCULANTE), que o balanço já traz
+  consolidado; somar também as linhas de baixo dobraria cada fatia. A
+  hierarquia vem da `Hierarquia` de `src/reports/saldos.py`, à prova de
+  ciclo: um ciclo A→B→A fazia o laço antigo rodar para sempre e o dashboard
+  inteiro parava para todos os usuários (event loop único). O ciclo continua
+  registrado em log (WARNING).
+- **Evolução patrimonial e notas explicativas passam pela mesma
+  consolidação dos relatórios** (`src/reports/saldos.py`): um ponto por
+  I150 com os centros de custo somados; nas notas, o saldo final do último
+  I150, sem dobrar sintética e filha. A margem líquida só aparece quando a
+  DRE devolve receita bruta positiva — o que passou a acontecer quando o
+  total da DRE ganhou o sinal da demonstração.
 - **O banco vem de `database_reference()`** e é relido a cada uso — antes só
   `SPED_HUB_DB` era lido e `DATABASE_URL` era ignorada em silêncio.
 - **A tela de upload usa a importação assíncrona para ECD.** O arquivo é validado
   antes de ser salvo, processado fora do event loop e acompanhado por
-  `GET /api/jobs/{id}`. O resultado mostra quantas contas, lançamentos e
+  `GET /api/jobs/{id}`. A rota pega o serviço de jobs com
+  `get_async_job_service` — reinicializá-lo a cada upload zerava o progresso e
+  o cancelamento de quem já estava importando (ver
+  `docs/modules/async_jobs.md`). O resultado mostra quantas contas, lançamentos e
   partidas foram importadas; falhas e cancelamentos também aparecem no painel
   de status da página. Os painéis ECD, EFD e ECF ficam fora do flex da barra de
   abas, para que a área de seleção preserve sua largura.
 - As APIs externas (`/api/v1`, `/api/v2/graphql`) têm autenticação própria
   por API Key — o middleware do dashboard as ignora de propósito.
+- **`/api/health/full` é público e é `def`, não `async def`.** A checagem é
+  síncrona (sessão do banco, cliente Redis com timeout de 2 s) e, dentro de
+  uma corrotina, parava o event loop: com o Redis fora do ar, cada chamada
+  anônima congelava a aplicação inteira por ~2 s. Como `def`, roda no
+  threadpool. O cliente Redis vem de `cache_compartilhado` — criado uma vez,
+  com nova tentativa de conexão no máximo a cada 30 s enquanto o Redis estiver
+  fora — em vez de ser reconstruído a cada requisição anônima.
 
 ## Como testar isoladamente
 
 ```bash
 pytest tests/test_fase13.py tests/test_fase14.py tests/test_fase16.py -q
 pytest tests/test_hardening.py tests/test_vendor_assets.py -q
+pytest tests/test_saude_publica.py -q            # health público não trava o loop
 pytest tests/test_hierarquia_ciclica.py -q       # trava de ciclo
 pytest tests/test_fase7.py tests/test_fase10.py -q   # DashboardService
 pytest tests/test_telas_classificar_corrigir.py tests/test_identidade_dashboard.py -q

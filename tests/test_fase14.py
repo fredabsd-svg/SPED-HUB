@@ -384,6 +384,53 @@ class TestCachedDecorator:
         assert pesada(10) == 20
         assert call_count == 2
 
+    def test_metodo_de_objeto_sem_chave_estavel_e_recusado(self, cache_svc):
+        """`self` entrava na chave como `<... object at 0x...>`.
+
+        Endereço de objeto coletado é reaproveitado pelo próximo: o serviço da
+        ECD 2 recebia o resultado cacheado da ECD 1. Chave que pode colidir em
+        silêncio é recusada.
+        """
+        import src.cache as cache_mod
+
+        cache_mod._cache_service = cache_svc
+
+        class Servico:
+            def __init__(self, ecd_id):
+                self.ecd_id = ecd_id
+
+            @cached(ttl=60)
+            def total(self):
+                return self.ecd_id
+
+        with pytest.raises(TypeError, match="chave estável"):
+            Servico(1).total()
+        assert cache_svc.stats()["sets"] == 0, "nada pode ter sido cacheado com a chave instável"
+
+    def test_objeto_com_cache_key_nao_colide(self, cache_svc):
+        """Com `__cache_key__`, a chave é o valor — e duas ECDs não dividem entrada."""
+        import src.cache as cache_mod
+
+        cache_mod._cache_service = cache_svc
+        chamadas = []
+
+        class Servico:
+            def __init__(self, ecd_id):
+                self.ecd_id = ecd_id
+
+            def __cache_key__(self):
+                return self.ecd_id
+
+            @cached(ttl=60)
+            def total(self):
+                chamadas.append(self.ecd_id)
+                return self.ecd_id * 10
+
+        assert Servico(1).total() == 10
+        assert Servico(2).total() == 20, "o serviço da ECD 2 recebeu o resultado da ECD 1"
+        assert Servico(1).total() == 10
+        assert chamadas == [1, 2], "a mesma ECD deveria vir do cache na segunda vez"
+
     def test_prefixo_isola_cache(self, cache_svc):
         """Prefixos diferentes isolam entradas."""
         call_a = 0

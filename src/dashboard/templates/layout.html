@@ -188,15 +188,18 @@
             font-style: italic;
         }
     </style>
+    <link rel="icon" href="/static/marca.svg" type="image/svg+xml">
+    <meta name="theme-color" content="#0C3A30">
     <link rel="stylesheet" href="/static/app-shell.css">
     <script defer src="/static/quick-access.js"></script>
+    <script defer src="/static/app-shell.js"></script>
 </head>
-<body>
+<body class="app-layout">
     <a class="skip-link" href="#page-content">Pular para o conteúdo</a>
     {% include "partials/navigation.html" %}
     {% include "partials/quick_access.html" %}
 
-    <main class="container" id="page-content" tabindex="-1" x-data="layoutApp()" x-init="init()">
+    <main class="container" id="page-content" tabindex="-1" x-data="layoutApp()">
         <h1 class="page-title">Layout Customizável</h1>
         <p class="page-subtitle">Arraste para reordenar e use os toggles para mostrar/ocultar colunas. As preferências são salvas no navegador.</p>
 

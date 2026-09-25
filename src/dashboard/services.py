@@ -6,6 +6,7 @@ Fase 6: +evolução multi-período, +notas explicativas automáticas.
 """
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 from sqlalchemy import func, select
@@ -18,11 +19,12 @@ from src.db.models import (
     PlanoConta,
     SaldoPeriodico,
 )
-from src.filters.engine import FilterEngine
+from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.balanco import BalancoPatrimonial
-from src.reports.base import saldo_por_natureza, valor_sinalizado
+from src.reports.base import saldo_por_natureza
 from src.reports.dfc import DFC
 from src.reports.dre import DRE
+from src.reports.saldos import consolidar, saldos_por_periodo
 
 logger = logging.getLogger("sped-hub.dashboard.services")
 
@@ -35,6 +37,11 @@ class KPICard:
     tendencia: str = "neutro"
     descricao: str = ""
     icone: str = ""
+    # Só para a tela, fora da API. `tendencia` tem sentido diferente em cada
+    # cartão ("down" é bom no endividamento e ruim no PL), e colorir por ela
+    # pintava de vermelho um endividamento saudável. `tom` diz a cor.
+    tom: str = "neutro"  # positivo | negativo | neutro
+    variacao: float | None = None  # % contra o exercício anterior
 
 
 @dataclass
@@ -51,6 +58,15 @@ class DashboardData:
     resultado_liquido: float = 0.0
     num_lancamentos: int = 0
     num_contas: int = 0
+    ativo_anterior: float | None = None
+    pl_anterior: float | None = None
+
+
+def _variacao(atual: float, anterior: float | None) -> float | None:
+    """Variação percentual, ou None quando não há base para comparar."""
+    if anterior is None or abs(anterior) < 0.005:
+        return None
+    return (atual - anterior) / abs(anterior) * 100
 
 
 class DashboardService:
@@ -104,6 +120,8 @@ class DashboardService:
             resultado_liquido=totais_dre.get("resultado_liquido", 0.0),
             num_lancamentos=num_lancs,
             num_contas=num_contas,
+            ativo_anterior=totais.get("ativo_anterior") if totais.get("tem_anterior") else None,
+            pl_anterior=totais.get("pl_anterior") if totais.get("tem_anterior") else None,
         )
 
     def _calcular_kpis(self, totais, totais_dre, num_lancs, num_contas) -> list[KPICard]:
@@ -111,7 +129,10 @@ class DashboardService:
         ativo = totais["ativo"]
         passivo = totais["passivo"]
         pl = totais["pl"]
-        receita_bruta = totais_dre.get("receita_bruta", 0.0)
+        # A DRE devolve a receita com o sinal contábil (crédito negativo). O
+        # cartão comparava `receita_bruta > 0`, e numa empresa com receita — o
+        # caso normal — a margem líquida nunca aparecia.
+        receita_bruta = abs(totais_dre.get("receita_bruta", 0.0))
         resultado = totais_dre.get("resultado_liquido", 0.0)
 
         kpis.append(
@@ -122,6 +143,11 @@ class DashboardService:
                 tendencia="neutro",
                 descricao="Total de bens e direitos",
                 icone="💰",
+                variacao=(
+                    _variacao(ativo, totais.get("ativo_anterior"))
+                    if totais.get("tem_anterior")
+                    else None
+                ),
             )
         )
         kpis.append(
@@ -132,6 +158,10 @@ class DashboardService:
                 tendencia="up" if pl > 0 else "down",
                 descricao="Capital próprio da empresa",
                 icone="🏛️",
+                tom="positivo" if pl > 0 else "negativo" if pl < 0 else "neutro",
+                variacao=(
+                    _variacao(pl, totais.get("pl_anterior")) if totais.get("tem_anterior") else None
+                ),
             )
         )
 
@@ -145,6 +175,7 @@ class DashboardService:
                     tendencia="down" if endividamento < 60 else "up",
                     descricao="Passivo ÷ Ativo Total",
                     icone="📊",
+                    tom="negativo" if endividamento >= 100 else "neutro",
                 )
             )
 
@@ -156,6 +187,7 @@ class DashboardService:
                 tendencia="up" if resultado > 0 else "down",
                 descricao="Lucro ou prejuízo do período",
                 icone="📈",
+                tom="positivo" if resultado > 0 else "negativo" if resultado < 0 else "neutro",
             )
         )
 
@@ -169,6 +201,7 @@ class DashboardService:
                     tendencia="up" if margem > 10 else "neutro",
                     descricao="Resultado ÷ Receita Bruta",
                     icone="🎯",
+                    tom="positivo" if margem > 0 else "negativo" if margem < 0 else "neutro",
                 )
             )
 
@@ -186,38 +219,34 @@ class DashboardService:
         return kpis
 
     def get_evolucao_patrimonial(self) -> dict:
-        """Dados para gráfico de evolução patrimonial (Ativo vs Passivo+PL)."""
+        """Dados para gráfico de evolução patrimonial (Ativo vs Passivo+PL).
+
+        Um ponto por I150: o SF de cada conta naquele período, centros de
+        custo somados, só as contas com saldo próprio sem superior que
+        também tenha (sintética com I155 próprio não dobra as filhas). O
+        plano é lido uma vez — antes era uma consulta por linha do I155.
+        """
         saldos = (
-            self.session.execute(
-                select(SaldoPeriodico)
-                .where(SaldoPeriodico.ecd_id == self.ecd_id)
-                .order_by(SaldoPeriodico.dt_ini)
-            )
+            self.session.execute(select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == self.ecd_id))
             .scalars()
             .all()
         )
+        plano = self.engine.plano()
+        hierarquia = self.engine.hierarquia()
+
+        por_periodo: dict = defaultdict(dict)
+        for (cod_cta, periodo), saldo in saldos_por_periodo(saldos).items():
+            por_periodo[periodo][cod_cta] = saldo
 
         periodos: dict[str, dict[str, float]] = {}
-        for s in saldos:
-            chave = s.dt_ini.isoformat()
-            if chave not in periodos:
-                periodos[chave] = {"ativo": 0.0, "passivo": 0.0, "pl": 0.0}
-
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            conta = self.session.execute(
-                select(PlanoConta).where(
-                    PlanoConta.ecd_id == self.ecd_id,
-                    PlanoConta.cod_cta == s.cod_cta,
-                )
-            ).scalar_one_or_none()
-
-            if conta:
-                if conta.cod_nat == "01":
-                    periodos[chave]["ativo"] += saldo_por_natureza(vl, "01")
-                elif conta.cod_nat == "02":
-                    periodos[chave]["passivo"] += saldo_por_natureza(vl, "02")
-                elif conta.cod_nat == "03":
-                    periodos[chave]["pl"] += saldo_por_natureza(vl, "03")
+        for (dt_ini, _dt_fin), proprios in por_periodo.items():
+            totais = {"ativo": 0.0, "passivo": 0.0, "pl": 0.0}
+            for cod_cta in hierarquia.contas_base(proprios):
+                nat = plano[cod_cta].cod_nat
+                chave_nat = {"01": "ativo", "02": "passivo", "03": "pl"}.get(nat)
+                if chave_nat:
+                    totais[chave_nat] += saldo_por_natureza(proprios[cod_cta].sf, nat)
+            periodos[dt_ini.isoformat()] = totais
 
         labels = sorted(periodos.keys())
         ativo_series = [periodos[p]["ativo"] for p in labels]
@@ -312,16 +341,16 @@ class DashboardService:
             ).scalars()
         }
 
-        saldos = (
-            self.session.execute(select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == self.ecd_id))
-            .scalars()
-            .all()
-        )
+        # Saldo final consolidado (último I150, centros de custo somados,
+        # sintéticas com a soma das filhas). Antes ficava a última linha
+        # lida de cada conta — de um mês e de um centro de custo quaisquer.
+        consolidados = consolidar(self.engine, FilterCriteria())
+        saldo_por_conta = {cod: saldo.sf for cod, saldo in consolidados.saldos.items()}
+        hierarquia = consolidados.hierarquia
 
-        saldo_por_conta: dict[str, float] = {}
-        for s in saldos:
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            saldo_por_conta[s.cod_cta] = vl
+        def _soma_sem_dobrar(contas: list[str], saldos: dict[str, float], arvore) -> float:
+            """Soma das contas sem superior no mesmo conjunto (sintética não dobra)."""
+            return sum(abs(saldos.get(c, 0.0)) for c in arvore.maximais(contas))
 
         # Nota 1: Contexto operacional
         empresa = self.session.get(Empresa, ecd.empresa_id) if ecd.empresa_id else None
@@ -359,11 +388,14 @@ class DashboardService:
         )
 
         # Nota 3: Capital Social
-        capital_social = 0.0
-        for cod_cta, pc in plano.items():
-            nome = pc.nome_cta.upper()
-            if any(t in nome for t in ["CAPITAL SOCIAL", "CAPITAL SUBSCRITO"]):
-                capital_social += abs(saldo_por_conta.get(cod_cta, 0.0))
+        def _contas_de_capital(plano_contas) -> list[str]:
+            return [
+                cod
+                for cod, pc in plano_contas.items()
+                if any(t in pc.nome_cta.upper() for t in ["CAPITAL SOCIAL", "CAPITAL SUBSCRITO"])
+            ]
+
+        capital_social = _soma_sem_dobrar(_contas_de_capital(plano), saldo_por_conta, hierarquia)
 
         if capital_social > 0:
             # Verifica se houve alteração (comparar com período anterior)
@@ -380,18 +412,13 @@ class DashboardService:
 
             capital_anterior = 0.0
             if ecds_ant:
-                saldos_ant = (
-                    self.session.execute(
-                        select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecds_ant.id)
-                    )
-                    .scalars()
-                    .all()
+                engine_ant = FilterEngine(self.session, ecds_ant.id)
+                anteriores = consolidar(engine_ant, FilterCriteria())
+                capital_anterior = _soma_sem_dobrar(
+                    _contas_de_capital(engine_ant.plano()),
+                    {cod: saldo.sf for cod, saldo in anteriores.saldos.items()},
+                    anteriores.hierarquia,
                 )
-                for s in saldos_ant:
-                    if s.cod_cta in plano:
-                        nome_ant = plano[s.cod_cta].nome_cta.upper()
-                        if any(t in nome_ant for t in ["CAPITAL SOCIAL", "CAPITAL SUBSCRITO"]):
-                            capital_anterior += abs(valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin))
 
             if capital_anterior > 0 and abs(capital_social - capital_anterior) > 0.01:
                 variacao = capital_social - capital_anterior
@@ -424,11 +451,11 @@ class DashboardService:
                 )
 
         # Nota 4: Imobilizado (se relevante)
-        imob_contas = []
-        for cod_cta, pc in plano.items():
-            nome = pc.nome_cta.upper()
+        candidatas = [
+            cod_cta
+            for cod_cta, pc in plano.items()
             if any(
-                t in nome
+                t in pc.nome_cta.upper()
                 for t in [
                     "IMOBILIZADO",
                     "MÁQUINAS",
@@ -439,10 +466,15 @@ class DashboardService:
                     "EDIFÍCIO",
                     "TERRENO",
                 ]
-            ):
-                vl = abs(saldo_por_conta.get(cod_cta, 0.0))
-                if vl > 0:
-                    imob_contas.append((pc.nome_cta, vl))
+            )
+        ]
+        # Só as sem superior entre as candidatas: com a sintética
+        # "IMOBILIZADO" agregando "MÁQUINAS", listar as duas dobraria o total.
+        imob_contas = []
+        for cod_cta in hierarquia.maximais(candidatas):
+            vl = abs(saldo_por_conta.get(cod_cta, 0.0))
+            if vl > 0:
+                imob_contas.append((plano[cod_cta].nome_cta, vl))
 
         if imob_contas:
             total_imob = sum(v for _, v in imob_contas)
@@ -485,45 +517,36 @@ class DashboardService:
         balanco = BalancoPatrimonial(self.session, self.ecd_id)
         _, grupos, _ = balanco.gerar()
 
-        plano = {
-            c.cod_cta: c
-            for c in self.session.execute(
-                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
-            ).scalars()
+        # Cada fatia é um grupo logo abaixo do topo do ativo (ATIVO
+        # CIRCULANTE, ATIVO NÃO CIRCULANTE), com o saldo já agregado pela
+        # consolidação. Somar também as linhas de baixo — como era quando a
+        # sintética vinha zerada — dobraria cada fatia. Conta de topo sem
+        # filha listada vira fatia por si. A hierarquia vem de `ancestrais`,
+        # calculada à prova de ciclo (`src.reports.saldos.Hierarquia`): um
+        # plano em que a conta é a própria sintética já travou o painel
+        # inteiro num laço infinito.
+        em_ciclo = self.engine.hierarquia().contas_em_ciclo()
+        if em_ciclo:
+            # Contornar sem avisar esconderia um plano de contas inválido.
+            logger.warning(
+                "Plano de contas com ciclo na hierarquia: as contas %s voltam a si "
+                "mesmas subindo por COD_CTA_SUP. Cada uma entra no gráfico por si.",
+                ", ".join(sorted(em_ciclo)[:10]),
+            )
+        listadas = {ln.cod_cta for ln in grupos["ativo"]}
+        com_filha_listada = {
+            a for ln in grupos["ativo"] for a in ln.ancestrais[:1] if a in listadas
         }
 
         categorias: dict[str, float] = {}
         for linha in grupos["ativo"]:
-            if linha.nivel <= 2:
+            superiores_listadas = [a for a in linha.ancestrais if a in listadas]
+            fatia = len(superiores_listadas) == 1 or (
+                not superiores_listadas and linha.cod_cta not in com_filha_listada
+            )
+            if fatia:
                 nome = linha.nome_cta[:30]
                 categorias[nome] = categorias.get(nome, 0.0) + linha.saldo_atual
-            else:
-                cod = linha.cod_cta
-                pc = plano.get(cod)
-                # A subida pela hierarquia precisa de trava de ciclo.  Sem
-                # ela, um plano de contas em que uma conta é sua própria
-                # sintética (ou A→B→A) faz este laço rodar para sempre — e
-                # como o uvicorn atende num único event loop, o dashboard
-                # inteiro para de responder para TODOS os usuários, não só
-                # para quem importou.  A hierarquia vem do arquivo do
-                # cliente: é entrada não confiável, e o validador de
-                # integridade só confere que a conta sintética existe, não
-                # que o caminho até a raiz é acíclico.
-                vistos: set[str] = set()
-                while pc and pc.nivel > 2 and pc.cod_cta_sup:
-                    if pc.cod_cta in vistos:
-                        logger.warning(
-                            "Plano de contas com ciclo na hierarquia: a conta %s volta "
-                            "a si mesma subindo por COD_CTA_SUP. Agrupando no ponto em "
-                            "que o ciclo foi detectado.",
-                            pc.cod_cta,
-                        )
-                        break
-                    vistos.add(pc.cod_cta)
-                    pc = plano.get(pc.cod_cta_sup)
-                if pc:
-                    nome = pc.nome_cta[:30]
-                    categorias[nome] = categorias.get(nome, 0.0) + linha.saldo_atual
 
         sorted_cats = sorted(categorias.items(), key=lambda x: abs(x[1]), reverse=True)
         return {"labels": [c[0] for c in sorted_cats], "valores": [c[1] for c in sorted_cats]}

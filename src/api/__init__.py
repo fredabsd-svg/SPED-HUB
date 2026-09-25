@@ -14,12 +14,12 @@ import hmac
 import logging
 import secrets
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.audit import get_audit_service
-from src.db.models import ApiKey, get_session, init_db_once, obter_engine
+from src.db.models import ECD, ApiKey, Empresa, get_session, init_db_once, obter_engine
 from src.ratelimit import get_limiter
 from src.settings import database_reference
 
@@ -140,6 +140,79 @@ async def requer_api_key(request: Request):
         request,
         database_reference(),
     )
+
+
+# ── Escopo da credencial ────────────────────────────────────────────────────
+
+
+def escopo_da_credencial(stmt, credencial):
+    """Restringe uma query com `Empresa` ao escritório da credencial.
+
+    `credencial` é a API Key (ou o usuário admin de sessão) que passou pela
+    dependência. Chave **sem** escritório é chave de instância e lê tudo — é o
+    comportamento histórico, mantido para não invalidar integração existente.
+    Chave **com** escritório lê só o dele.
+
+    Vive aqui, e não em `routes.py`, porque REST e GraphQL precisam da MESMA
+    regra: o GraphQL chegou a ficar sem escopo nenhum enquanto o REST já
+    tinha, e uma chave do escritório A lia a escrituração do B por
+    `/api/v2/graphql` pedindo o id direto.
+    """
+    escritorio_id = getattr(credencial, "escritorio_id", None)
+    if escritorio_id is None:
+        return stmt
+    return stmt.where(Empresa.escritorio_id == escritorio_id)
+
+
+def credencial_ve_ecd(session: Session, credencial, ecd_id: int) -> bool:
+    """A credencial enxerga esta ECD?  `False` também para ECD inexistente.
+
+    Uma resposta só para "não existe" e "é de outro escritório": distinguir
+    as duas já confirmaria que a ECD do vizinho existe.
+    """
+    stmt = escopo_da_credencial(
+        select(ECD.id).join(Empresa, ECD.empresa_id == Empresa.id).where(ECD.id == ecd_id),
+        credencial,
+    )
+    return session.execute(stmt).scalar_one_or_none() is not None
+
+
+def credencial_de_instancia(credencial) -> bool:
+    """A credencial alcança a instância inteira, e não um escritório só?
+
+    Chave sem escritório (`escritorio_id` nulo) é de instância. Sessão do
+    dashboard só chega aqui se for de administrador (`validar_requisicao_api`
+    recusa o usuário comum), e o administrador já vê a instância inteira no
+    próprio painel — a auditoria e os webhooks do dashboard são dele.
+    """
+    if isinstance(credencial, ApiKey):
+        return credencial.escritorio_id is None
+    return bool(getattr(credencial, "admin", False))
+
+
+async def requer_credencial_de_instancia(credencial=Depends(requer_api_key)):
+    """Exige credencial de instância; chave com escritório recebe **403**.
+
+    Para o que não tem dono por escritório: webhooks (o registro não guarda
+    escritório e todo evento de toda importação vai para todos os inscritos)
+    e a trilha de auditoria (uma tabela só, para a instância inteira).
+    Antes qualquer chave listava, alterava e removia os webhooks de todos os
+    escritórios — inclusive trocar a URL do webhook do vizinho para um
+    endereço seu e passar a receber os eventos dele — e lia e apagava a
+    auditoria da instância.
+
+    403, e não 404: aqui não há recurso de outro escritório cuja existência
+    precise ser escondida — é a rota inteira que não é para esta chave.
+    """
+    if not credencial_de_instancia(credencial):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Esta rota exige chave de instância (sem escritório): "
+                "chave de escritório não administra webhooks nem auditoria"
+            ),
+        )
+    return credencial
 
 
 async def requer_admin_de_sessao(request: Request):

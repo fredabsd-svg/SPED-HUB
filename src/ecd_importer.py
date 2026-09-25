@@ -33,7 +33,7 @@ from src.db.models import (
     SaldoPeriodico,
     SaldoResultado,
 )
-from src.parsers.ecd import ECDParser
+from src.parsers.ecd import CampoInvalidoError, ECDParser
 from src.settings import get_settings
 from src.validators.integridade import encontrar_ciclos
 from src.webhooks import emitir
@@ -198,6 +198,18 @@ class ECDImportService:
             do_leiaute,
         )
 
+    def _registros(self, path: Path):
+        """Os registros do arquivo; valor monetário ilegível recusa a importação.
+
+        "1.234,56" (separador de milhar) ou "1 234,56" viravam `None` no
+        parser e 0,00 no banco: a escrituração entrava com um valor a menos,
+        com aparência de completa (§6.1). A recusa diz a linha e o campo.
+        """
+        try:
+            yield from self.parser.parse(path)
+        except CampoInvalidoError as exc:
+            raise ECDImportError(f"{exc}. Arquivo recusado; nada foi importado.") from exc
+
     # Campo do parser → coluna, por registro.  O que difere entre J100, J150 e
     # J210 é só o que classifica a linha; o miolo é o mesmo nos três.
     _CLASSIFICACAO_DA_LINHA = {
@@ -339,7 +351,10 @@ class ECDImportService:
                 "ind_sit_esp": _optional_int(header_0000.get("IND_SIT_ESP")),
                 "ind_nire": _optional_int(header_0000.get("IND_NIRE")),
                 "ind_fin_esc": _optional_int(header_0000.get("IND_FIN_ESC")),
-                "ind_grande_por": _optional_int(header_0000.get("IND_GRANDE_POR")),
+                # O leiaute chama o campo de IND_GRANDE_PORTE; lido como
+                # "IND_GRANDE_POR", a chave não existia e a coluna ficava
+                # sempre vazia.
+                "ind_grande_por": _optional_int(header_0000.get("IND_GRANDE_PORTE")),
                 "tip_ecd": header_0000.get("TIP_ECD") or None,
                 "ident_mf": header_0000.get("IDENT_MF") or None,
                 "ind_esc_cons": header_0000.get("IND_ESC_CONS") or None,
@@ -383,7 +398,7 @@ class ECDImportService:
             return empresa, ecd, dt_ini, dt_fin
 
         try:
-            for record in self.parser.parse(path):
+            for record in self._registros(path):
                 record_type = record["_reg"]
                 counts[record_type] = counts.get(record_type, 0) + 1
 

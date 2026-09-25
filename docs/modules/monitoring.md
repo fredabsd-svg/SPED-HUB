@@ -65,6 +65,12 @@ Consumido por `dashboard.app` — o middleware chama
 - **Snapshot não derruba com banco quebrado**: captura exceção e devolve
   `{"status": "error"}`; a engine é descartada com `dispose()` a cada
   chamada. O tamanho do banco soma os arquivos `-wal`/`-shm` do SQLite.
+- **O tamanho do banco sai da URL da engine, não do `db_path`.** A rota passa
+  a URL (`sqlite:////app/data/sped_hub.db`), e `_database_size` a tratava como
+  caminho de arquivo — procurava um arquivo chamado `sqlite:////…` e somava
+  zero: o painel mostrava 0 byte para todo banco. Hoje usa `engine.url.database`,
+  o caminho que o próprio SQLite abre. PostgreSQL (e `:memory:`) responde 0 —
+  o tamanho de banco em servidor não é medido.
 - **Acesso é de admin.** Anônimo: redirect/401; usuário comum: 403.
 - Fila não inicializada aparece como `"not_initialized"` em vez de erro.
 

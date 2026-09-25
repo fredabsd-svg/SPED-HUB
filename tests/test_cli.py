@@ -211,6 +211,49 @@ class TestExportar:
         wb = load_workbook(saida)
         assert wb.active.max_row > 1, "planilha sem linhas de dados"
 
+    def test_xlsx_formato_de_moeda_no_padrao_do_ooxml(self, db_com_ecd, tmp_path):
+        """O código de formato do OOXML é gravado em notação en-US.
+
+        `#.##0,00` não é "milhar com ponto e duas casas com vírgula": no
+        arquivo, a vírgula depois dos dígitos divide o número por mil e o
+        ponto é o separador decimal. O Excel e o LibreOffice em pt-BR mostram
+        `#,##0.00` com ponto de milhar e vírgula decimal.
+        """
+        from openpyxl import load_workbook
+
+        saida = tmp_path / "balanco.xlsx"
+        executar(
+            "exportar", "balanco", "--formato", "xlsx", "--saida", str(saida), "--db", db_com_ecd
+        )
+        planilha = load_workbook(saida).active
+        cabecalho = next(linha for linha in planilha.iter_rows() if linha[0].value == "secao")
+        coluna = [c.value for c in cabecalho].index("saldo_atual")
+        formatos = {
+            linha[coluna].number_format
+            for linha in planilha.iter_rows(min_row=cabecalho[0].row + 1)
+            if isinstance(linha[coluna].value, (int, float))
+        }
+        assert formatos == {'#,##0.00;(#,##0.00);"-"'}, (
+            f"formato {formatos}: no OOXML '.' é o separador decimal e ',' o de milhar (ou "
+            "escala por mil); '#.##0,00' não é o formato de moeda que parece ser"
+        )
+
+    def test_xlsx_em_buffer_usa_o_mesmo_formato(self):
+        import io
+
+        from openpyxl import load_workbook
+
+        from src.reports.export_engine import ExportEngine
+
+        buffer = io.BytesIO()
+        ExportEngine().export_xlsx_to_buffer(
+            buffer, None, [{"conta": "1", "saldo_atual": 1234.5}], ["conta", "saldo_atual"], "T"
+        )
+        buffer.seek(0)
+        planilha = load_workbook(buffer).active
+        celula = next(c for linha in planilha.iter_rows() for c in linha if c.value == 1234.5)
+        assert celula.number_format == '#,##0.00;(#,##0.00);"-"'
+
     def test_white_label_aplica_escritorio(self, db_com_ecd, tmp_path):
         saida = tmp_path / "marca.pdf"
         executar(

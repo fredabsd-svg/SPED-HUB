@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import re
 import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -68,18 +69,101 @@ def serializar(valor: Any) -> str | None:
     return str(valor)
 
 
+# O número como alguém o digita.  Com vírgula é o formato brasileiro, e o
+# ponto só pode separar milhar em grupos de três ("1.234,56"); sem vírgula,
+# o ponto é o decimal ("1234.56"), que é o que a CLI já aceitava no `ajuste`.
+# Qualquer outra coisa é recusada — "1.23,4", "1,2,3", "nan", "inf", "1e5".
+_DECIMAL_COM_VIRGULA = re.compile(r"[+-]?(?:\d{1,3}(?:\.\d{3})+|\d+),\d+")
+_DECIMAL_COM_PONTO = re.compile(r"[+-]?\d+(?:\.\d+)?")
+_INTEIRO = re.compile(r"[+-]?\d+")
+
+
+def numero_digitado(bruto: str, *, campo: str = "valor") -> float:
+    """`"1.234,56"`, `"190,00"` ou `"1234.56"` → float; o resto levanta.
+
+    A mensagem diz o campo e o valor: quem digitou precisa saber o que
+    corrigir, e "valor inválido" sozinho não diz.
+    """
+    texto = str(bruto).strip()
+    if _DECIMAL_COM_VIRGULA.fullmatch(texto):
+        return float(texto.replace(".", "").replace(",", "."))
+    if _DECIMAL_COM_PONTO.fullmatch(texto):
+        return float(texto)
+    raise ValueError(
+        f"{campo}: {bruto!r} não é um número — use 1234,56 ou 1.234,56 (vírgula "
+        "decimal) ou 1234.56 (ponto decimal, sem separador de milhar)"
+    )
+
+
+def _numerica(coluna) -> bool:
+    return isinstance(coluna.type, Float | Integer)
+
+
+def converter(texto: str, coluna) -> Any:
+    """Texto vindo de fora → o tipo da coluna, **ou `ValueError`**.
+
+    É a conversão de quem grava: terminal, formulário, planilha e ação de
+    regra. Aceita o formato brasileiro e recusa o que não é número — na hora,
+    com o campo e o valor na mensagem. Guardar o texto e deixar o erro para
+    depois foi o defeito: "190,00" virava ajuste de texto, o recálculo o lia
+    como zero e a geração quebrava no fechamento, longe de quem digitou.
+    """
+    tipo = coluna.type
+    if isinstance(tipo, Float):
+        return numero_digitado(texto, campo=coluna.name)
+    if isinstance(tipo, Integer):
+        if not _INTEIRO.fullmatch(str(texto).strip()):
+            raise ValueError(f"{coluna.name}: {texto!r} não é um número inteiro")
+        return int(str(texto).strip())
+    if isinstance(tipo, DateTime):
+        return datetime.datetime.fromisoformat(str(texto).strip())
+    if isinstance(tipo, Date):
+        return datetime.date.fromisoformat(str(texto).strip()[:10])
+    return texto
+
+
+def tipar(valor: Any, coluna) -> Any:
+    """Qualquer valor → o tipo da coluna, com a mesma recusa de `converter`.
+
+    Número que já chega como número passa direto (a planilha e a simulação
+    entregam `float`); texto passa por `converter`.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, str):
+        return converter(valor, coluna)
+    if _numerica(coluna) and isinstance(valor, int | float) and not isinstance(valor, bool):
+        if isinstance(coluna.type, Integer):
+            if float(valor) != int(valor):
+                raise ValueError(f"{coluna.name}: {valor!r} não é um número inteiro")
+            return int(valor)
+        return float(valor)
+    if isinstance(valor, datetime.date):
+        return valor
+    return converter(serializar(valor), coluna)
+
+
 def desserializar(texto: str | None, coluna) -> Any:
-    """Texto → o tipo que a coluna espera.
+    """Texto **já gravado** → o tipo que a coluna espera.
 
     Sem isto, um CFOP ajustado voltaria como `str` e um valor como `str`
     também — e a soma na apuração concatenaria em vez de somar.
+
+    É a leitura, não a gravação: o que está no banco foi escrito por
+    `serializar` (`"1234.5"`, `"1e-05"`), e por isso `float()` vem antes.
+    O formato brasileiro vem em seguida para o ajuste que o defeito antigo
+    gravou como `"190,00"` — ele volta a ser número em vez de quebrar a
+    geração do mês.
     """
     if texto is None:
         return None
     tipo = coluna.type
     try:
         if isinstance(tipo, Float):
-            return float(texto)
+            try:
+                return float(texto)
+            except ValueError:
+                return numero_digitado(texto, campo=coluna.name)
         if isinstance(tipo, Integer):
             return int(texto)
         if isinstance(tipo, DateTime):
@@ -87,8 +171,9 @@ def desserializar(texto: str | None, coluna) -> Any:
         if isinstance(tipo, Date):
             return datetime.date.fromisoformat(texto[:10])
     except (TypeError, ValueError):
-        # Ajuste com valor que não converte é dado corrompido, não motivo
-        # para derrubar a geração inteira: registra e mantém o texto.
+        # Ajuste com valor que não converte é dado corrompido — só um gravado
+        # antes de `aplicar_ajuste` recusar na entrada chega aqui. Não é
+        # motivo para derrubar a leitura: registra e mantém o texto.
         logger.warning(
             "Ajuste com valor %r incompatível com a coluna %s (%s); mantido como texto",
             texto,
@@ -244,7 +329,10 @@ def aplicar_ajuste(
         ajustes_atuais = session.execute(consulta).scalars().all()
 
     anterior = valor_efetivo(alvo, campo, ajustes_atuais)
-    novo = desserializar(serializar(valor_novo), coluna)
+    # A última trava antes do banco: todo ajuste passa por aqui, venha da
+    # tela, da planilha, da massa ou de uma regra. Valor que não é do tipo da
+    # coluna levanta agora, e não no fechamento do mês.
+    novo = tipar(valor_novo, coluna)
     if anterior == novo:
         return None
 
@@ -253,7 +341,9 @@ def aplicar_ajuste(
         item_id=item.id if item is not None else None,
         campo=campo,
         valor_anterior=serializar(anterior),
-        valor_novo=serializar(valor_novo),
+        # O valor já convertido, não o digitado: "190,00" é gravado "190.0",
+        # que qualquer leitura entende.
+        valor_novo=serializar(novo),
         origem=origem,
         regra=regra,
         motivo=motivo,

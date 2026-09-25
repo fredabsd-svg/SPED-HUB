@@ -394,6 +394,11 @@ class IPRateLimiter:
     def verificar(
         self, ip: str, escopo: str, limite: int, janela: int
     ) -> tuple[bool, IPRateLimitInfo]:
+        # Piso de 1, como o limitador por API Key já faz em `limite_padrao()`.
+        # Com `SPED_HUB_RATE_LIMIT_IP_WINDOW=0` (ou `_LOGIN_WINDOW=0`) toda
+        # requisição caía em "janela expirada" e abria contagem nova: o limite
+        # de login deixava de existir sem aviso nenhum.
+        limite, janela = max(1, int(limite)), max(1, int(janela))
         agora = time.monotonic()
         chave = (escopo, ip)
         with self._lock:
@@ -443,6 +448,16 @@ def ip_do_request(request) -> str:
     o atacante troca o cabeçalho a cada tentativa.  Por isso o cabeçalho só é
     lido quando `SPED_HUB_TRUST_PROXY` está ligado — o que só faz sentido com
     um nginx na frente sobrescrevendo o valor, como no docker-compose.
+
+    Mesmo com o proxy, vale a entrada **mais à direita**, não a primeira.  Um
+    proxy que acrescenta (`$proxy_add_x_forwarded_for`) entrega
+    `<o que o cliente mandou>, <IP que o proxy viu>`: só a última entrada foi
+    escrita por quem a aplicação confia.  Ler a primeira era o que se fazia, e
+    atrás do nginx do compose — que acrescentava — bastava o atacante mandar
+    `X-Forwarded-For: <qualquer coisa>` diferente a cada tentativa para
+    ganhar uma cota de login nova em cada uma.  O nginx do projeto hoje
+    sobrescreve o cabeçalho com `$remote_addr`; ler a direita mantém o limite
+    de pé mesmo diante de um proxy que acrescente.
     """
     from src.settings import get_settings
 
@@ -452,6 +467,8 @@ def ip_do_request(request) -> str:
 
     encaminhado = request.headers.get("X-Forwarded-For", "")
     if encaminhado:
-        # O primeiro da lista é o cliente original.
-        return encaminhado.split(",")[0].strip() or direto
+        # A última entrada é a que o nosso proxy — o único confiável — pôs.
+        ultima = encaminhado.split(",")[-1].strip()
+        if ultima:
+            return ultima
     return request.headers.get("X-Real-IP", "").strip() or direto

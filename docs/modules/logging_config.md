@@ -11,8 +11,8 @@ Oferece dois formatos: texto legível (padrão) e uma linha JSON por evento
 | Símbolo | Para quê |
 |---|---|
 | `configurar_logging(forcar_json=None)` | Instala handler, formato e filtro. Chamado no start de cada entrypoint. |
-| `sanitizar(texto)` | Mascara e-mail, CNPJ, CPF, token e API key numa string. |
-| `FiltroPII` | `logging.Filter` que aplica `sanitizar` na mensagem e nos args. |
+| `sanitizar(texto)` | Mascara e-mail, CNPJ, CPF, token, API key e senha dentro de URL numa string. |
+| `FiltroPII` | `logging.Filter` que aplica `sanitizar` na mensagem, nos args, no traceback (`exc_text`) e no `stack_info`. |
 | `FormatadorJSON` | Uma linha JSON por registro. |
 
 ## Depende de / quem depende
@@ -36,15 +36,28 @@ configuram.
 - **O filtro age nos `args`, não só na mensagem formatada.** `logger.info("%s
   entrou", email)` guarda o e-mail em `record.args`; filtrar só o texto final
   deixaria passar quem formata tarde.
+- **O traceback é sanitizado no filtro, não no formatador.** O formato texto
+  (padrão) monta o traceback em `Formatter.format`, depois do filtro, a partir
+  de `exc_info` — e ele saía inteiro, com o CNPJ e o e-mail que a mensagem da
+  exceção carregava. Só o JSON sanitizava. `FiltroPII` formata o traceback de
+  antemão em `record.exc_text`, que o `Formatter` reaproveita, e o sanitiza.
+  Como o filtro altera o registro, os handlers seguintes da raiz (o `caplog`
+  do pytest, por exemplo) também veem a versão mascarada.
+- **Senha em URL vira `***`.** `esquema://usuario:senha@host` →
+  `esquema://usuario:***@host`. É o formato de `DATABASE_URL` e `REDIS_URL`, e
+  o `RedisCacheService` chegou a logar a URL do Redis inteira a cada conexão.
+  A máscara vai até o último `@` antes do caminho (senha com `@` não deixa
+  cauda) e roda antes da de e-mail, que casaria `senha@host.com.br` e
+  mascararia só o começo. Usuário, host e porta ficam.
 - **Token é reconhecido por forma** (32+ hex) e API key por prefixo (`spd_`).
   Segredo em formato novo precisa de padrão novo — não há detecção genérica.
 - O saneamento é regex sobre o domínio deste projeto (documento brasileiro,
-  e-mail, os dois formatos de segredo). Não é DLP.
+  e-mail, token, API key e senha em URL). Não é DLP.
 
 ## Como testar isoladamente
 
 ```bash
-pytest tests/test_hardening.py -q -k pii
+pytest tests/test_hardening.py -q -k "pii or Saneamento"
 ```
 
 `sanitizar` é função pura: teste dela sem tocar em `logging`. Para o filtro,

@@ -1,53 +1,101 @@
-<header class="navbar">
-    <a href="/" class="navbar-brand" aria-label="SPED-HUB — início">SPED<span>-HUB</span></a>
+{#- Shell da área logada: menu lateral fixo e barra superior.
 
-    {% if usuario %}
-    <nav class="navbar-nav" aria-label="Navegação principal">
-        <a href="/" class="nav-link{% if current_page == 'dashboard' %} is-active{% endif %}"
-           {% if current_page == 'dashboard' %}aria-current="page"{% endif %}>Painel</a>
+    O menu só mostra o que o usuário pode abrir (rotas de administração só
+    para admin) e a tela anônima não recebe nada disto — login e cadastro
+    não anunciam o mapa da aplicação.
 
-        <details class="nav-group{% if current_page in ['upload', 'comparar'] %} is-active{% endif %}">
-            <summary>Análises</summary>
-            <div class="nav-group-menu">
-                <a href="/upload"{% if current_page == 'upload' %} aria-current="page"{% endif %}>Importar ECD</a>
-                <a href="/comparar"{% if current_page == 'comparar' %} aria-current="page"{% endif %}>Comparar exercícios</a>
-            </div>
-        </details>
+    `current_page` decide o item ativo e a trilha da barra superior. -#}
+{%- import "partials/icones.html" as ic -%}
+{%- if usuario -%}
+{%- set PAGINAS = {
+    "dashboard": ("Contábil", "Painel"),
+    "upload": ("Contábil", "Importar ECD"),
+    "comparar": ("Contábil", "Comparar exercícios"),
+    "importar": ("Fiscal", "Importar documentos"),
+    "documentos": ("Fiscal", "Documentos fiscais"),
+    "classificar": ("Fiscal", "Classificar"),
+    "corrigir": ("Fiscal", "Corrigir"),
+    "gerar": ("Fiscal", "Gerar escrituração"),
+    "cadastro_fiscal": ("Fiscal", "Cadastro fiscal"),
+    "layout": ("Sistema", "Layouts de relatório"),
+    "api_keys": ("Sistema", "Chaves de API"),
+    "webhooks": ("Sistema", "Webhooks"),
+    "auditoria": ("Sistema", "Auditoria"),
+    "monitoring": ("Sistema", "Monitoramento"),
+} -%}
+{%- set trilha = PAGINAS.get(current_page, ("SPED-HUB", "Início")) -%}
+{%- macro item(pagina, href, rotulo, icone) -%}
+<a class="nav-item{% if current_page == pagina %} is-active{% endif %}" href="{{ href }}"
+   {%- if current_page == pagina %} aria-current="page"{% endif %}>{{ ic.icone(icone) }}<span>{{ rotulo }}</span></a>
+{%- endmacro -%}
+{%- set partes_nome = (usuario.nome or "?").split() -%}
+{%- set iniciais = (partes_nome[0][:1] ~ (partes_nome[-1][:1] if partes_nome|length > 1 else "")) | upper -%}
 
-        <details class="nav-group{% if current_page in ['importar', 'documentos', 'classificar', 'corrigir', 'gerar', 'cadastro_fiscal'] %} is-active{% endif %}">
-            <summary>Fiscal</summary>
-            <div class="nav-group-menu">
-                <a href="/fiscal/importar"{% if current_page == 'importar' %} aria-current="page"{% endif %}>Importar documentos</a>
-                <a href="/fiscal/documentos"{% if current_page == 'documentos' %} aria-current="page"{% endif %}>Documentos fiscais</a>
-                <a href="/fiscal/classificar"{% if current_page == 'classificar' %} aria-current="page"{% endif %}>Classificar documentos</a>
-                <a href="/fiscal/corrigir"{% if current_page == 'corrigir' %} aria-current="page"{% endif %}>Corrigir documentos</a>
-                <a href="/fiscal/gerar"{% if current_page == 'gerar' %} aria-current="page"{% endif %}>Gerar escrituração</a>
-                <a href="/fiscal/cadastro"{% if current_page == 'cadastro_fiscal' %} aria-current="page"{% endif %}>Cadastro fiscal</a>
-            </div>
-        </details>
+<aside class="app-sidebar" id="app-sidebar" aria-label="Menu principal">
+    <div class="sidebar-top">
+        <a href="/" class="sidebar-brand" aria-label="SPED-HUB — início">
+            <img src="/static/marca.svg" alt="" width="32" height="32">
+            <span class="brand-wordmark">SPED<span>-HUB</span></span>
+        </a>
+        <button type="button" class="icon-button sidebar-close" data-menu-fechar aria-label="Fechar menu">
+            {{ ic.icone("fechar") }}
+        </button>
+    </div>
 
-        <details class="nav-group{% if current_page == 'layout' or (usuario.admin and current_page in ['api_keys', 'webhooks', 'auditoria', 'monitoring']) %} is-active{% endif %}">
-            <summary>Sistema</summary>
-            <div class="nav-group-menu">
-                <a href="/layout"{% if current_page == 'layout' %} aria-current="page"{% endif %}>Layouts</a>
-                {% if usuario.admin %}
-                <a href="/api-keys"{% if current_page == 'api_keys' %} aria-current="page"{% endif %}>Chaves de API</a>
-                <a href="/webhooks"{% if current_page == 'webhooks' %} aria-current="page"{% endif %}>Webhooks</a>
-                <a href="/auditoria"{% if current_page == 'auditoria' %} aria-current="page"{% endif %}>Auditoria</a>
-                <a href="/monitoring"{% if current_page == 'monitoring' %} aria-current="page"{% endif %}>Monitoramento</a>
-                {% endif %}
-            </div>
-        </details>
+    <button type="button" class="sidebar-search" data-quick-open
+            aria-controls="quick-access" aria-haspopup="dialog"
+            aria-keyshortcuts="Control+K Meta+K">
+        {{ ic.icone("busca") }}<span>Buscar telas e ações</span><kbd data-shortcut-hint>Ctrl K</kbd>
+    </button>
+
+    <nav class="sidebar-nav" aria-label="Navegação principal">
+        {{ item("dashboard", "/", "Painel", "painel") }}
+
+        <p class="nav-section">Contábil</p>
+        {{ item("upload", "/upload", "Importar ECD", "importar") }}
+        {{ item("comparar", "/comparar", "Comparar exercícios", "comparar") }}
+
+        <p class="nav-section">Fiscal</p>
+        {{ item("importar", "/fiscal/importar", "Importar documentos", "xml") }}
+        {{ item("documentos", "/fiscal/documentos", "Documentos fiscais", "documento") }}
+        {{ item("classificar", "/fiscal/classificar", "Classificar", "classificar") }}
+        {{ item("corrigir", "/fiscal/corrigir", "Corrigir", "corrigir") }}
+        {{ item("gerar", "/fiscal/gerar", "Gerar escrituração", "gerar") }}
+        {{ item("cadastro_fiscal", "/fiscal/cadastro", "Cadastro fiscal", "empresa") }}
+
+        <p class="nav-section">Sistema</p>
+        {{ item("layout", "/layout", "Layouts", "layouts") }}
+        {% if usuario.admin %}
+        {{ item("api_keys", "/api-keys", "Chaves de API", "chave") }}
+        {{ item("webhooks", "/webhooks", "Webhooks", "webhook") }}
+        {{ item("auditoria", "/auditoria", "Auditoria", "auditoria") }}
+        {{ item("monitoring", "/monitoring", "Monitoramento", "monitoramento") }}
+        {% endif %}
     </nav>
 
-    <div class="navbar-actions">
-        <button type="button" class="quick-trigger" data-quick-open
-                aria-controls="quick-access" aria-haspopup="dialog"
-                aria-keyshortcuts="Control+K Meta+K">
-            <span>Acesso rápido</span><kbd data-shortcut-hint>Ctrl K</kbd>
-        </button>
-        <span class="navbar-user" title="{{ usuario.nome }}">{{ usuario.nome }}</span>
-        <a class="nav-link nav-logout" href="/logout">Sair</a>
+    <div class="sidebar-user">
+        <span class="avatar" aria-hidden="true">{{ iniciais }}</span>
+        <div class="sidebar-user-info">
+            <strong title="{{ usuario.nome }}">{{ usuario.nome }}</strong>
+            <small>{{ "Administrador" if usuario.admin else "Equipe do escritório" }}</small>
+        </div>
+        <a class="icon-button" href="/logout" title="Sair">{{ ic.icone("sair") }}<span class="sr-only">Sair</span></a>
     </div>
-    {% endif %}
+</aside>
+<div class="sidebar-backdrop" data-menu-fechar hidden></div>
+
+<header class="app-topbar">
+    <button type="button" class="icon-button topbar-menu" data-menu-abrir
+            aria-controls="app-sidebar" aria-expanded="false" aria-label="Abrir menu">
+        {{ ic.icone("menu") }}
+    </button>
+    <nav class="topbar-trail" aria-label="Você está em">
+        <span>{{ trilha[0] }}</span>{{ ic.icone("seta-direita") }}<strong aria-current="page">{{ trilha[1] }}</strong>
+    </nav>
+    <div class="topbar-actions">
+        {% if current_page != "upload" %}
+        <a class="btn btn-primary btn-sm" href="/upload">{{ ic.icone("mais") }}<span>Importar ECD</span></a>
+        {% endif %}
+    </div>
 </header>
+{%- endif -%}

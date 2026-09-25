@@ -421,13 +421,14 @@ class TestCargaSyntheticECD:
         for i in range(1, 11):
             linhas.append(f"|I075|{dt_ini}|HIST{i:03d}|HISTORICO PADRAO {i:03d}|")
 
-        # I155 — saldos periódicos
+        # I150 + I155 — saldos periódicos. As datas são do I150; no I155
+        # elas empurravam os valores uma posição, e o VL_CRED recebia "D" —
+        # valor monetário ilegível, que a importação passou a recusar.
+        linhas.append(f"|I150|{dt_ini}|{dt_fin}|")
         for i in range(1, n_contas + 1):
             cod = f"1.{i:04d}"
             vl = round(10000.0 + i * 100.0, 2)
-            linhas.append(
-                f"|I155|{cod}||{dt_ini}|{dt_fin}|{vl}|D|{vl*0.3:.2f}|{vl*0.1:.2f}|{vl*1.2:.2f}|D|"
-            )
+            linhas.append(f"|I155|{cod}||{vl:.2f}|D|{vl*0.3:.2f}|{vl*0.1:.2f}|{vl*1.2:.2f}|D|")
 
         # I200 + I250 — lançamentos
         for ln in range(1, n_lancamentos + 1):
@@ -671,8 +672,8 @@ class TestCargaSyntheticECD:
             n = sum(contagem.values())
 
             # Esperado: 0000 + I010 + 2*I030 + 500*I050 + 50*I051 + 10*I075
-            # + 500*I155 + 2000*I200 + 4000*I250 + 500*I355 + I990 + 9999
-            esperado = 1 + 1 + 2 + 500 + 50 + 10 + 500 + 2000 + 4000 + 500 + 1 + 1
+            # + I150 + 500*I155 + 2000*I200 + 4000*I250 + 500*I355 + I990 + 9999
+            esperado = 1 + 1 + 2 + 500 + 50 + 10 + 1 + 500 + 2000 + 4000 + 500 + 1 + 1
             assert n == esperado, f"Contagem: {n} != esperado: {esperado}"
 
         finally:

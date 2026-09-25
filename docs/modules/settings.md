@@ -20,7 +20,8 @@ aliases legados e normaliza caminho de SQLite para URL SQLAlchemy.
 | `PROJECT_ROOT` | Raiz do repositório. |
 
 Propriedades derivadas em `Settings`: `max_upload_bytes` (resolve MB versus
-override legado em bytes) e `redis_url_or_local`.
+override legado em bytes, e cai no default com valor não positivo) e
+`redis_url_or_local`.
 
 ## Depende de / quem depende
 
@@ -39,6 +40,16 @@ Consumido por: `db.models`, `db.migrations`, `logging_config`, `uploads`,
 - **Booleano precisa entrar em `_BOOL_FIELDS`.** A string `"false"` é
   verdadeira em Python; `SPED_HUB_DB_ECHO=false` chegou a **ligar** o echo do
   SQLAlchemy. Campo booleano novo sem entrada na lista repete o defeito.
+- **A coerção booleana tem três saídas, não duas.** `_VERDADEIROS`
+  (`1 true yes on y t`) ligam, `_FALSOS` (`0 false no off n f`) desligam, e
+  qualquer outro valor mantém o **default do campo**. Antes, tudo que não era
+  grafia de verdadeiro virava `False`: `SMTP_USE_TLS=sim` desligava o TLS do
+  SMTP, o contrário do pedido, sem aviso. Não há grafia em português
+  reconhecida — `sim` fica com o default, não liga.
+- **`max_upload_bytes` nunca é zero.** `SPED_HUB_MAX_UPLOAD_MB` zero ou
+  negativo cai no default (200 MB), como o override legado em bytes já fazia.
+  Com `0`, o limite era 0 byte e todo upload levava 413. O campo
+  `max_upload_mb` guarda o valor lido; quem lê o limite usa a propriedade.
 - **`DATABASE_URL` vence `SPED_HUB_DB`.** O segundo é legado (Fase 16 e
   anteriores) e só preenche o primeiro quando ele não existe.
 - **Caminho absoluto de SQLite precisa de quatro barras.**

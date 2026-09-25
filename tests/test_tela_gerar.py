@@ -20,6 +20,7 @@ inclusive para baixar o arquivo, que é a escrituração inteira.
 from __future__ import annotations
 
 import datetime
+import hashlib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -278,6 +279,23 @@ class TestGerarSempreArquiva:
         resposta = cenario["cliente"].get(f"/fiscal/escrituracoes/{escrituracao.id}/arquivo")
 
         assert b"\r\n" in resposta.content
+
+    def test_o_arquivo_baixado_e_iso_8859_1(self, cenario):
+        """O leiaute pede Latin-1; em UTF-8 o validador lê "COMÃ‰RCIO"."""
+        with get_session(criar_engine(url=cenario["referencia"])) as sessao:
+            sessao.get(Empresa, cenario["empresa_a"]).nome = "COMÉRCIO — FILIAL"
+            sessao.commit()
+        _gerar(cenario)
+        escrituracao = _escrituracoes(cenario["referencia"])[0]
+
+        resposta = cenario["cliente"].get(f"/fiscal/escrituracoes/{escrituracao.id}/arquivo")
+
+        assert "iso-8859-1" in resposta.headers["content-type"]
+        assert "|COMÉRCIO - FILIAL|".encode("latin-1") in resposta.content, (
+            "o arquivo baixado não está em ISO-8859-1, ou o travessão não foi "
+            "transliterado: o validador lê outro nome de empresa"
+        )
+        assert hashlib.sha256(resposta.content).hexdigest() == escrituracao.hash_conteudo
 
     def test_periodo_sem_cadastro_nao_arquiva_nada(self, cenario):
         with get_session(criar_engine(url=cenario["referencia"])) as sessao:
