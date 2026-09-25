@@ -17,6 +17,7 @@ com o `ExportEngine`.
 | `ExportEngine` | `render_html`, `export_pdf`, `export_xlsx`, `export_xlsx_to_buffer`. |
 | `WhiteLabel` | Marca do escritório: nome, cor primária, cor clara, logo. |
 | `base.py` | `ReportContext`, `valor_sinalizado`, `saldo_por_natureza`, `fmt_moeda/fmt_data/fmt_data_hora`. |
+| `saldos.py` | `Hierarquia` (árvore `COD_CTA → COD_CTA_SUP`, à prova de ciclo: ancestrais, descendentes, ordem do plano, contas maximais) e `Saldo`. |
 
 Templates em `templates/`: `base.html` (moldura comum), um HTML por
 relatório, `tokens.css` (paleta e tipografia) e `print.css` (regras de

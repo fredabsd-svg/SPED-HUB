@@ -265,3 +265,143 @@ class TestFilterEngine:
         c = FilterCriteria()
         saldos = engine.aplicar_saldos_resultado(c)
         assert len(saldos) == 5
+
+
+# ── Critério de conta que não casa com nada ────────────────────────────────
+
+
+CRITERIOS_SEM_CONTA = [
+    pytest.param(FilterCriteria(cod_cta_exato=["9.9.9"]), id="conta-inexistente"),
+    pytest.param(FilterCriteria(nome_cta="inexistente"), id="nome-inexistente"),
+    pytest.param(FilterCriteria(cod_cta_prefixo=["8"]), id="prefixo-inexistente"),
+    pytest.param(FilterCriteria(cod_cta_prefixo=["1"], cod_nat=["02"]), id="prefixo-e-natureza"),
+    pytest.param(FilterCriteria(subarvore_de="9"), id="subarvore-inexistente"),
+]
+
+
+class TestCriterioDeContaSemCorrespondencia:
+    """Critério de conta que não casa com nenhuma conta devolve nada — não tudo.
+
+    O `if contas:` pulava a cláusula `IN` quando o conjunto ficava vazio:
+    quem filtrava pela conta "9.9.9" recebia a escrituração inteira, com a
+    aparência de um relatório daquela conta.
+    """
+
+    @pytest.mark.parametrize("criterios", CRITERIOS_SEM_CONTA)
+    def test_saldos(self, session, criterios):
+        saldos = FilterEngine(session, session._ecd_id).aplicar_saldos(criterios)
+        assert saldos == [], (
+            f"{len(saldos)} saldos para um critério que não casa com conta nenhuma: "
+            "o relatório mostraria a escrituração inteira como se fosse o filtro"
+        )
+
+    @pytest.mark.parametrize("criterios", CRITERIOS_SEM_CONTA)
+    def test_lancamentos(self, session, criterios):
+        partidas = FilterEngine(session, session._ecd_id).aplicar_lancamentos(criterios)
+        assert partidas == [], f"{len(partidas)} partidas para um critério sem conta"
+
+    @pytest.mark.parametrize("criterios", CRITERIOS_SEM_CONTA)
+    def test_saldos_resultado(self, session, criterios):
+        saldos = FilterEngine(session, session._ecd_id).aplicar_saldos_resultado(criterios)
+        assert saldos == [], f"{len(saldos)} saldos de resultado para um critério sem conta"
+
+    def test_sem_criterio_de_conta_continua_devolvendo_tudo(self, session):
+        engine = FilterEngine(session, session._ecd_id)
+        assert len(engine.aplicar_saldos(FilterCriteria())) == 15
+        assert len(engine.aplicar_saldos(FilterCriteria(dt_ini=datetime.date(2024, 1, 1)))) == 15
+
+
+class TestSubarvorePelaHierarquia:
+    """A subárvore segue o COD_CTA_SUP, não o prefixo do código.
+
+    O código da conta é livre no leiaute: "111001" pode ser filha de "11" e
+    "1101" pode pertencer a outra sintética. Pelo prefixo "11.", a subárvore
+    de "11" saía só com a própria "11".
+    """
+
+    PLANO = [
+        ("1", "", "S", 1, "ATIVO"),
+        ("11", "1", "S", 2, "ATIVO CIRCULANTE"),
+        ("111001", "11", "A", 3, "CAIXA"),
+        ("111002", "11", "A", 3, "BANCOS"),
+        ("12", "1", "S", 2, "ATIVO NAO CIRCULANTE"),
+        ("1101", "12", "A", 3, "IMOBILIZADO"),
+    ]
+
+    @pytest.fixture
+    def sessao(self, tmp_path):
+        from src.ecd_importer import ECDImportService
+
+        linhas = [
+            "|0000|LECD|01012024|31122024|EMPRESA SEM PONTO LTDA|00123456000199|SP||1234567"
+            "||0|0|1|0|0|E||1|0||",
+            "|I001|0|",
+            "|I010|G|009|",
+        ]
+        for cod, sup, ind, nivel, nome in self.PLANO:
+            linhas.append(f"|I050|01012024|01|{ind}|{nivel}|{cod}|{sup}|{nome}|")
+        linhas.append("|I150|01012024|31122024|")
+        for cod, valor in (("111001", "100,00"), ("111002", "200,00"), ("1101", "400,00")):
+            linhas.append(f"|I155|{cod}||{valor}|D|0,00|0,00|{valor}|D|")
+        linhas.append("|I990|0|")
+        arquivo = tmp_path / "sem_ponto.txt"
+        arquivo.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+
+        engine = criar_engine(":memory:")
+        init_db(engine)
+        s = get_session(engine)
+        s._ecd_id = ECDImportService(s).importar(arquivo).ecd_id
+        yield s
+        s.close()
+
+    def test_codigo_sem_ponto(self, sessao):
+        contas = FilterEngine(sessao, sessao._ecd_id)._filtrar_contas(
+            FilterCriteria(subarvore_de="11")
+        )
+        assert contas == {"11", "111001", "111002"}, (
+            f"subárvore de 11 = {sorted(contas)}: as analíticas 111001 e 111002 são "
+            "filhas de 11 pelo COD_CTA_SUP e ficaram de fora"
+        )
+
+    def test_prefixo_igual_de_outra_sintetica_fica_fora(self, sessao):
+        contas = FilterEngine(sessao, sessao._ecd_id)._filtrar_contas(
+            FilterCriteria(subarvore_de="12")
+        )
+        assert contas == {
+            "12",
+            "1101",
+        }, f"subárvore de 12 = {sorted(contas)}: 1101 é filha de 12, apesar do código"
+
+    def test_descendentes_em_mais_de_um_nivel(self, sessao):
+        contas = FilterEngine(sessao, sessao._ecd_id)._filtrar_contas(
+            FilterCriteria(subarvore_de="1")
+        )
+        assert contas == {c[0] for c in self.PLANO}
+
+    def test_saldos_da_subarvore(self, sessao):
+        saldos = FilterEngine(sessao, sessao._ecd_id).aplicar_saldos(
+            FilterCriteria(subarvore_de="11")
+        )
+        assert sorted(s.cod_cta for s in saldos) == ["111001", "111002"]
+
+
+class TestFiltroSemContaPelaLinhaDeComando:
+    """A mesma garantia, entrando pelo executável `sped-hub`."""
+
+    @pytest.fixture
+    def banco(self, tmp_path) -> str:
+        from src.cli import main
+
+        caminho = str(tmp_path / "filtro.db")
+        main(["importar-ecd", str(FIXTURE), "--db", caminho])
+        return caminho
+
+    def test_balancete_de_conta_inexistente_sai_vazio(self, banco, capsys):
+        from src.cli import main
+
+        capsys.readouterr()
+        main(["relatorio", "balancete", "--conta", "9.9.9", "--db", banco])
+        saida = capsys.readouterr().out
+        assert (
+            "BANCOS CONTA MOVIMENTO" not in saida and "CAPITAL SOCIAL" not in saida
+        ), "o balancete filtrado pela conta 9.9.9 listou as contas da escrituração inteira"

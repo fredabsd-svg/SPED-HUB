@@ -27,7 +27,8 @@ redondos acima de um limite, fins de semana).
 
 ## Depende de / quem depende
 
-Depende de `db.models`, SQLAlchemy e `unidecode`.
+Depende de `db.models`, SQLAlchemy, `unidecode` e da `Hierarquia` de
+`src/reports/saldos.py` (a árvore do plano de contas, usada na subárvore).
 
 Quem depende: os relatórios de `reports/`, `dashboard` (app e services) e
 `cli`.
@@ -39,9 +40,15 @@ Quem depende: os relatórios de `reports/`, `dashboard` (app e services) e
 - **Filtros de conta rodam em Python, não em SQL**: o plano de contas é
   carregado uma vez por instância (`_plano_cache`) e os critérios reduzem um
   `set` de `cod_cta`; só o conjunto final vira `IN` na query.
-- **Conjunto de contas vazio desliga o `IN`**: critérios de conta que não
-  casam com nenhuma conta devolvem *todos* os saldos, não zero — o
-  `if contas:` pula a cláusula.
+- **Critério de conta que não casa com nada devolve nada.** Até a correção,
+  o `if contas:` pulava a cláusula `IN` quando o conjunto ficava vazio, e o
+  filtro pela conta "9.9.9" devolvia a escrituração inteira com a aparência
+  de um relatório daquela conta. Hoje `tem_criterio_de_conta` separa "nenhum
+  critério de conta" (sem `IN`, devolve tudo) de "critério sem
+  correspondência" (lista vazia) — nos saldos, nas partidas e no I355.
+- **Subárvore segue o `COD_CTA_SUP`**, pela `Hierarquia` de
+  `src/reports/saldos.py`, não o prefixo do código: o código é livre no
+  leiaute, e "111001" pode ser filha de "11" sem começar por "11.".
 - **`hist_texto` usa `ilike`, não `like`**: o LIKE do SQLite é
   case-insensitive para ASCII e o do Postgres não — com `like`, buscar
   "recebi" funcionava em desenvolvimento e devolvia nada em produção.

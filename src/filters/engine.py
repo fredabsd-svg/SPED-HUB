@@ -17,6 +17,7 @@ from src.db.models import (
     SaldoPeriodico,
     SaldoResultado,
 )
+from src.reports.saldos import Hierarquia
 
 
 @dataclass
@@ -105,6 +106,27 @@ class FilterCriteria:
         return c
 
 
+def tem_criterio_de_conta(criterios: FilterCriteria) -> bool:
+    """Algum critério restringe **quais contas** entram?
+
+    É o que separa "nenhuma conta casou" (devolve nada) de "nenhum critério
+    de conta" (devolve tudo) — a distinção que o `if contas:` perdia.
+    """
+    return bool(
+        criterios.cod_cta_exato
+        or criterios.cod_cta_prefixo
+        or criterios.cod_cta_intervalo
+        or criterios.nome_cta
+        or criterios.cod_nat
+        or criterios.ind_cta
+        or criterios.nivel_exato is not None
+        or criterios.nivel_ate is not None
+        or criterios.subarvore_de
+        or criterios.cod_cta_ref
+        or criterios.cod_agl
+    )
+
+
 class FilterEngine:
     """Query builder único — aplica FilterCriteria sobre queries SQLAlchemy."""
 
@@ -112,6 +134,7 @@ class FilterEngine:
         self.session = session
         self.ecd_id = ecd_id
         self._plano_cache: dict[str, PlanoConta] | None = None
+        self._hierarquia_cache: Hierarquia | None = None
 
     def _get_plano(self) -> dict[str, PlanoConta]:
         if self._plano_cache is None:
@@ -120,6 +143,38 @@ class FilterEngine:
             ).scalars()
             self._plano_cache = {c.cod_cta: c for c in contas}
         return self._plano_cache
+
+    def plano(self) -> dict[str, PlanoConta]:
+        """O plano de contas da ECD, `{cod_cta: PlanoConta}` (carregado uma vez)."""
+        return self._get_plano()
+
+    def hierarquia(self) -> Hierarquia:
+        """A árvore do plano de contas desta ECD (carregada uma vez)."""
+        if self._hierarquia_cache is None:
+            self._hierarquia_cache = Hierarquia.do_plano(self._get_plano())
+        return self._hierarquia_cache
+
+    def contas_selecionadas(self, criterios: FilterCriteria) -> set[str]:
+        """As contas que os critérios de conta deixam passar.
+
+        Sem critério de conta, todas as do plano; com critério que não casa
+        com nada, o conjunto vazio — e quem consulta devolve nada.
+        """
+        return self._filtrar_contas(criterios)
+
+    def _restringir_contas(self, stmt, coluna, criterios: FilterCriteria):
+        """Aplica o conjunto de contas; `None` quando nada pode passar.
+
+        Sem critério de conta não há `IN` nenhum — a consulta devolve tudo e
+        não carrega um `IN` com o plano inteiro (dezenas de milhares de
+        parâmetros numa ECD grande).
+        """
+        if not tem_criterio_de_conta(criterios):
+            return stmt
+        contas = self._filtrar_contas(criterios)
+        if not contas:
+            return None
+        return stmt.where(coluna.in_(contas))
 
     def _filtrar_contas(self, criterios: FilterCriteria) -> set[str]:
         """Retorna conjunto de cod_cta que passam pelos filtros de conta."""
@@ -163,12 +218,16 @@ class FilterEngine:
         if criterios.nivel_ate is not None:
             contas = {c for c in contas if plano[c].nivel <= criterios.nivel_ate}
 
-        # Subárvore
+        # Subárvore — pela hierarquia (COD_CTA_SUP), não pelo prefixo do
+        # código: o código é livre no leiaute, e "111001" pode ser filha de
+        # "11" sem começar por "11.".
         if criterios.subarvore_de:
             raiz = criterios.subarvore_de
-            prefixo = raiz + "." if not raiz.endswith(".") else raiz
-            # Inclui a própria raiz + todas que começam com o prefixo
-            contas = {c for c in contas if c == raiz or c.startswith(prefixo)}
+            if raiz in plano:
+                arvore = {raiz} | self.hierarquia().descendentes(raiz)
+            else:
+                arvore = set()
+            contas &= arvore
 
         # Conta referencial (via I051)
         if criterios.cod_cta_ref:
@@ -197,13 +256,16 @@ class FilterEngine:
         return contas
 
     def aplicar_saldos(self, criterios: FilterCriteria) -> list[SaldoPeriodico]:
-        """Aplica filtros sobre saldos periódicos (I155)."""
-        contas = self._filtrar_contas(criterios)
+        """Aplica filtros sobre as linhas de saldos periódicos (I155), como estão.
 
+        Devolve as linhas cruas: uma por (conta, período, centro de custo), só
+        de analíticas numa ECD conforme o manual. Relatório que precisa do
+        saldo de uma conta usa `src.reports.saldos.consolidar`.
+        """
         stmt = select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == self.ecd_id)
-
-        if contas:
-            stmt = stmt.where(SaldoPeriodico.cod_cta.in_(contas))
+        stmt = self._restringir_contas(stmt, SaldoPeriodico.cod_cta, criterios)
+        if stmt is None:
+            return []
 
         # Centro de custo
         if criterios.cod_ccus:
@@ -238,16 +300,14 @@ class FilterEngine:
 
     def aplicar_lancamentos(self, criterios: FilterCriteria) -> list[Partida]:
         """Aplica filtros sobre partidas (I250), retornando com dados do lançamento."""
-        contas = self._filtrar_contas(criterios)
-
         stmt = (
             select(Partida, Lancamento)
             .join(Lancamento, Partida.lancamento_id == Lancamento.id)
             .where(Lancamento.ecd_id == self.ecd_id)
         )
-
-        if contas:
-            stmt = stmt.where(Partida.cod_cta.in_(contas))
+        stmt = self._restringir_contas(stmt, Partida.cod_cta, criterios)
+        if stmt is None:
+            return []
 
         # Centro de custo
         if criterios.cod_ccus:
@@ -305,12 +365,10 @@ class FilterEngine:
 
     def aplicar_saldos_resultado(self, criterios: FilterCriteria) -> list[SaldoResultado]:
         """Aplica filtros sobre saldos de resultado (I355)."""
-        contas = self._filtrar_contas(criterios)
-
         stmt = select(SaldoResultado).where(SaldoResultado.ecd_id == self.ecd_id)
-
-        if contas:
-            stmt = stmt.where(SaldoResultado.cod_cta.in_(contas))
+        stmt = self._restringir_contas(stmt, SaldoResultado.cod_cta, criterios)
+        if stmt is None:
+            return []
 
         if criterios.cod_ccus:
             stmt = stmt.where(SaldoResultado.cod_ccus.in_(criterios.cod_ccus))
