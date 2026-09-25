@@ -34,6 +34,20 @@ Consumido por `api` (rotas e middleware) e por `dashboard.app`.
   na frente, quem escreve esse cabeçalho é o cliente: confiar nele sem
   condição transforma o limite por IP em decoração, porque basta trocar o
   cabeçalho a cada tentativa. Ligue apenas com o nginx do compose à frente.
+- **Com o proxy, vale a entrada mais à direita — e o nginx sobrescreve.** O
+  `proxy.conf` usava `$proxy_add_x_forwarded_for`, que acrescenta o IP visto
+  pelo nginx ao que o cliente mandou (`<forjado>, <real>`), e
+  `ip_do_request` lia a primeira entrada. Atrás do nginx do próprio projeto,
+  bastava mandar um `X-Forwarded-For` diferente a cada tentativa para ganhar
+  cota de login nova: 40 tentativas de senha, nenhum 429. Os dois lados
+  mudaram: o nginx sobrescreve o cabeçalho com `$remote_addr`, e a aplicação
+  lê a última entrada — a única escrita pelo proxy em que ela confia —, o que
+  mantém o limite de pé mesmo atrás de um proxy que acrescente. Cadeia de
+  vários proxies confiáveis não é suportada: vale só o último salto.
+- **Cota e janela do limite por IP têm piso de 1.** `IPRateLimiter.verificar`
+  aplica `max(1, …)`, como `limite_padrao()` já fazia no limite por API Key.
+  Com `SPED_HUB_RATE_LIMIT_IP_WINDOW=0` (ou `_LOGIN_WINDOW=0`) toda requisição
+  abria janela nova e o limite deixava de existir sem aviso.
 - **Os dois limitadores se sobrepõem, e a ordem importa.** O middleware de IP
   roda por fora do de API Key; ele usa `headers.setdefault` para não
   sobrescrever o `X-RateLimit-Limit` que o interno já escreveu. Sem isso a
@@ -63,6 +77,7 @@ Consumido por `api` (rotas e middleware) e por `dashboard.app`.
 ```bash
 pytest tests/test_fase13.py -q       # limite por API Key, configuração por chave
 pytest tests/test_hardening.py -q    # limite por IP, X-Forwarded-For, login
+pytest tests/test_deploy_config.py -k Origem -q   # o nginx sobrescreve o cabeçalho
 ```
 
 Para forçar estouro sem esperar a janela, construa `RateLimiter` com janela

@@ -139,14 +139,108 @@ class TestOrigemDaRequisicao:
         )
 
     def test_com_trust_proxy_o_cabecalho_vale(self, monkeypatch):
+        """O nginx do projeto sobrescreve o cabeçalho com o IP que ele viu."""
         monkeypatch.setenv("SPED_HUB_TRUST_PROXY", "true")
         reset_settings_cache()
-        req = self._Req("10.0.0.1", {"X-Forwarded-For": "1.2.3.4, 10.0.0.9"})
-        assert ip_do_request(req) == "1.2.3.4"
+        req = self._Req("10.0.0.1", {"X-Forwarded-For": "203.0.113.7"})
+        assert ip_do_request(req) == "203.0.113.7"
+        reset_settings_cache()
+
+    def test_com_trust_proxy_vale_a_entrada_que_o_proxy_escreveu(self, monkeypatch):
+        """Numa cadeia, só a última entrada foi escrita pelo proxy confiável.
+
+        Proxy que acrescenta entrega ``<o que o cliente mandou>, <IP real>``.
+        Ler a primeira entrada deixava o cliente escolher o próprio IP.
+        """
+        monkeypatch.setenv("SPED_HUB_TRUST_PROXY", "true")
+        reset_settings_cache()
+        req = self._Req("10.0.0.1", {"X-Forwarded-For": "1.2.3.4, 203.0.113.7"})
+        assert ip_do_request(req) == "203.0.113.7", (
+            "a primeira entrada é escrita pelo cliente: usá-la deixa o atacante "
+            "trocar de IP a cada tentativa de senha"
+        )
         reset_settings_cache()
 
     def test_trust_proxy_e_desligado_por_padrao(self):
         assert with_overrides().trust_proxy is False
+
+
+class TestLimitePorIPPelaAplicacao:
+    """O limite de login pela aplicação montada, do jeito que o nginx a alcança."""
+
+    REAL = "203.0.113.7"
+
+    @pytest.fixture
+    def cliente(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from src.audit import init_audit_service
+        from src.auth import init_auth
+        from src.ratelimit import get_ip_limiter, init_limiter
+
+        referencia = f"sqlite:///{tmp_path / 'limite.db'}"
+        monkeypatch.setenv("DATABASE_URL", referencia)
+        monkeypatch.delenv("SPED_HUB_DB", raising=False)
+        monkeypatch.setenv("SPED_HUB_TRUST_PROXY", "true")
+        reset_settings_cache()
+        init_auth(referencia)
+        init_audit_service(referencia)
+        init_limiter(referencia)
+        get_ip_limiter().reset()
+        from src.dashboard.app import app
+
+        yield TestClient(app)
+        get_ip_limiter().reset()
+        reset_settings_cache()
+
+    def _login(self, cliente, cabecalhos=None):
+        return cliente.post(
+            "/api/login", data={"email": "ninguem@x.local", "senha": "errada"}, headers=cabecalhos
+        ).status_code
+
+    def test_x_forwarded_for_forjado_nao_escapa_do_limite_de_login(self, cliente):
+        """A auditoria mostrou 40 tentativas sem nenhum 429 trocando o cabeçalho.
+
+        O cabeçalho é o que um proxy que ACRESCENTA entregaria: o forjado pelo
+        cliente à esquerda, o IP que o proxy viu à direita.
+        """
+        codigos = [
+            self._login(cliente, {"X-Forwarded-For": f"10.9.{i}.1, {self.REAL}"}) for i in range(15)
+        ]
+
+        assert 429 in codigos, (
+            f"15 tentativas de senha, cada uma com X-Forwarded-For forjado diferente, "
+            f"e nenhuma barrada ({sorted(set(codigos))}): varrer senhas não custa nada"
+        )
+
+    def test_clientes_distintos_segundo_o_proxy_tem_cotas_distintas(self, cliente):
+        """A correção não pode juntar todo mundo numa cota só."""
+        for _ in range(12):
+            self._login(cliente, {"X-Forwarded-For": self.REAL})
+
+        assert self._login(cliente, {"X-Forwarded-For": "198.51.100.20"}) == 401
+
+    @pytest.mark.parametrize(
+        "variavel_janela,variavel_limite,rota",
+        [
+            ("SPED_HUB_RATE_LIMIT_LOGIN_WINDOW", "SPED_HUB_RATE_LIMIT_LOGIN", "/api/login"),
+            ("SPED_HUB_RATE_LIMIT_IP_WINDOW", "SPED_HUB_RATE_LIMIT_IP", "/api/v1/health"),
+        ],
+    )
+    def test_janela_zero_nao_desliga_o_limite(
+        self, cliente, monkeypatch, variavel_janela, variavel_limite, rota
+    ):
+        """Janela 0 fazia toda requisição abrir contagem nova — limite nenhum."""
+        monkeypatch.setenv(variavel_janela, "0")
+        monkeypatch.setenv(variavel_limite, "3")
+        reset_settings_cache()
+
+        if rota == "/api/login":
+            codigos = [self._login(cliente) for _ in range(6)]
+        else:
+            codigos = [cliente.get(rota).status_code for _ in range(6)]
+
+        assert 429 in codigos, f"{variavel_janela}=0 desligou o limite por IP de {rota}: {codigos}"
 
 
 class TestSaneamentoDePII:

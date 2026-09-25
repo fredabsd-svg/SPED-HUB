@@ -38,8 +38,11 @@ Ajuste no mínimo:
   `nginx.conf`, senão o nginx corta com 413 antes de a aplicação opinar.
 
 `SPED_HUB_TRUST_PROXY` já vem `true` no compose, porque há nginx na frente
-sobrescrevendo `X-Forwarded-For`.  **Se você tirar o nginx, desligue** — sem
-proxy o cabeçalho é escrito pelo cliente e o limite por IP deixa de valer.
+sobrescrevendo `X-Forwarded-For` com o IP que ele viu (`deploy/nginx/proxy.conf`),
+e a aplicação lê a entrada mais à direita.  **Se você tirar o nginx, ou
+publicar a porta do `web`, desligue** — sem proxy o cabeçalho é escrito pelo
+cliente e o limite por IP deixa de valer.  Pelo mesmo motivo, não troque o
+`$remote_addr` do `proxy.conf` por `$proxy_add_x_forwarded_for`.
 
 ## 2. Banco de dados
 
@@ -189,13 +192,16 @@ Verifique também o rate limit de login:
 ```bash
 for i in $(seq 1 12); do
   curl -so /dev/null -w '%{http_code} ' -X POST \
+    -H "X-Forwarded-For: 10.9.$i.1" \
     -d 'email=x@y.z&senha=errada' https://seu-dominio.com.br/api/login
 done; echo
 ```
 
-Deve terminar em `429`.  Se as doze responderem `401`, o limite não está
-sendo aplicado — provavelmente `SPED_HUB_TRUST_PROXY` está lendo um
-cabeçalho variável.
+Deve terminar em `429`, mesmo com um `X-Forwarded-For` diferente a cada
+tentativa.  Se as doze responderem `401`, o limite não está sendo aplicado —
+provavelmente o proxy está repassando o cabeçalho do cliente
+(`$proxy_add_x_forwarded_for` em vez de `$remote_addr`) ou há outro proxy na
+frente do nginx.
 
 ## 6. Backup
 
