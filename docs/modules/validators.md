@@ -23,8 +23,9 @@ validação tem contrato próprio.
 
 ## Depende de / quem depende
 
-Depende de `src.db.models` (consultas) e `src.reports.base`
-(`valor_sinalizado`).
+Depende de `src.db.models` (consultas), `src.reports.base`
+(`valor_sinalizado`), `src.reports.saldos` (saldo por período e
+consolidado) e `src.filters.engine` (plano e hierarquia da ECD).
 
 Consumido por: `cli` (comando `validar`), `api.routes` (REST) e
 `api.graphql`.
@@ -45,6 +46,16 @@ Consumido por: `cli` (comando `validar`), `api.routes` (REST) e
   agrupamento, e é dele que sairia um "lançamento sem partida" se a validação
   vier a reportá-lo.
 
+- **A validação (b) confere SI + D − C = SF por (conta, período).** Na soma
+  dos períodos, +100 de erro em janeiro e −100 em fevereiro se anulavam e a
+  validação dizia OK sobre dois meses errados. Os I155 da mesma conta no
+  mesmo período em centros de custo diferentes são somados antes — são
+  partes do mesmo saldo. O detalhe traz `dt_ini`/`dt_fin` do período.
+- **A validação (e) usa a consolidação dos relatórios**
+  (`src/reports/saldos.py`): SF do último I150, centros de custo somados,
+  só contas com saldo próprio sem superior que também tenha. Antes ficava
+  uma linha por conta — a do último centro de custo lido —, e um caixa
+  dividido entre duas lojas fazia o balanço "não fechar".
 - **`erro` versus `alerta` é uma distinção de natureza.** Divergência de
   valor (saldos, DRE, movimentos) pode ser centavo de arredondamento;
   algumas são `alerta`. Partida descasada, balanço que não fecha e
@@ -69,6 +80,7 @@ Consumido por: `cli` (comando `validar`), `api.routes` (REST) e
 
 ```bash
 pytest tests/test_validators.py -q
+pytest tests/test_saldos_consolidados.py -q -k "Validacao or centro_de_custo"
 ```
 
 A fixture principal importa `tests/fixtures/ecd_sample.txt` (arquivo

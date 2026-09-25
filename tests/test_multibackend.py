@@ -143,6 +143,63 @@ class TestRelatoriosPortaveis:
         assert ValidadorIntegridade(sessao_com_ecd, 1).validar_todas() is not None
 
 
+@pytest.fixture
+def sessao_trimestral(backend, tmp_path):
+    """ECD com três I150 mensais, sintéticas sem I155 e centro de custo."""
+    from src.ecd_importer import ECDImportService
+    from tests.fixtures.multiperiodo import gerar_ecd_multiperiodo
+
+    session = get_session(backend)
+    try:
+        ecd_id = (
+            ECDImportService(session)
+            .importar(gerar_ecd_multiperiodo(tmp_path / "trimestral.txt"))
+            .ecd_id
+        )
+        session.ecd_id = ecd_id
+        yield session
+    finally:
+        session.close()
+
+
+class TestRelatoriosIdenticos:
+    """§6.3 — o mesmo número em qualquer banco, conferido contra o valor certo.
+
+    "Gera sem erro" nos dois bancos não prova que os números batem. Estes
+    testes conferem o valor calculado à mão para a escrituração trimestral
+    de `tests/fixtures/multiperiodo.py`, em SQLite e em PostgreSQL.
+    """
+
+    def test_balancete(self, sessao_trimestral):
+        from src.reports.balancete import Balancete
+
+        balancete = Balancete(sessao_trimestral, sessao_trimestral.ecd_id)
+        _, linhas = balancete.gerar()
+        conta = {ln.cod_cta: ln for ln in linhas}
+        assert (conta["1.1.01"].saldo_inicial, conta["1.1.01"].saldo_final) == (10_000, 18_000)
+        assert conta["1.1"].saldo_final == 121_000
+        assert balancete.totais(linhas) == {
+            "saldo_inicial": 0.0,
+            "debitos": 227_000.0,
+            "creditos": 227_000.0,
+            "saldo_final": 0.0,
+        }
+
+    def test_balanco(self, sessao_trimestral):
+        from src.reports.balanco import BalancoPatrimonial
+
+        _, grupos, totais = BalancoPatrimonial(sessao_trimestral, sessao_trimestral.ecd_id).gerar()
+        assert (totais["ativo"], totais["passivo"], totais["pl"]) == (221_000, 64_000, 157_000)
+        assert grupos["ativo"][0].cod_cta == "1" and grupos["ativo"][0].saldo_atual == 221_000
+
+    def test_dre(self, sessao_trimestral):
+        from src.reports.dre import DRE
+
+        _, _linhas, totais = DRE(sessao_trimestral, sessao_trimestral.ecd_id).gerar()
+        assert totais["resultado_liquido"] == 21_000
+        assert totais["receita_bruta"] == 48_000
+
+
 class TestBuscaTextualCaseInsensitive:
     """`LIKE` diverge entre os backends; `ilike` uniformiza."""
 

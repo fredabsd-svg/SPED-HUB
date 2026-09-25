@@ -17,7 +17,7 @@ com o `ExportEngine`.
 | `ExportEngine` | `render_html`, `export_pdf`, `export_xlsx`, `export_xlsx_to_buffer`. |
 | `WhiteLabel` | Marca do escritório: nome, cor primária, cor clara, logo. |
 | `base.py` | `ReportContext`, `valor_sinalizado`, `saldo_por_natureza`, `fmt_moeda/fmt_data/fmt_data_hora`. |
-| `saldos.py` | `Hierarquia` (árvore `COD_CTA → COD_CTA_SUP`, à prova de ciclo: ancestrais, descendentes, ordem do plano, contas maximais) e `Saldo`. |
+| `saldos.py` | A consolidação única de saldos: `consolidar(engine, criterios)` → `SaldosConsolidados`; `consolidar_periodos`, `saldos_por_periodo`, `somar_resultado`; `Hierarquia` (árvore `COD_CTA → COD_CTA_SUP`, à prova de ciclo: ancestrais, descendentes, ordem do plano, contas maximais, contas-base, rollup) e `Saldo`. |
 
 Templates em `templates/`: `base.html` (moldura comum), um HTML por
 relatório, `tokens.css` (paleta e tipografia) e `print.css` (regras de
@@ -28,8 +28,9 @@ página A4).
 Depende de `src.db.models`, `src.filters.engine` (critérios) e, na
 exportação, WeasyPrint e openpyxl.
 
-Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard` e
-`validators.integridade` (que reusa `valor_sinalizado`).
+Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard`,
+`validators.integridade` (que reusa `valor_sinalizado` e a consolidação de
+`saldos.py`) e `filters.engine` (que usa a `Hierarquia` na subárvore).
 
 ## Decisões não óbvias e armadilhas
 
@@ -42,10 +43,35 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard` e
 - **Fonte ausente não dá erro.** O WeasyPrint degrada para Times/Helvetica
   sem avisar; `tests/test_identidade_export.py` confere que todo
   `@font-face` aponta para arquivo existente.
-- **`Balancete.totais` soma só o menor nível presente.** Sintética agrega as
-  analíticas; somar todas as linhas dobra cada valor. Em listagem filtrada
-  por conteúdo, os totais são do topo do que está listado — a consistência
-  contábil é assunto do `conferir`, não do rodapé.
+- **Todo saldo passa por `saldos.consolidar`.** O I155 e o I355 só existem
+  para conta analítica (o manual diz "código da conta analítica"), uma ECD
+  real traz um I150 por mês, e a conta com centro de custo tem um I155 por
+  centro. A consolidação soma os centros de custo do mesmo (conta,
+  período), toma o SI do **primeiro** I150 e o SF do **último** (débitos e
+  créditos somados) e dá às sintéticas a soma das filhas. Sintética com
+  I155 próprio usa o próprio saldo, e as filhas deixam de subir por ela:
+  nada é contado duas vezes. Balancete, balanço (inclusive a visão de
+  publicação e o comparativo), DRE, validações e o painel usam esse único
+  caminho — antes cada um tinha o seu, e cada um errava num ponto (saldos
+  de doze meses somados, ATIVO zerado, centro de custo sobrescrito).
+- **Critérios de conta escolhem o que aparece, não o que soma.** Com "nível
+  até 2", a sintética de nível 2 continua com o saldo das analíticas de
+  nível 3. Critérios de valor (mínimo, máximo, saldo zero, sem movimento)
+  olham o saldo consolidado; período e centro de custo restringem as
+  linhas do I155 (o período pega os I150 inteiramente dentro dele).
+- **Total conta cada valor uma vez.** `Balancete.totais` e os totais do
+  balanço somam só as linhas sem superior listado. Somar só o menor nível
+  presente, como era antes, deixava de fora as analíticas mais fundas
+  (820.000 de débitos na amostra, contra 2.980.000). Linha montada fora do
+  `gerar` (sem `ancestrais`) herda a superior da indentação.
+- **`conferir` conta só as contas com saldo próprio**, e confere o intervalo
+  inteiro (SI do primeiro mês + D − C = SF do último). A conferência mês a
+  mês é a validação (b) de `validators`.
+- **DRE: o valor da linha é o saldo com o sinal trocado**, para receita e
+  para despesa (crédito soma, débito subtrai); `totais["receita_bruta"]`
+  vem com o sinal da DRE. Cada conta com I355 entra uma vez, na categoria
+  dela ou do superior mapeado mais próximo — mapear a sintética leva as
+  filhas. O período do filtro vale para a data do I350.
 - **Sinal contábil**: os valores no banco seguem D positivo / C negativo
   (`valor_sinalizado`); a natureza da conta (`saldo_por_natureza`) decide a
   exibição. Relatório novo deve passar por essas funções, nunca refazer o
@@ -63,8 +89,13 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard` e
 
 ```bash
 pytest tests/test_reports.py tests/test_fase2.py tests/test_identidade_export.py -q
+pytest tests/test_saldos_consolidados.py -q   # três I150, sintéticas, centro de custo
 pytest tests/test_cli.py -q -k exportar
 ```
+
+`tests/fixtures/multiperiodo.py` gera uma ECD trimestral (três I150,
+sintéticas sem I155, despesa rateada em dois centros de custo, encerramento)
+que fecha por construção.
 
 Os geradores aceitam qualquer `Session` com o schema criado — a fixture de
 `tests/test_reports.py` monta a base mínima sem arquivo.

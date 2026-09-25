@@ -22,12 +22,10 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import Mapeamento, PlanoConta, SaldoResultado
+from src.db.models import Mapeamento, PlanoConta
 from src.filters.engine import FilterCriteria, FilterEngine
-from src.reports.base import (
-    ReportContext,
-    valor_sinalizado,
-)
+from src.reports.base import ReportContext
+from src.reports.saldos import somar_resultado
 
 
 @dataclass
@@ -211,20 +209,35 @@ class DRE:
         ).scalar_one_or_none()
         return ecd_ant.id if ecd_ant else None
 
-    def _get_saldos_resultado_anteriores(self, ecd_anterior_id: int) -> dict[str, float]:
-        """Carrega saldos de resultado do período anterior."""
-        saldos_ant = (
-            self.session.execute(
-                select(SaldoResultado).where(SaldoResultado.ecd_id == ecd_anterior_id)
-            )
-            .scalars()
-            .all()
-        )
-        result: dict[str, float] = {}
-        for s in saldos_ant:
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            result[s.cod_cta] = vl
-        return result
+    @staticmethod
+    def _valores_por_categoria(
+        engine: FilterEngine,
+        criterios: FilterCriteria,
+        mapeamentos: dict[str, list[str]],
+    ) -> dict[str, float]:
+        """Soma do I355 por categoria da DRE, cada conta uma única vez.
+
+        1. O I355 de cada conta soma os centros de custo e os encerramentos
+           (antes ficava a última linha lida: o CC2 apagava o CC1).
+        2. Só entram as contas com I355 próprio sem superior que também
+           tenha — numa ECD conforme o manual, as analíticas.
+        3. Cada uma vai para a categoria dela ou, se não for mapeada, do
+           superior mapeado mais próximo: mapear a sintética "DESPESAS"
+           leva todas as filhas, que não têm I355 na sintética.
+        """
+        proprios = somar_resultado(engine.aplicar_saldos_resultado(criterios))
+        hierarquia = engine.hierarquia()
+        categoria_da_conta: dict[str, str] = {}
+        for categoria, contas in mapeamentos.items():
+            for cod in contas:
+                categoria_da_conta.setdefault(cod, categoria)
+
+        valores: dict[str, float] = {cat: 0.0 for cat in mapeamentos}
+        for cod in hierarquia.contas_base(proprios):
+            categoria = hierarquia.atribuir(cod, categoria_da_conta)
+            if categoria is not None:
+                valores[categoria] = valores.get(categoria, 0.0) + proprios[cod]
+        return valores
 
     def gerar(
         self,
@@ -252,27 +265,14 @@ class DRE:
 
         mapeamentos = self._get_mapeamentos(empresa_id)
 
-        # Busca saldos de resultado (I355)
-        saldos_res = self.engine.aplicar_saldos_resultado(criterios)
-        saldo_por_conta: dict[str, float] = {}
-        for s in saldos_res:
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            saldo_por_conta[s.cod_cta] = vl
-
-        # Busca saldos do período anterior
+        # Valores por categoria (atual e anterior), pelo I355.
+        cat_valores = self._valores_por_categoria(self.engine, criterios, mapeamentos)
         ecd_ant_id = self._get_ecd_anterior()
-        saldo_anterior_por_conta: dict[str, float] = {}
-        if ecd_ant_id:
-            saldo_anterior_por_conta = self._get_saldos_resultado_anteriores(ecd_ant_id)
-
-        # Calcula valores por categoria (atual e anterior)
-        cat_valores: dict[str, float] = {}
         cat_valores_ant: dict[str, float] = {}
-        for cat, contas in mapeamentos.items():
-            total = sum(saldo_por_conta.get(c, 0.0) for c in contas)
-            cat_valores[cat] = total
-            total_ant = sum(saldo_anterior_por_conta.get(c, 0.0) for c in contas)
-            cat_valores_ant[cat] = total_ant
+        if ecd_ant_id:
+            cat_valores_ant = self._valores_por_categoria(
+                FilterEngine(self.session, ecd_ant_id), FilterCriteria(), mapeamentos
+            )
 
         # Monta linhas da DRE
         linhas: list[LinhaDRE] = []
@@ -294,19 +294,13 @@ class DRE:
             else:
                 vl = cat_valores.get(degrau["categoria"], 0.0)
                 vl_ant = cat_valores_ant.get(degrau["categoria"], 0.0)
-                # Aplica sinal: receitas são crédito (negativo interno → positivo na DRE)
-                # despesas são débito (positivo interno → negativo na DRE)
-                if degrau["sinal"] == 1:
-                    # Receitas: crédito interno (negativo) → positivo na DRE
-                    vl_dre = abs(vl)
-                    vl_dre_ant = abs(vl_ant)
-                elif degrau["sinal"] == -1:
-                    # Despesas: débito interno (positivo) → negativo na DRE
-                    vl_dre = -abs(vl)
-                    vl_dre_ant = -abs(vl_ant)
-                else:
-                    vl_dre = vl
-                    vl_dre_ant = vl_ant
+                # Na DRE, crédito soma e débito subtrai: o valor é o saldo
+                # interno (débito +, crédito −) com o sinal trocado, para
+                # receita e para despesa.  O `abs()` de antes mostrava uma
+                # despesa com saldo credor (recuperação maior que o gasto)
+                # como despesa, e o resultado não batia com o I355.
+                vl_dre = -vl
+                vl_dre_ant = -vl_ant
 
                 running += vl_dre
                 running_ant += vl_dre_ant
@@ -325,7 +319,9 @@ class DRE:
 
         totais = {
             "resultado_liquido": resultado_liquido,
-            "receita_bruta": cat_valores.get("receita_bruta", 0.0),
+            # Com o sinal da DRE (receita positiva). Era o saldo interno,
+            # negativo, e o painel nunca mostrava a margem líquida.
+            "receita_bruta": -cat_valores.get("receita_bruta", 0.0),
             "lucro_bruto": next(
                 (ln.valor_atual for ln in linhas if "Lucro Bruto" in ln.descricao), 0.0
             ),

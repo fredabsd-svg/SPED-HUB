@@ -220,10 +220,19 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   quatro páginas que não herdam o `base.html` declaram as fontes por conta
   própria; cor de dado (gráficos) segue a identidade, badge de estado
   (sucesso/erro) mantém o verde/vermelho semântico.
-- **`get_composicao_ativo` tem trava de ciclo** ao subir a hierarquia do
-  plano de contas. A hierarquia vem do arquivo do cliente; um ciclo A→B→A
-  fazia o laço rodar para sempre e o dashboard inteiro parava para todos os
-  usuários (event loop único).
+- **`get_composicao_ativo` usa o saldo agregado do grupo logo abaixo do
+  topo** (ATIVO CIRCULANTE, ATIVO NÃO CIRCULANTE), que o balanço já traz
+  consolidado; somar também as linhas de baixo dobraria cada fatia. A
+  hierarquia vem da `Hierarquia` de `src/reports/saldos.py`, à prova de
+  ciclo: um ciclo A→B→A fazia o laço antigo rodar para sempre e o dashboard
+  inteiro parava para todos os usuários (event loop único). O ciclo continua
+  registrado em log (WARNING).
+- **Evolução patrimonial e notas explicativas passam pela mesma
+  consolidação dos relatórios** (`src/reports/saldos.py`): um ponto por
+  I150 com os centros de custo somados; nas notas, o saldo final do último
+  I150, sem dobrar sintética e filha. A margem líquida só aparece quando a
+  DRE devolve receita bruta positiva — o que passou a acontecer quando o
+  total da DRE ganhou o sinal da demonstração.
 - **O banco vem de `database_reference()`** e é relido a cada uso — antes só
   `SPED_HUB_DB` era lido e `DATABASE_URL` era ignorada em silêncio.
 - **A tela de upload usa a importação assíncrona para ECD.** O arquivo é validado

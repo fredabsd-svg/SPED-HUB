@@ -195,22 +195,41 @@ class TestBalancete:
     def test_gerar_sem_filtros(self, session):
         balancete = Balancete(session, session._ecd_id)
         ctx, linhas = balancete.gerar()
-        # 15 contas com I155
-        assert len(linhas) == 15
+        # 15 analíticas com I155 + 8 sintéticas com saldo agregado das filhas
+        # (1, 1.1, 1.2, 2, 2.1, 3, 4, 5). O I155 só existe para analítica;
+        # antes as sintéticas sumiam do balancete.
+        assert len(linhas) == 23
+        assert sum(1 for ln in linhas if ln.ind_cta == "S") == 8
         assert ctx.titulo == "Balancete de Verificação"
 
     def test_gerar_com_filtro_natureza(self, session):
         balancete = Balancete(session, session._ecd_id)
         ctx, linhas = balancete.gerar(FilterCriteria(cod_nat=["01"]))
-        # 5 contas de ativo com I155
-        assert len(linhas) == 5
+        # 5 analíticas de ativo + as sintéticas 1, 1.1 e 1.2
+        assert [ln.cod_cta for ln in linhas] == [
+            "1",
+            "1.1",
+            "1.1.1",
+            "1.1.2",
+            "1.1.3",
+            "1.2",
+            "1.2.1",
+            "1.2.2",
+        ]
 
     def test_gerar_nivel_max(self, session):
         balancete = Balancete(session, session._ecd_id)
         ctx, linhas = balancete.gerar(nivel_max=1)
-        # Nível 1: 1, 2, 3, 4, 5 — mas só analíticas têm I155
-        # Como as sintéticas não têm saldo, retorna 0
-        assert len(linhas) == 0
+        # Nível 1: 1, 2, 3, 4, 5 — sintéticas, com o saldo agregado das
+        # analíticas. Antes voltava vazio: sem I155 próprio, a sintética não
+        # tinha saldo nenhum.
+        assert {ln.cod_cta: ln.saldo_final for ln in linhas} == {
+            "1": 830_000.0,
+            "2": -260_000.0,
+            "3": -570_000.0,
+            "4": -1_000_000.0,
+            "5": 820_000.0,
+        }
 
     def test_conferir_sem_divergencias(self, session):
         balancete = Balancete(session, session._ecd_id)
@@ -223,7 +242,7 @@ class TestBalancete:
         balancete = Balancete(session, session._ecd_id)
         ctx, linhas = balancete.gerar()
         dados = balancete.to_dict(linhas)
-        assert len(dados) == 15
+        assert len(dados) == 23  # 15 analíticas + 8 sintéticas agregadas
         assert "cod_cta" in dados[0]
         assert "saldo_final" in dados[0]
 

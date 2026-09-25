@@ -17,8 +17,8 @@ from src.filters.engine import FilterCriteria, FilterEngine
 from src.reports.base import (
     ReportContext,
     saldo_por_natureza,
-    valor_sinalizado,
 )
+from src.reports.saldos import consolidar
 
 
 @dataclass
@@ -30,6 +30,8 @@ class LinhaBalanco:
     ind_cta: str
     saldo_atual: float = 0.0
     saldo_anterior: float = 0.0
+    # Superiores da conta no plano, do mais próximo ao topo.
+    ancestrais: tuple[str, ...] = ()
 
 
 class BalancoPatrimonial:
@@ -60,17 +62,13 @@ class BalancoPatrimonial:
         return ecd_ant.id if ecd_ant else None
 
     def _get_saldos_anteriores(self, ecd_anterior_id: int) -> dict[str, float]:
-        """Carrega saldos do período anterior."""
-        from src.db.models import SaldoPeriodico as SP
+        """Saldo final de cada conta na ECD anterior, sintéticas incluídas.
 
-        saldos_ant = (
-            self.session.execute(select(SP).where(SP.ecd_id == ecd_anterior_id)).scalars().all()
-        )
-        result: dict[str, float] = {}
-        for s in saldos_ant:
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            result[s.cod_cta] = vl
-        return result
+        Passa pela mesma consolidação do período atual: SF do último I150,
+        centros de custo somados, sintéticas agregando as filhas.
+        """
+        anteriores = consolidar(FilterEngine(self.session, ecd_anterior_id), FilterCriteria())
+        return {cod: saldo.sf for cod, saldo in anteriores.saldos.items()}
 
     def gerar(
         self,
@@ -85,26 +83,17 @@ class BalancoPatrimonial:
 
         Returns:
             (contexto, grupos, totais)
+
+        O saldo de cada conta é o SF do último I150 do intervalo; o das
+        sintéticas, a soma das filhas. O total de cada grupo soma só as
+        contas listadas sem superior listado — sintética e filha nunca
+        entram as duas.
         """
         if criterios is None:
             criterios = FilterCriteria()
 
-        # Busca plano de contas
-        plano = {
-            c.cod_cta: c
-            for c in self.session.execute(
-                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
-            ).scalars()
-        }
-
-        # Busca saldos atuais
-        saldos = self.engine.aplicar_saldos(criterios)
-
-        # Agrupa saldos por conta (último período)
-        saldo_por_conta: dict[str, float] = {}
-        for s in saldos:
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            saldo_por_conta[s.cod_cta] = vl
+        saldos = consolidar(self.engine, criterios)
+        plano = self.engine.plano()
 
         # Busca saldos do período anterior
         ecd_ant_id = self._get_ecd_anterior()
@@ -113,55 +102,53 @@ class BalancoPatrimonial:
             saldo_anterior_por_conta = self._get_saldos_anteriores(ecd_ant_id)
 
         # Monta linhas por natureza
-        ativo: list[LinhaBalanco] = []
-        passivo: list[LinhaBalanco] = []
-        pl: list[LinhaBalanco] = []
+        grupos: dict[str, list[LinhaBalanco]] = {"01": [], "02": [], "03": []}
 
         # Se há filtro de natureza, restringe o plano
         nats_permitidas = set(criterios.cod_nat) if criterios.cod_nat else {"01", "02", "03"}
 
-        for cod_cta, pc in sorted(plano.items()):
-            if pc.cod_nat not in nats_permitidas:
+        listadas: list[str] = []
+        for cod_cta in saldos.visiveis:
+            pc = plano[cod_cta]
+            if pc.cod_nat not in nats_permitidas or pc.cod_nat not in grupos:
                 continue
-
-            vl = saldo_por_conta.get(cod_cta, 0.0)
-            vl_exposicao = saldo_por_natureza(vl, pc.cod_nat)
-
-            vl_ant = saldo_anterior_por_conta.get(cod_cta, 0.0)
-            vl_ant_exposicao = saldo_por_natureza(vl_ant, pc.cod_nat)
-
-            linha = LinhaBalanco(
-                cod_cta=cod_cta,
-                nome_cta=pc.nome_cta,
-                nivel=pc.nivel,
-                cod_nat=pc.cod_nat,
-                ind_cta=pc.ind_cta,
-                saldo_atual=vl_exposicao,
-                saldo_anterior=vl_ant_exposicao,
+            listadas.append(cod_cta)
+            grupos[pc.cod_nat].append(
+                LinhaBalanco(
+                    cod_cta=cod_cta,
+                    nome_cta=pc.nome_cta,
+                    nivel=pc.nivel,
+                    cod_nat=pc.cod_nat,
+                    ind_cta=pc.ind_cta,
+                    saldo_atual=saldo_por_natureza(saldos.saldo(cod_cta).sf, pc.cod_nat),
+                    saldo_anterior=saldo_por_natureza(
+                        saldo_anterior_por_conta.get(cod_cta, 0.0), pc.cod_nat
+                    ),
+                    ancestrais=saldos.hierarquia.ancestrais(cod_cta),
+                )
             )
+        ativo, passivo, pl = grupos["01"], grupos["02"], grupos["03"]
 
-            if pc.cod_nat == "01":
-                ativo.append(linha)
-            elif pc.cod_nat == "02":
-                passivo.append(linha)
-            elif pc.cod_nat == "03":
-                pl.append(linha)
+        # Totais: só as linhas sem superior listado, cada valor uma vez.
+        no_total = set(saldos.hierarquia.maximais(listadas))
 
-        # Totais
-        total_ativo = sum(ln.saldo_atual for ln in ativo)
-        total_passivo = sum(ln.saldo_atual for ln in passivo)
-        total_pl = sum(ln.saldo_atual for ln in pl)
+        def _total(linhas: list[LinhaBalanco], campo: str) -> float:
+            return round(sum(getattr(ln, campo) for ln in linhas if ln.cod_cta in no_total), 2)
 
-        total_ativo_ant = sum(ln.saldo_anterior for ln in ativo)
-        total_passivo_ant = sum(ln.saldo_anterior for ln in passivo)
-        total_pl_ant = sum(ln.saldo_anterior for ln in pl)
+        total_ativo = _total(ativo, "saldo_atual")
+        total_passivo = _total(passivo, "saldo_atual")
+        total_pl = _total(pl, "saldo_atual")
+
+        total_ativo_ant = _total(ativo, "saldo_anterior")
+        total_passivo_ant = _total(passivo, "saldo_anterior")
+        total_pl_ant = _total(pl, "saldo_anterior")
 
         totais = {
             "ativo": total_ativo,
             "passivo": total_passivo,
             "pl": total_pl,
-            "passivo_pl": total_passivo + total_pl,
-            "diferenca": abs(total_ativo - (total_passivo + total_pl)),
+            "passivo_pl": round(total_passivo + total_pl, 2),
+            "diferenca": round(abs(total_ativo - (total_passivo + total_pl)), 2),
             "ativo_anterior": total_ativo_ant,
             "passivo_anterior": total_passivo_ant,
             "pl_anterior": total_pl_ant,
@@ -210,12 +197,9 @@ class BalancoPatrimonial:
         for a in agls:
             agl_map.setdefault(a.cod_agl, []).append(a.conta.cod_cta)
 
-        # Busca saldos
-        saldos = self.engine.aplicar_saldos(criterios)
-        saldo_por_conta: dict[str, float] = {}
-        for s in saldos:
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            saldo_por_conta[s.cod_cta] = vl
+        # Saldos consolidados: sintéticas com a soma das filhas.
+        saldos = consolidar(self.engine, criterios)
+        visiveis = set(saldos.visiveis)
 
         # Estrutura hierárquica da publicação
         # Cada seção tem: nome, código_agl (ou None para agrupar sub-seções), sub_secoes
@@ -268,10 +252,14 @@ class BalancoPatrimonial:
         ]
 
         def _calcular_saldo_agl(cod_agl: str) -> float:
-            """Calcula saldo total de um código de aglutinação."""
-            contas = agl_map.get(cod_agl, [])
-            total = sum(saldo_por_conta.get(c, 0.0) for c in contas)
-            return total
+            """Saldo de um código de aglutinação, sem dobrar a sintética.
+
+            O I052 costuma vir na sintética e nas filhas com o mesmo código.
+            Com a sintética agregando as filhas, somar todas dobraria o
+            valor: entram só as contas do código sem superior no mesmo código.
+            """
+            contas = [c for c in agl_map.get(cod_agl, []) if c in visiveis]
+            return sum(saldos.saldo(c).sf for c in saldos.hierarquia.maximais(contas))
 
         def _processar_secao(secao: dict, nat: str) -> tuple[list[LinhaBalanco], float]:
             """Processa uma seção recursivamente, retornando linhas e total."""

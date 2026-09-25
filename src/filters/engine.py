@@ -298,6 +298,23 @@ class FilterEngine:
         stmt = stmt.order_by(SaldoPeriodico.cod_cta, SaldoPeriodico.dt_ini)
         return list(self.session.execute(stmt).scalars())
 
+    def linhas_de_saldo(self, criterios: FilterCriteria) -> list[SaldoPeriodico]:
+        """I155 da ECD restritos só pelo que vale **por linha**: centro de custo e período.
+
+        É a matéria-prima de `src.reports.saldos.consolidar`. Os critérios de
+        conta e de valor não entram aqui: o saldo de uma sintética precisa de
+        todas as filhas, e o critério de valor olha o saldo consolidado — um
+        mês descartado por valor faria o saldo inicial vir do mês errado.
+        """
+        stmt = select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == self.ecd_id)
+        if criterios.cod_ccus:
+            stmt = stmt.where(SaldoPeriodico.cod_ccus.in_(criterios.cod_ccus))
+        if criterios.dt_ini:
+            stmt = stmt.where(SaldoPeriodico.dt_ini >= criterios.dt_ini)
+        if criterios.dt_fin:
+            stmt = stmt.where(SaldoPeriodico.dt_fin <= criterios.dt_fin)
+        return list(self.session.execute(stmt).scalars())
+
     def aplicar_lancamentos(self, criterios: FilterCriteria) -> list[Partida]:
         """Aplica filtros sobre partidas (I250), retornando com dados do lançamento."""
         stmt = (
@@ -372,6 +389,14 @@ class FilterEngine:
 
         if criterios.cod_ccus:
             stmt = stmt.where(SaldoResultado.cod_ccus.in_(criterios.cod_ccus))
+
+        # Período: o I355 vale na data do encerramento (DT_RES do I350). O
+        # cabeçalho da DRE imprime o período pedido; sem este filtro, ele
+        # dizia "janeiro a fevereiro" sobre o resultado do ano inteiro.
+        if criterios.dt_ini:
+            stmt = stmt.where(SaldoResultado.dt_res >= criterios.dt_ini)
+        if criterios.dt_fin:
+            stmt = stmt.where(SaldoResultado.dt_res <= criterios.dt_fin)
 
         if criterios.vl_min is not None:
             stmt = stmt.where(SaldoResultado.vl_sld_fin >= criterios.vl_min)

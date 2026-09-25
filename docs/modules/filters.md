@@ -16,7 +16,8 @@ relatórios.
 | Símbolo | Para quê |
 |---|---|
 | `FilterCriteria` | Dataclass de critérios; `to_dict()`/`from_dict()` para JSON. |
-| `FilterEngine(session, ecd_id)` | `aplicar_saldos`, `aplicar_lancamentos`, `aplicar_saldos_resultado`, `descricao_filtros`. |
+| `FilterEngine(session, ecd_id)` | `aplicar_saldos` (linhas cruas do I155), `aplicar_lancamentos`, `aplicar_saldos_resultado`, `descricao_filtros`; `plano`, `hierarquia`, `contas_selecionadas` e `linhas_de_saldo`, a matéria-prima de `src.reports.saldos.consolidar`. |
+| `tem_criterio_de_conta(criterios)` | Separa "sem critério de conta" de "critério que não casou com nada". |
 
 Os 16 tipos: conta (exata, prefixo, intervalo, nome), natureza, classificação
 S/A, nível (exato/até), subárvore, conta referencial (I051), aglutinação
@@ -49,6 +50,15 @@ Quem depende: os relatórios de `reports/`, `dashboard` (app e services) e
 - **Subárvore segue o `COD_CTA_SUP`**, pela `Hierarquia` de
   `src/reports/saldos.py`, não o prefixo do código: o código é livre no
   leiaute, e "111001" pode ser filha de "11" sem começar por "11.".
+- **`aplicar_saldos` devolve linhas, não saldos.** Uma linha por (conta,
+  período, centro de custo), só de analíticas numa ECD conforme o manual.
+  Relatório que precisa do saldo de uma conta passa por
+  `src.reports.saldos.consolidar`, que lê `linhas_de_saldo` (só centro de
+  custo e período, por linha) e aplica os critérios de conta e de valor
+  sobre o saldo consolidado.
+- **O período vale para o I355** (`aplicar_saldos_resultado`) pela data do
+  encerramento (`dt_res`). Antes era ignorado, e a DRE imprimia no
+  cabeçalho um período que os números não respeitavam.
 - **`hist_texto` usa `ilike`, não `like`**: o LIKE do SQLite é
   case-insensitive para ASCII e o do Postgres não — com `like`, buscar
   "recebi" funcionava em desenvolvimento e devolvia nada em produção.
