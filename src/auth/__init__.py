@@ -356,6 +356,11 @@ class AuthService:
             ).scalar_one_or_none()
             if not sessao or sessao.expirado:
                 return None
+            # Desativar o usuário só barrava o próximo login: a sessão aberta
+            # seguia valendo até expirar, e quem foi desligado do escritório
+            # continuava lendo tudo com o token que já tinha.
+            if not sessao.usuario.ativo:
+                return None
             return sessao.usuario
         finally:
             session.close()

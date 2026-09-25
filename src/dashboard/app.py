@@ -77,6 +77,7 @@ from src.auth import (
     usuario_pode_acessar_ecd,
 )
 from src.cache.redis_cache import RedisCacheService
+from src.cnpj import formatar as formatar_cnpj
 from src.dashboard.services import DashboardService
 from src.db.models import (
     ECD,
@@ -332,6 +333,9 @@ _PUBLIC_API_PATHS = {
     "/api/health/full",
 }
 
+# Identificador numérico aceito na query: dígitos ASCII e nada mais.
+_ID_ASCII = re.compile(r"[0-9]{1,18}")
+
 
 # Nomes de loopback ficam sempre liberados, independentemente do allowlist:
 # o HEALTHCHECK do container chama `http://localhost:8000/api/v1/health`, e
@@ -492,12 +496,19 @@ async def require_dashboard_api_auth(request: Request, call_next):
                 status_code=403,
             )
 
-        raw_ids = []
-        if request.query_params.get("ecd_id"):
-            raw_ids.append(request.query_params["ecd_id"])
-        if request.query_params.get("ecd_ids"):
-            raw_ids.extend(request.query_params["ecd_ids"].split(","))
-        ecd_ids = {int(value.strip()) for value in raw_ids if value.strip().isdigit()}
+        # Todo valor é conferido — `getlist`, não `get` — e só dígito ASCII
+        # passa.  O filtro era `isdigit()`: `+2`, `2.0` e `2_0` não passavam
+        # nele e por isso escapavam da checagem de dono, mas o FastAPI os
+        # converte para `2` e a rota servia a ECD de outro escritório.
+        raw_ids = list(request.query_params.getlist("ecd_id"))
+        for lista in request.query_params.getlist("ecd_ids"):
+            raw_ids.extend(parte for parte in lista.split(",") if parte.strip())
+        if any(not _ID_ASCII.fullmatch(value) for value in raw_ids):
+            return JSONResponse(
+                {"status": "erro", "mensagem": "Identificador de ECD inválido"},
+                status_code=400,
+            )
+        ecd_ids = {int(value) for value in raw_ids}
         if ecd_ids:
             session = get_session(_get_engine())
             try:
@@ -519,6 +530,25 @@ jinja_env.globals["fmt_moeda"] = fmt_moeda
 jinja_env.globals["fmt_data"] = fmt_data
 jinja_env.globals["now"] = datetime.datetime.now
 jinja_env.globals["app_version"] = APP_VERSION
+
+
+def _periodo_br(periodo: str) -> str:
+    """`2024-01-01 a 2024-12-31` → `01/01/2024 a 31/12/2024`.
+
+    O texto ISO continua sendo o que a API entrega; só a tela converte.  O
+    que não casar com o formato sai como veio, em vez de sumir.
+    """
+    return re.sub(r"(\d{4})-(\d{2})-(\d{2})", r"\3/\2/\1", periodo or "")
+
+
+def _percentual(valor: float, casas: int = 1) -> str:
+    """`31.25` → `31,3%` — vírgula decimal, como o resto da tela."""
+    return f"{valor:.{casas}f}".replace(".", ",") + "%"
+
+
+jinja_env.filters["cnpj"] = formatar_cnpj
+jinja_env.filters["periodo"] = _periodo_br
+jinja_env.filters["percentual"] = _percentual
 
 
 # ── Rotas: Autenticação ────────────────────────────────────────────────────
@@ -660,8 +690,14 @@ async def api_register(request: Request):
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    """Dashboard principal (requer autenticação)."""
+async def dashboard(request: Request, ecd_id: int | None = Query(None)):
+    """Dashboard principal (requer autenticação).
+
+    `?ecd_id=` escolhe a escrituração exibida — é para onde o seletor do
+    cabeçalho navega.  Sem ele, vale a importada por último.  A busca passa
+    pelo escopo do escritório: id de outro escritório responde 404, igual a
+    id que não existe.
+    """
     usuario = await get_usuario_atual(request)
     if not usuario:
         return RedirectResponse(url="/login", status_code=302)
@@ -672,9 +708,13 @@ async def dashboard(request: Request):
 
         latest_stmt = select(ECD).join(Empresa)
         latest_stmt = aplicar_escopo_empresas(latest_stmt, usuario)
+        if ecd_id is not None:
+            latest_stmt = latest_stmt.where(ECD.id == ecd_id)
         ecd = session.execute(
             latest_stmt.order_by(desc(ECD.importado_em)).limit(1)
         ).scalar_one_or_none()
+        if ecd_id is not None and ecd is None:
+            return HTMLResponse("ECD não encontrada", status_code=404)
 
         if ecd:
             svc = DashboardService(session, ecd.id)
@@ -1293,7 +1333,13 @@ async def api_export_xlsx(
     tipo: str = Query("balanco"),
     visao: str = Query("hierarquica"),
 ):
-    """Exporta relatório para XLSX."""
+    """Exporta relatório para XLSX e entrega o arquivo na própria resposta.
+
+    A rota gravava num caminho fixo, `/workspace/outputs/`, que não existe
+    em nenhuma instalação: toda exportação respondia 500.  E mesmo onde o
+    diretório existisse, nada servia o arquivo depois.  Agora o XLSX é
+    montado em memória e baixado, como o PDF.
+    """
     session = get_session(_get_engine())
     try:
         from src.db.models import ECD, Empresa
@@ -1312,7 +1358,7 @@ async def api_export_xlsx(
             periodo_ref=f"{ecd.dt_ini} a {ecd.dt_fin}" if ecd else "",
         )
 
-        output_path = f"/workspace/outputs/{tipo}_{ecd_id}.xlsx"
+        buffer = io.BytesIO()
 
         if tipo == "balanco":
             balanco = BalancoPatrimonial(session, ecd_id)
@@ -1333,7 +1379,7 @@ async def api_export_xlsx(
                         }
                     )
             colunas = ["secao", "cod_cta", "nome_cta", "saldo_atual"]
-            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
         elif tipo == "dre":
             dre = DRE(session, ecd_id)
@@ -1344,7 +1390,7 @@ async def api_export_xlsx(
                 for ln in linhas
             ]
             colunas = ["tipo", "descricao", "valor_atual"]
-            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
         elif tipo == "dfc":
             dfc = DFC(session, ecd_id)
@@ -1354,7 +1400,7 @@ async def api_export_xlsx(
                 {"tipo": ln.tipo, "descricao": ln.descricao, "valor": ln.valor} for ln in linhas
             ]
             colunas = ["tipo", "descricao", "valor"]
-            export.export_xlsx(output_path, ctx, linhas_dict, colunas, ctx.titulo, wl)
+            export.export_xlsx_to_buffer(buffer, ctx, linhas_dict, colunas, ctx.titulo, wl)
 
         else:
             return JSONResponse({"status": "erro", "mensagem": "Tipo inválido"}, status_code=400)
@@ -1367,7 +1413,11 @@ async def api_export_xlsx(
             detalhes={"tipo": tipo, "visao": visao, "formato": "xlsx"},
         )
 
-        return JSONResponse({"status": "ok", "arquivo": f"{tipo}_{ecd_id}.xlsx"})
+        return Response(
+            content=buffer.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={tipo}_{ecd_id}.xlsx"},
+        )
 
     except Exception as e:
         logger.exception("Erro ao exportar XLSX")
@@ -1397,12 +1447,21 @@ async def api_filtros_aplicar(
         criterios = FilterCriteria()
         if natureza:
             criterios.cod_nat = [n.strip() for n in natureza.split(",")]
-        if nivel_ate:
-            criterios.nivel_ate = int(nivel_ate)
-        if dt_ini:
-            criterios.dt_ini = datetime.date.fromisoformat(dt_ini)
-        if dt_fin:
-            criterios.dt_fin = datetime.date.fromisoformat(dt_fin)
+        # Nível e datas vêm digitados: valor inválido é erro de quem pediu
+        # (400 com a razão), não falha do servidor (500 sem explicação).
+        try:
+            if nivel_ate:
+                criterios.nivel_ate = int(nivel_ate)
+            if dt_ini:
+                criterios.dt_ini = datetime.date.fromisoformat(dt_ini)
+            if dt_fin:
+                criterios.dt_fin = datetime.date.fromisoformat(dt_fin)
+        except ValueError:
+            return HTMLResponse(
+                '<div class="alert alert-error">Filtro inválido: confira o nível e as '
+                "datas (AAAA-MM-DD).</div>",
+                status_code=400,
+            )
         if conta:
             criterios.cod_cta_exato = [conta]
         if nome_cta:
@@ -2096,10 +2155,14 @@ async def documento_page(request: Request, documento_id: int):
                         {
                             "item": item,
                             "numero": valores.get("numero_item"),
+                            # `itens_alterados` é indexado pelo número do item
+                            # na nota, não pelo id da linha no banco: buscar
+                            # por `item.id` só acertava na primeira nota
+                            # importada, e nas outras marcava o item errado.
                             "linhas": _linhas_de_revisao(
-                                item, valores, visao.itens_alterados.get(item.id, set())
+                                item, valores, visao.itens_alterados.get(item.numero_item, set())
                             ),
-                            "alterados": visao.itens_alterados.get(item.id, set()),
+                            "alterados": visao.itens_alterados.get(item.numero_item, set()),
                             # Sobre os valores **efetivos**: é o que vai para o
                             # arquivo.  Conferir o original mostraria um erro
                             # que já foi corrigido, e esconderia um que alguém

@@ -415,3 +415,50 @@
         transition-duration: .01ms !important;
     }
 }
+
+/* ── Gráficos do painel ─────────────────────────────────────────────────
+   Com `maintainAspectRatio: false` o Chart.js assume a altura do pai.  Sem
+   um pai de altura fixa, o canvas crescia até o fim da coluna do grid e o
+   painel chegava a 5.500 px no desktop e 14.000 px no celular. */
+.chart-box { position: relative; width: 100%; height: 280px; }
+.chart-box-wide { height: 320px; }
+@media (max-width: 520px) {
+    .chart-box { height: 240px; }
+    .chart-box-wide { height: 300px; }
+}
+
+/* ── Indicadores ────────────────────────────────────────────────────── */
+.kpi-card { display: flex; flex-direction: column; gap: 2px; }
+.kpi-icon {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    background: #F5F2EA;
+    font-size: 1.1rem;
+}
+.kpi-valor {
+    font-size: clamp(1.25rem, 1.1rem + .8vw, 1.6rem);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.01em;
+    white-space: nowrap;
+}
+.kpi-moeda { margin-right: 3px; color: var(--gray-500, #6B7280); font-size: .7em; font-weight: 600; }
+.kpi-valor.kpi-tendencia-up .kpi-moeda,
+.kpi-valor.kpi-tendencia-down .kpi-moeda { color: inherit; opacity: .75; }
+@media (max-width: 520px) {
+    .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+    .kpi-card { padding: 14px; }
+    .kpi-valor { font-size: 1.12rem; }
+}
+
+/* ── Relatórios ─────────────────────────────────────────────────────── */
+.report-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+.report-actions-end { justify-content: flex-end; }
+.tabs { gap: 2px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: thin; }
+.tab-btn { flex: 0 0 auto; font-weight: 600; border-radius: 8px 8px 0 0; }
+.tab-btn.active { background: #F5F2EA; }
+.dashboard-controls { margin: 0; }
+.dashboard-controls .btn { justify-content: center; }

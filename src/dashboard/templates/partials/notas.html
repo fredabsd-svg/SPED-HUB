@@ -1,10 +1,4 @@
 <!-- Notas Explicativas Partial (HTMX) — Fase 6 -->
-<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">
-    <button class="btn btn-sm btn-outline"
-            hx-get="/api/export/pdf?ecd_id={{ ecd_id }}&tipo=notas"
-            hx-target="_blank">📄 PDF</button>
-</div>
-
 {% if notas %}
 <div style="display:flex;flex-direction:column;gap:16px;">
     {% for nota in notas %}

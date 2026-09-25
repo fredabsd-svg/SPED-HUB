@@ -17,10 +17,10 @@ vem de `reports/`.
 | Grupo | Rotas |
 |---|---|
 | Autenticação | `/login`, `/register`, `POST /api/login`, `POST /api/register`, `/logout` |
-| Páginas | `/`, `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/classificar/exportar.csv`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
+| Páginas | `/` (aceita `?ecd_id=`), `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/classificar/exportar.csv`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
 | Upload | `POST /api/upload` (ECD síncrona, compatibilidade), `/api/upload-async` + `/api/jobs/*` (importação com progresso usada pela tela), `/api/upload-efd`, `/api/upload-ecf` (só resumo) |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
-| Exportação | `/api/export/pdf`, `/xlsx`, `/multi-formato` (ZIP), `/lote` |
+| Exportação | `/api/export/pdf`, `/xlsx` (os dois devolvem o arquivo como download), `/multi-formato` (ZIP), `/lote` |
 | Administração (admin) | `/api/audit/*`, `/api/email/*`, `/api/worker/status`, `/api/monitoring/*`, `/api/health/full` |
 
 `services.py` — `DashboardService` (KPIs, evolução patrimonial e
@@ -43,7 +43,12 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
 - **Multi-tenancy por `escritorio_id`**: o middleware extrai
   `ecd_id`/`ecd_ids` da query string e valida com
   `usuario_pode_acessar_ecd`; ECD de outro escritório responde **404, não
-  403** — não vaza que ela existe. Listagens passam por
+  403** — não vaza que ela existe. **Todo** valor é conferido (`getlist`) e
+  só dígito ASCII passa; o resto é 400. O filtro era `str.isdigit()`, e
+  `+2`, `2.0` ou `2_0` escapavam dele sem escapar do FastAPI, que os
+  converte para `2`: a rota servia a ECD do outro escritório. Rota nova que
+  receba id de ECD por outro nome de parâmetro não está coberta — confira o
+  escopo nela. Listagens passam por
   `aplicar_escopo_empresas`; o upload grava o `escritorio_id` do usuário
   logado.
 - **O escopo do cadastro fiscal é aplicado na consulta, não conferido depois.**
@@ -57,6 +62,26 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   `name=` divergindo do que a rota lê — e aí os dois passam com a página
   quebrada. `tests/test_formularios_batem_com_as_rotas.py` lê o formulário da
   página e envia o que ele declara.
+- **`/` escolhe a ECD por `?ecd_id=`, com o escopo na consulta.** O seletor
+  do cabeçalho é um `GET` comum para essa URL e recarrega o painel inteiro;
+  trocar só os cartões por HTMX deixava gráficos e abas mostrando a ECD
+  anterior. A rota `/` não passa pelo middleware de `/api/`, por isso o
+  `where` do id vai junto com `aplicar_escopo_empresas`.
+- **Gráfico do Chart.js mora numa `.chart-box` de altura fixa.** Com
+  `maintainAspectRatio: false` ele assume a altura do pai; sem pai fixo, o
+  canvas crescia até o fim da coluna do grid (o painel chegou a 14.000 px no
+  celular). `tests/test_e2e_playwright.py::TestE2EPainelRevisado` mede.
+- **Exportação é link, não `hx-get`.** Download não é swap: `hx-target`
+  apontando para `_blank` fazia o htmx acusar erro e não pedir nada. O XLSX é
+  montado em memória (`export_xlsx_to_buffer`); antes era gravado num
+  `/workspace/outputs/` que não existe em instalação nenhuma.
+- **Valores da tela saem no formato brasileiro.** Moeda por `fmt_moeda`,
+  percentual pelo filtro `percentual`, CNPJ pelo filtro `cnpj`
+  (`src.cnpj.formatar`) e período pelo filtro `periodo` (ISO → DD/MM/AAAA).
+  O JSON da API continua em ISO: a conversão é só de apresentação.
+- **Alpine chama `init()` sozinho.** `x-data` com objeto que tem `init()` já o
+  executa; `x-init="init()"` repetia a chamada e, no monitoramento, criava
+  dois laços de consulta ao servidor.
 - **O menu só mostra o que o usuário pode abrir.** Link que devolve 403 é pior
   que link ausente: a mensagem fala de permissão, e quem clicou não pediu
   permissão nenhuma.

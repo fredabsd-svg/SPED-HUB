@@ -1,14 +1,17 @@
 <!-- KPIs Cards (HTMX partial) -->
+{# Moeda e percentual no formato brasileiro.  O cartão usava "%.2f": o ativo
+   aparecia como "R$ 830000.00", sem milhar e com ponto decimal, na mesma
+   tela em que as tabelas mostravam "830.000,00". #}
 <div class="kpi-grid">
     {% for kpi in data.kpis %}
     <div class="kpi-card">
-        <div class="kpi-icon">{{ kpi.icone }}</div>
+        <div class="kpi-icon" aria-hidden="true">{{ kpi.icone }}</div>
         <div class="kpi-titulo">{{ kpi.titulo }}</div>
         <div class="kpi-valor {% if kpi.tendencia == 'up' %}kpi-tendencia-up{% elif kpi.tendencia == 'down' %}kpi-tendencia-down{% endif %}">
             {% if kpi.formato == 'moeda' %}
-                R$ {{ "%.2f"|format(kpi.valor) }}
+                <span class="kpi-moeda">R$</span>{{ fmt_moeda(kpi.valor) }}
             {% elif kpi.formato == 'percentual' %}
-                {{ "%.1f"|format(kpi.valor) }}%
+                {{ kpi.valor | percentual }}
             {% else %}
                 {{ kpi.valor | int }}
             {% endif %}

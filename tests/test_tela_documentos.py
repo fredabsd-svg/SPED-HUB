@@ -384,6 +384,27 @@ class TestOQueMudouFicaVisivel:
         assert "corrigido</span>" in item, "a linha do campo não foi marcada"
         assert "2102" in item
 
+    def test_a_marca_vale_tambem_para_a_nota_que_nao_e_a_primeira_do_banco(self, cenario):
+        """`itens_alterados` é indexado pelo número do item na nota.
+
+        A tela buscava pelo id da linha no banco.  Na primeira nota importada
+        os dois coincidem — item 1 tem id 1 —, e por isso os outros testes
+        desta classe passavam.  Na nota do escritório B, importada depois, o
+        item 1 tem id 3: a correção ficava invisível, ou marcava outro item.
+        """
+        from src.dashboard.app import app
+
+        _corrigir(cenario["referencia"], cenario["documento_b"], "cfop", "2102")
+        admin = TestClient(app)
+        admin.post("/api/login", data={"email": "admin@teste.local", "senha": "senha-de-teste"})
+
+        html = _texto(admin.get(f"/fiscal/documentos/{cenario['documento_b']}"))
+
+        assert "corrigido</span>" in _secao(
+            html, "item-1"
+        ), "a correção do item 1 da segunda nota não foi marcada na tela"
+        assert "corrigido</span>" not in _secao(html, "item-2")
+
     def test_o_normalizado_continua_a_vista(self, cenario):
         """O valor de origem não some quando alguém corrige.
 

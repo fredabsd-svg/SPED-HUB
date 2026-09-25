@@ -17,23 +17,24 @@
     <div>
         <p class="dashboard-eyebrow">VISÃO CONTÁBIL</p>
         <h1>{{ data.empresa_nome }}</h1>
-        <p class="dashboard-meta">CNPJ {{ data.empresa_cnpj }} <span aria-hidden="true">·</span> Período {{ data.periodo }}</p>
+        <p class="dashboard-meta">CNPJ {{ data.empresa_cnpj | cnpj }} <span aria-hidden="true">·</span> Período {{ data.periodo | periodo }}</p>
     </div>
-    <div class="dashboard-controls">
-        <select class="form-select" id="ecd-selector"
+    {# O seletor não tinha `name` e trocava só os cartões de KPI: escolher
+       outra ECD respondia 422 e nada mudava.  Agora é um GET comum para
+       `/?ecd_id=`, que recarrega o painel inteiro — gráficos e abas junto. #}
+    <form class="dashboard-controls" method="get" action="/">
+        <select class="form-select" id="ecd-selector" name="ecd_id"
                 aria-label="Escolher empresa e período contábil"
-                hx-get="/api/kpis"
-                hx-target="#dashboard-content"
-                hx-trigger="change"
-                hx-include="this">
+                onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()">
             {% for e in ecds %}
             <option value="{{ e.id }}" {% if e.id == ecd_ativo %}selected{% endif %}>
-                {{ e.empresa }} — {{ e.periodo }}
+                {{ e.empresa }} — {{ e.periodo | periodo }}
             </option>
             {% endfor %}
         </select>
+        <noscript><button type="submit" class="btn btn-outline btn-sm">Abrir</button></noscript>
         <a href="/upload" class="btn btn-outline btn-sm">Nova ECD</a>
-    </div>
+    </form>
 </header>
 
 <!-- ── Dashboard Content ── -->
@@ -45,8 +46,10 @@
         <div class="card">
             <h2 class="card-header" id="chart-evolucao-title">Evolução patrimonial</h2>
             <div class="card-body">
-                <canvas id="chart-evolucao" height="280" role="img"
-                        aria-label="Evolução do ativo total e do passivo mais patrimônio líquido"></canvas>
+                <div class="chart-box">
+                    <canvas id="chart-evolucao" role="img"
+                            aria-label="Evolução do ativo total e do passivo mais patrimônio líquido"></canvas>
+                </div>
                 <p class="chart-caption">Ativo total comparado ao passivo e patrimônio líquido no período.</p>
                 {% if evolucao and evolucao.labels %}
                 <details class="chart-data-details">
@@ -73,8 +76,10 @@
         <div class="card">
             <h2 class="card-header" id="chart-composicao-title">Composição do ativo</h2>
             <div class="card-body">
-                <canvas id="chart-composicao" height="280" role="img"
-                        aria-label="Composição dos grupos que formam o ativo da empresa"></canvas>
+                <div class="chart-box">
+                    <canvas id="chart-composicao" role="img"
+                            aria-label="Composição dos grupos que formam o ativo da empresa"></canvas>
+                </div>
                 <p class="chart-caption">Participação de cada grupo no ativo total.</p>
                 {% if composicao and composicao.labels %}
                 <details class="chart-data-details">
@@ -103,8 +108,10 @@
     <div class="card" style="margin-bottom:24px;">
         <h2 class="card-header" id="chart-dre-title">DRE · Demonstração do Resultado</h2>
         <div class="card-body">
-            <canvas id="chart-dre" height="200" role="img"
-                    aria-label="Valores das etapas da Demonstração do Resultado do Exercício"></canvas>
+            <div class="chart-box chart-box-wide">
+                <canvas id="chart-dre" role="img"
+                        aria-label="Valores das etapas da Demonstração do Resultado do Exercício"></canvas>
+            </div>
             <p class="chart-caption">Valores por etapa da DRE para a escrituração selecionada.</p>
             {% if dre_waterfall and dre_waterfall.labels %}
             <details class="chart-data-details">
@@ -132,8 +139,10 @@
     <div class="card" style="margin-bottom:24px;">
         <h2 class="card-header" id="chart-dfc-title">DFC · Fluxos de caixa</h2>
         <div class="card-body">
-            <canvas id="chart-dfc" height="200" role="img"
-                    aria-label="Fluxos de caixa por atividade operacional, investimento e financiamento"></canvas>
+            <div class="chart-box chart-box-wide">
+                <canvas id="chart-dfc" role="img"
+                        aria-label="Fluxos de caixa por atividade operacional, investimento e financiamento"></canvas>
+            </div>
             <p class="chart-caption">Fluxos operacionais, de investimento e de financiamento.</p>
             <details class="chart-data-details">
                 <summary>Consultar valores em tabela</summary>
@@ -156,8 +165,10 @@
     <div class="card" style="margin-bottom:24px;">
         <h2 class="card-header" id="chart-comparativo-title">Comparativo entre empresas</h2>
         <div class="card-body">
-            <canvas id="chart-comparativo" height="250" role="img"
-                    aria-label="Comparativo de ativo total, patrimônio líquido e resultado entre empresas"></canvas>
+            <div class="chart-box">
+                <canvas id="chart-comparativo" role="img"
+                        aria-label="Comparativo de ativo total, patrimônio líquido e resultado entre empresas"></canvas>
+            </div>
             <p class="chart-caption">Ativo, patrimônio líquido e resultado das empresas selecionadas.</p>
             <details class="chart-data-details">
                 <summary>Consultar valores em tabela</summary>
@@ -202,7 +213,6 @@
                         <option value="01">Ativo</option>
                         <option value="02">Passivo</option>
                         <option value="03">PL</option>
-                        <option value="04">Resultado</option>
                     </select>
                 </div>
                 <div>
@@ -240,27 +250,27 @@
     <div class="card">
         <div class="card-header">📋 Relatórios</div>
         <div class="card-body">
-            <div class="tabs" x-data="{ tab: 'balanco' }">
-                <button class="tab-btn" :class="{ active: tab === 'balanco' }" @click="tab = 'balanco'">Balanço</button>
-                <button class="tab-btn" :class="{ active: tab === 'dre' }" @click="tab = 'dre'">DRE</button>
-                <button class="tab-btn" :class="{ active: tab === 'dfc' }" @click="tab = 'dfc'">DFC</button>
-                <button class="tab-btn" :class="{ active: tab === 'diario' }" @click="tab = 'diario'">Diário</button>
+            {# A barra de abas e os painéis ficam separados: com os painéis
+               dentro da barra flex, a borda da barra caía embaixo do relatório. #}
+            <div x-data="{ tab: 'balanco' }">
+              <div class="tabs" role="tablist" aria-label="Relatórios contábeis">
+                <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'balanco'" :class="{ active: tab === 'balanco' }" @click="tab = 'balanco'">Balanço</button>
+                <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'dre'" :class="{ active: tab === 'dre' }" @click="tab = 'dre'">DRE</button>
+                <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'dfc'" :class="{ active: tab === 'dfc' }" @click="tab = 'dfc'">DFC</button>
+                <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'diario'" :class="{ active: tab === 'diario' }" @click="tab = 'diario'">Diário</button>
+              </div>
 
                 <!-- Balanço -->
-                <div class="tab-content" :class="{ active: tab === 'balanco' }" style="width:100%;">
-                    <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                <div class="tab-content" role="tabpanel" :class="{ active: tab === 'balanco' }">
+                    <div class="report-actions">
                         <button class="btn btn-sm btn-outline"
                                 hx-get="/api/balanco?ecd_id={{ ecd_ativo }}&visao=hierarquica"
                                 hx-target="#tab-balanco" hx-swap="innerHTML">Hierárquica</button>
                         <button class="btn btn-sm btn-outline"
                                 hx-get="/api/balanco?ecd_id={{ ecd_ativo }}&visao=publicacao"
                                 hx-target="#tab-balanco" hx-swap="innerHTML">Publicação</button>
-                        <button class="btn btn-sm btn-outline"
-                                hx-get="/api/export/pdf?ecd_id={{ ecd_ativo }}&tipo=balanco"
-                                hx-target="_blank">📄 PDF</button>
-                        <button class="btn btn-sm btn-outline"
-                                hx-get="/api/export/xlsx?ecd_id={{ ecd_ativo }}&tipo=balanco"
-                                hx-target="#export-result">📊 XLSX</button>
+                        <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_ativo }}&tipo=balanco" download>📄 PDF</a>
+                        <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_ativo }}&tipo=balanco" download>📊 XLSX</a>
                     </div>
                     <div id="tab-balanco" hx-get="/api/balanco?ecd_id={{ ecd_ativo }}" hx-trigger="load">
                         <div class="spinner"></div> Carregando...
@@ -268,14 +278,10 @@
                 </div>
 
                 <!-- DRE -->
-                <div class="tab-content" :class="{ active: tab === 'dre' }" style="width:100%;">
-                    <div style="margin-bottom:12px;display:flex;gap:8px;">
-                        <button class="btn btn-sm btn-outline"
-                                hx-get="/api/export/pdf?ecd_id={{ ecd_ativo }}&tipo=dre"
-                                hx-target="_blank">📄 PDF</button>
-                        <button class="btn btn-sm btn-outline"
-                                hx-get="/api/export/xlsx?ecd_id={{ ecd_ativo }}&tipo=dre"
-                                hx-target="#export-result">📊 XLSX</button>
+                <div class="tab-content" role="tabpanel" :class="{ active: tab === 'dre' }">
+                    <div class="report-actions">
+                        <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_ativo }}&tipo=dre" download>📄 PDF</a>
+                        <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_ativo }}&tipo=dre" download>📊 XLSX</a>
                     </div>
                     <div id="tab-dre" hx-get="/api/dre?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
                         <div class="spinner"></div> Carregando...
@@ -283,14 +289,14 @@
                 </div>
 
                 <!-- DFC -->
-                <div class="tab-content" :class="{ active: tab === 'dfc' }" style="width:100%;">
+                <div class="tab-content" role="tabpanel" :class="{ active: tab === 'dfc' }">
                     <div id="tab-dfc" hx-get="/api/dfc?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
                         <div class="spinner"></div> Carregando...
                     </div>
                 </div>
 
                 <!-- Diário -->
-                <div class="tab-content" :class="{ active: tab === 'diario' }" style="width:100%;">
+                <div class="tab-content" role="tabpanel" :class="{ active: tab === 'diario' }">
                     <div id="tab-diario" hx-get="/api/diario?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
                         <div class="spinner"></div> Carregando...
                     </div>
@@ -298,7 +304,6 @@
             </div>
         </div>
     </div>
-    <div id="export-result" style="margin-top:8px;"></div>
 </div>
 {% endif %}
 {% endblock %}

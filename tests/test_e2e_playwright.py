@@ -194,7 +194,16 @@ def live_server(db_path, tmp_path_factory):
     base_url = f"http://127.0.0.1:{porta}"
     log = tmp_path_factory.mktemp("e2e") / "uvicorn.log"
 
-    ambiente = {**os.environ, "SPED_HUB_DB": db_path}
+    # O limite de login por IP (10 por minuto) vale para o módulo inteiro: um
+    # servidor só, todos os navegadores em 127.0.0.1.  Com mais de dez testes
+    # entrando pela tela, o décimo primeiro recebia 429 e esperava o painel
+    # até estourar o tempo — falha que não diz nada sobre o que o teste
+    # confere.  O limitador tem suíte própria (`test_fase13.py`).
+    ambiente = {
+        **os.environ,
+        "SPED_HUB_DB": db_path,
+        "SPED_HUB_RATE_LIMIT_LOGIN": "1000",
+    }
 
     with log.open("wb") as saida:
         proc = subprocess.Popen(
@@ -525,6 +534,110 @@ class TestE2EDashboard:
             body_text = page.inner_text("body")
             assert len(body_text) > 0
 
+            browser.close()
+
+
+def _enviar_ecd(context, live_server, caminho) -> int:
+    """Importa pela API com a sessão do navegador — mais rápido que a tela."""
+    import httpx
+
+    cookies = {cookie["name"]: cookie["value"] for cookie in context.cookies()}
+    with open(caminho, "rb") as arquivo:
+        resposta = httpx.post(
+            f"{live_server}/api/upload",
+            files={"file": ("ecd.txt", arquivo, "text/plain")},
+            cookies=cookies,
+            timeout=30,
+        )
+    assert resposta.status_code == 200, resposta.text
+    return resposta.json()["ecd_id"]
+
+
+class TestE2EPainelRevisado:
+    """O que só um navegador consegue medir no painel (versão 0.20.0)."""
+
+    def test_graficos_tem_altura_limitada(self, live_server, ecd_factory, contador):
+        """Com `maintainAspectRatio: false` e sem pai de altura fixa, o canvas
+        crescia até o fim da coluna do grid: a evolução patrimonial passava de
+        2.000 px e o painel inteiro chegava a 14.000 px no celular."""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            for largura in (1366, 390):
+                context = browser.new_context(viewport={"width": largura, "height": 900})
+                page = context.new_page()
+                _entrar(page, live_server, contador)
+                _enviar_ecd(context, live_server, ecd_factory(f"graficos{largura}"))
+                page.goto(f"{live_server}/")
+                expect(page.locator("[data-chart-data-status]")).to_contain_text(
+                    "atualizados", timeout=15_000
+                )
+                page.wait_for_timeout(300)
+                for grafico in ("chart-evolucao", "chart-composicao", "chart-dre", "chart-dfc"):
+                    altura = page.eval_on_selector(
+                        f"#{grafico}", "e => e.getBoundingClientRect().height"
+                    )
+                    assert 0 < altura <= 400, (
+                        f"#{grafico} com {altura:.0f}px de altura em tela de {largura}px — "
+                        "o gráfico voltou a crescer sem limite"
+                    )
+                context.close()
+            browser.close()
+
+    def test_seletor_troca_a_ecd_do_painel(self, live_server, ecd_factory, contador):
+        """O seletor não tinha `name`: escolher outra ECD respondia 422 e nada mudava."""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            context = browser.new_context()
+            page = context.new_page()
+            _entrar(page, live_server, contador)
+            primeira = _enviar_ecd(context, live_server, ecd_factory("seletora"))
+            _enviar_ecd(context, live_server, ecd_factory("seletorb"))
+
+            page.goto(f"{live_server}/")
+            assert "SELETORB" in page.inner_text(".dashboard-hero h1")
+            with page.expect_navigation():
+                page.select_option("#ecd-selector", str(primeira))
+
+            assert f"ecd_id={primeira}" in page.url
+            assert "SELETORA" in page.inner_text(
+                ".dashboard-hero h1"
+            ), "o seletor mudou e o painel continuou mostrando a outra empresa"
+            browser.close()
+
+    def test_pdf_do_balanco_e_baixado(self, live_server, ecd_factory, contador):
+        """`hx-target="_blank"` não é seletor: o htmx acusava erro e não pedia nada."""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            context = browser.new_context(accept_downloads=True)
+            page = context.new_page()
+            _entrar(page, live_server, contador)
+            ecd_id = _enviar_ecd(context, live_server, ecd_factory("pdf"))
+
+            page.goto(f"{live_server}/?ecd_id={ecd_id}")
+            with page.expect_download(timeout=60_000) as baixado:
+                page.click(f"a[href='/api/export/pdf?ecd_id={ecd_id}&tipo=balanco']")
+
+            caminho = baixado.value.path()
+            assert Path(caminho).read_bytes()[:5] == b"%PDF-", "o download não é um PDF"
+            browser.close()
+
+    def test_monitoramento_consulta_o_resumo_uma_vez(self, live_server, contador):
+        """`x-init="init()"` repetia o `init()` que o `x-data` já chama: dois
+        laços de 15 s consultando o servidor, e o primeiro nunca era parado."""
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            page = browser.new_context().new_page()
+            _entrar(page, live_server, contador)
+            pedidos = []
+            page.on(
+                "request",
+                lambda r: pedidos.append(r.url) if "/api/monitoring/summary" in r.url else None,
+            )
+
+            page.goto(f"{live_server}/monitoring")
+            page.wait_for_timeout(1500)
+
+            assert len(pedidos) == 1, f"o resumo foi pedido {len(pedidos)} vezes ao abrir a tela"
             browser.close()
 
 

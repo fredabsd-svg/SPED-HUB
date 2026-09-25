@@ -59,6 +59,9 @@ API externa).
 - **`_resolve_tenant` engole exceções** (loga e retorna `None`): falha ao
   resolver tenant vira "sem isolamento", não erro 500.
 - `Sessao.expirado` normaliza datetimes naive para UTC antes de comparar.
+- **`validar_token` confere `usuario.ativo` a cada request.** Antes só o
+  `login` conferia: desativar alguém barrava o próximo acesso, mas a sessão
+  aberta seguia valendo até expirar.
 
 ## Como testar isoladamente
 

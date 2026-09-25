@@ -358,7 +358,18 @@
         // (relatórios, KPIs, parciais) seguem o swap normal do HTMX.
         document.body.addEventListener("htmx:beforeSwap", function (evento) {
             var xhr = evento.detail.xhr;
-            if (!xhr || (xhr.getResponseHeader("Content-Type") || "").indexOf("json") === -1) {
+            if (!xhr) {
+                return;
+            }
+            var tipo = xhr.getResponseHeader("Content-Type") || "";
+            if (tipo.indexOf("json") === -1) {
+                // 400 em HTML é recado para quem usa (filtro com data
+                // inválida, por exemplo).  O HTMX não faz swap de 4xx por
+                // padrão, e a tela ficaria parada sem dizer o que houve.
+                if (xhr.status === 400 && tipo.indexOf("html") !== -1) {
+                    evento.detail.shouldSwap = true;
+                    evento.detail.isError = false;
+                }
                 return;
             }
             var corpo;
