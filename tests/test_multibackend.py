@@ -199,6 +199,18 @@ class TestRelatoriosIdenticos:
         assert totais["resultado_liquido"] == 21_000
         assert totais["receita_bruta"] == 48_000
 
+    def test_dfc(self, sessao_trimestral):
+        from src.reports.dfc import DFC
+
+        _, _linhas, totais = DFC(sessao_trimestral, sessao_trimestral.ecd_id).gerar()
+        assert (totais["operacional"], totais["investimento"], totais["financiamento"]) == (
+            17_000,
+            -12_000,
+            1_000,
+        )
+        assert totais["variacao_caixa"] == totais["variacao_caixa_saldos"] == 6_000
+        assert totais["conciliado"] is True
+
     def test_razao_e_diario(self, sessao_trimestral):
         from src.reports.diario import LivroDiario
         from src.reports.razao import Razao

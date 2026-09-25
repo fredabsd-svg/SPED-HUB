@@ -51,9 +51,10 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard`,
   créditos somados) e dá às sintéticas a soma das filhas. Sintética com
   I155 próprio usa o próprio saldo, e as filhas deixam de subir por ela:
   nada é contado duas vezes. Balancete, balanço (inclusive a visão de
-  publicação e o comparativo), DRE, validações e o painel usam esse único
-  caminho — antes cada um tinha o seu, e cada um errava num ponto (saldos
-  de doze meses somados, ATIVO zerado, centro de custo sobrescrito).
+  publicação e o comparativo), DRE, DFC, validações e o painel usam esse
+  único caminho — antes cada um tinha o seu, e cada um errava num ponto
+  (saldos de doze meses somados, ATIVO zerado, centro de custo
+  sobrescrito).
 - **Critérios de conta escolhem o que aparece, não o que soma.** Com "nível
   até 2", a sintética de nível 2 continua com o saldo das analíticas de
   nível 3. Critérios de valor (mínimo, máximo, saldo zero, sem movimento)
@@ -76,6 +77,24 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard`,
   (`valor_sinalizado`); a natureza da conta (`saldo_por_natureza`) decide a
   exibição. Relatório novo deve passar por essas funções, nunca refazer o
   sinal na mão.
+- **DFC pelo método indireto, conciliada com o caixa.** Lucro líquido =
+  resultado do I355 (crédito − débito). Cada conta patrimonial com saldo
+  próprio, exceto caixa e equivalentes, contribui com **menos a variação**
+  do saldo sinalizado (SF do último I150 − SI do primeiro): aumento de
+  ativo é saída; aumento de passivo, de PL ou de depreciação acumulada é
+  entrada. A linha de distribuição de lucros é a variação das contas do PL
+  que recebem o resultado menos o lucro. Os subtotais são de cada seção
+  (antes acumulavam as anteriores) e o total tem de ser a variação de caixa
+  e equivalentes: a conciliação sai em linhas `conciliacao` e em
+  `totais["diferenca_conciliacao"]`/`totais["conciliado"]`; o PDF avisa
+  quando não concilia (balanço de abertura ou de encerramento que não fecha
+  — é o caso da amostra, 20.000). A classificação é a do módulo:
+  `Mapeamento` "dfc" da empresa (conta ou superior mapeado mais próximo,
+  categorias da DFC mais "caixa"); o resto pelo nome da conta ou de uma
+  superior, dentro da natureza. Imobilizado sai líquido de baixas: sem o
+  lançamento, o saldo não separa compra de venda. O comparativo é a DFC da
+  ECD anterior pelo mesmo cálculo. Dos filtros, valem período e centro de
+  custo — DFC de parte das contas não concilia.
 - **Razão: uma linha por partida, saldo desde o I155.** O saldo corrente
   parte do SI do I155 (sem data inicial, o do primeiro período; com data,
   o do período em que ela cai mais as partidas anteriores a ela dentro
@@ -105,7 +124,7 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard`,
 
 ```bash
 pytest tests/test_reports.py tests/test_fase2.py tests/test_identidade_export.py -q
-pytest tests/test_saldos_consolidados.py tests/test_razao_diario.py -q   # ECD trimestral
+pytest tests/test_saldos_consolidados.py tests/test_razao_diario.py tests/test_dfc_metodo_indireto.py -q
 pytest tests/test_cli.py -q -k exportar
 ```
 

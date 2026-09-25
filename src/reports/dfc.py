@@ -5,155 +5,203 @@ Estrutura conforme NBC TG 03 / CPC 03:
   2. Fluxo das Atividades de Investimento
   3. Fluxo das Atividades de Financiamento
   4. Variação Líquida de Caixa e Equivalentes
+  5. Conciliação com os saldos de caixa e equivalentes
 
-Fase 6: +período anterior comparativo.
+Método indireto a partir dos saldos (I155) e do resultado (I355):
+
+* lucro líquido do exercício = resultado do I355 (crédito − débito);
+* cada conta patrimonial (ativo, passivo, PL), exceto caixa e equivalentes,
+  contribui com **menos a variação do saldo sinalizado** (SF do último I150
+  − SI do primeiro): aumento de ativo é saída de caixa; aumento de passivo,
+  PL ou depreciação acumulada é entrada;
+* as contas do PL que recebem o resultado (lucros acumulados, reservas) dão
+  a distribuição de lucros: a variação delas menos o lucro do exercício;
+* a soma das três seções tem de ser a variação de caixa e equivalentes
+  (SF − SI). Quando o balanço de abertura ou de encerramento não fecha, não
+  é — e a diferença sai numa linha própria, em vez de sumir.
+
+A classificação das contas segue a do módulo: mapeamento da empresa
+(`Mapeamento`, tipo "dfc") pela conta ou pelo superior mapeado mais
+próximo; o que não estiver mapeado, pelo nome da conta ou de um superior,
+dentro da natureza.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from unidecode import unidecode
 
-from src.db.models import Mapeamento, PlanoConta, SaldoPeriodico
+from src.db.models import Mapeamento
 from src.filters.engine import FilterCriteria, FilterEngine
-from src.reports.base import (
-    ReportContext,
-    valor_sinalizado,
-)
+from src.reports.base import ReportContext
+from src.reports.saldos import consolidar, somar_resultado
+
+TOLERANCIA_CONCILIACAO = 0.01
 
 
 @dataclass
 class LinhaDFC:
-    tipo: str  # step, detail, subtotal, total
+    tipo: str  # section, step, subtotal, total, conciliacao
     descricao: str
     valor: float = 0.0
     valor_anterior: float = 0.0
     ordem: int = 0
 
 
+# (tipo, descrição, categoria). Subtotal e total não têm categoria.
 DFC_DEFAULT = [
-    {
-        "tipo": "section",
-        "descricao": "Fluxo das Atividades Operacionais",
-        "categoria": None,
-        "sinal": 0,
-    },
-    {
-        "tipo": "step",
-        "descricao": "Lucro Líquido do Exercício",
-        "categoria": "lucro_liquido",
-        "sinal": 1,
-    },
-    {
-        "tipo": "step",
-        "descricao": "(+) Depreciação e Amortização",
-        "categoria": "depreciacao",
-        "sinal": 1,
-    },
+    {"tipo": "section", "descricao": "Fluxo das Atividades Operacionais", "categoria": None},
+    {"tipo": "step", "descricao": "Lucro Líquido do Exercício", "categoria": "lucro_liquido"},
+    {"tipo": "step", "descricao": "(+) Depreciação e Amortização", "categoria": "depreciacao"},
     {
         "tipo": "step",
         "descricao": "(+/-) Variação em Contas a Receber",
         "categoria": "var_contas_receber",
-        "sinal": 1,
     },
-    {
-        "tipo": "step",
-        "descricao": "(+/-) Variação em Estoques",
-        "categoria": "var_estoques",
-        "sinal": 1,
-    },
+    {"tipo": "step", "descricao": "(+/-) Variação em Estoques", "categoria": "var_estoques"},
     {
         "tipo": "step",
         "descricao": "(+/-) Variação em Fornecedores",
         "categoria": "var_fornecedores",
-        "sinal": 1,
     },
     {
         "tipo": "step",
         "descricao": "(+/-) Variação em Obrigações Fiscais",
         "categoria": "var_obrig_fiscais",
-        "sinal": 1,
     },
     {
         "tipo": "step",
         "descricao": "(+/-) Outros Ajustes Operacionais",
         "categoria": "outros_operacionais",
-        "sinal": 1,
     },
-    {
-        "tipo": "subtotal",
-        "descricao": "= Caixa Gerado nas Operações",
-        "categoria": None,
-        "sinal": 0,
-    },
-    {
-        "tipo": "section",
-        "descricao": "Fluxo das Atividades de Investimento",
-        "categoria": None,
-        "sinal": 0,
-    },
+    {"tipo": "subtotal", "descricao": "= Caixa Gerado nas Operações", "categoria": None},
+    {"tipo": "section", "descricao": "Fluxo das Atividades de Investimento", "categoria": None},
     {
         "tipo": "step",
         "descricao": "(-) Aquisição de Imobilizado",
         "categoria": "aquisicao_imobilizado",
-        "sinal": -1,
     },
-    {
-        "tipo": "step",
-        "descricao": "(+) Venda de Imobilizado",
-        "categoria": "venda_imobilizado",
-        "sinal": 1,
-    },
+    {"tipo": "step", "descricao": "(+) Venda de Imobilizado", "categoria": "venda_imobilizado"},
     {
         "tipo": "step",
         "descricao": "(-) Aquisição de Intangível",
         "categoria": "aquisicao_intangivel",
-        "sinal": -1,
     },
     {
         "tipo": "step",
         "descricao": "(+/-) Outros Investimentos",
         "categoria": "outros_investimentos",
-        "sinal": 1,
     },
     {
         "tipo": "subtotal",
         "descricao": "= Caixa das Atividades de Investimento",
         "categoria": None,
-        "sinal": 0,
     },
-    {
-        "tipo": "section",
-        "descricao": "Fluxo das Atividades de Financiamento",
-        "categoria": None,
-        "sinal": 0,
-    },
-    {
-        "tipo": "step",
-        "descricao": "(+) Aumento de Capital",
-        "categoria": "aumento_capital",
-        "sinal": 1,
-    },
+    {"tipo": "section", "descricao": "Fluxo das Atividades de Financiamento", "categoria": None},
+    {"tipo": "step", "descricao": "(+) Aumento de Capital", "categoria": "aumento_capital"},
     {
         "tipo": "step",
         "descricao": "(+/-) Empréstimos e Financiamentos",
         "categoria": "emprestimos",
-        "sinal": 1,
     },
     {
         "tipo": "step",
         "descricao": "(-) Distribuição de Lucros",
         "categoria": "distribuicao_lucros",
-        "sinal": -1,
     },
     {
         "tipo": "subtotal",
         "descricao": "= Caixa das Atividades de Financiamento",
         "categoria": None,
-        "sinal": 0,
     },
-    {"tipo": "total", "descricao": "= Variação Líquida de Caixa", "categoria": None, "sinal": 0},
+    {"tipo": "total", "descricao": "= Variação Líquida de Caixa", "categoria": None},
 ]
+
+# Categorias que uma conta patrimonial pode receber. "caixa" não é linha:
+# é o que a DFC explica.
+CATEGORIAS = {
+    "caixa",
+    "depreciacao",
+    "var_contas_receber",
+    "var_estoques",
+    "var_fornecedores",
+    "var_obrig_fiscais",
+    "outros_operacionais",
+    "aquisicao_imobilizado",
+    "venda_imobilizado",
+    "aquisicao_intangivel",
+    "outros_investimentos",
+    "aumento_capital",
+    "emprestimos",
+    "distribuicao_lucros",
+}
+
+_TRIBUTOS = r"IMPOSTO|TRIBUT|OBRIGACOES FISC|\bPIS\b|COFINS|\bICMS\b|\bIPI\b|\bISS\b|IRPJ|CSLL"
+
+# Regras por natureza, em ordem: a primeira que casa decide. O nome é
+# comparado sem acento e em maiúsculas; a conta sem regra que case herda a
+# da superior mais próxima que case.
+_REGRAS: dict[str, list[tuple[str, str]]] = {
+    "01": [
+        ("depreciacao", r"DEPRECIA|AMORTIZA|EXAUST"),
+        (
+            "caixa",
+            r"\bCAIXA\b|\bBANCOS?\b|DISPONIBILIDADE|DISPONIVE|EQUIVALENTES? DE CAIXA"
+            r"|NUMERARIO|LIQUIDEZ IMEDIATA",
+        ),
+        ("var_contas_receber", r"CLIENTE|CONTAS A RECEBER|DUPLICATAS A RECEBER|RECEBIVE"),
+        ("var_estoques", r"ESTOQUE|MERCADORIA|MATERIA.?PRIMA|PRODUTOS ACABADOS"),
+        ("var_obrig_fiscais", _TRIBUTOS),
+        ("var_fornecedores", r"FORNECEDOR"),
+        (
+            "aquisicao_imobilizado",
+            r"IMOBILIZADO|MAQUINA|EQUIPAMENTO|VEICULO|MOVEIS|IMOVE|EDIFIC|TERRENO"
+            r"|BENFEITORIA|INSTALAC|COMPUTADOR",
+        ),
+        ("aquisicao_intangivel", r"INTANGIVE|SOFTWARE|MARCA|PATENTE|LICENCA|DIREITO DE USO"),
+        ("outros_investimentos", r"INVESTIMENTO|PARTICIPAC|COLIGADA|CONTROLADA"),
+    ],
+    "02": [
+        ("var_fornecedores", r"FORNECEDOR"),
+        ("emprestimos", r"EMPRESTIMO|FINANCIAMENTO|DEBENTURE"),
+        ("distribuicao_lucros", r"DIVIDENDO|LUCROS A DISTRIBUIR|JUROS SOBRE (O )?CAPITAL"),
+        ("var_obrig_fiscais", _TRIBUTOS),
+    ],
+    "03": [
+        ("aumento_capital", r"CAPITAL"),
+    ],
+}
+
+# Sem regra que case em nenhum nível: ativo e passivo são capital de giro
+# (outros operacionais); PL que não é capital é lucro retido ou reserva.
+_PADRAO_DA_NATUREZA = {
+    "01": "outros_operacionais",
+    "02": "outros_operacionais",
+    "03": "distribuicao_lucros",
+}
+
+
+def _normalizar(nome: str) -> str:
+    return unidecode(nome or "").upper()
+
+
+@dataclass
+class _Fluxos:
+    """O resultado do método indireto para uma ECD."""
+
+    categorias: dict[str, float] = field(default_factory=lambda: defaultdict(float))
+    lucro: float = 0.0
+    caixa_inicial: float = 0.0
+    caixa_final: float = 0.0
+
+    @property
+    def variacao_saldos(self) -> float:
+        return self.caixa_final - self.caixa_inicial
 
 
 class DFC:
@@ -164,89 +212,17 @@ class DFC:
         self.ecd_id = ecd_id
         self.engine = FilterEngine(session, ecd_id)
 
-    def _get_mapeamentos(self, empresa_id: int) -> dict[str, list[str]]:
-        """Carrega mapeamentos DFC da empresa ou usa defaults."""
-        maps = list(
-            self.session.execute(
-                select(Mapeamento)
-                .where(
-                    Mapeamento.empresa_id == empresa_id,
-                    Mapeamento.tipo == "dfc",
-                )
-                .order_by(Mapeamento.ordem)
-            ).scalars()
-        )
-
-        if maps:
-            result: dict[str, list[str]] = {}
-            for m in maps:
-                result.setdefault(m.categoria, []).append(m.cod_cta)
-            return result
-
-        # Default: classifica por nome da conta
-        plano = {
-            c.cod_cta: c
-            for c in self.session.execute(
-                select(PlanoConta).where(PlanoConta.ecd_id == self.ecd_id)
-            ).scalars()
-        }
-
-        result: dict[str, list[str]] = {
-            "lucro_liquido": [],
-            "depreciacao": [],
-            "var_contas_receber": [],
-            "var_estoques": [],
-            "var_fornecedores": [],
-            "var_obrig_fiscais": [],
-            "outros_operacionais": [],
-            "aquisicao_imobilizado": [],
-            "venda_imobilizado": [],
-            "aquisicao_intangivel": [],
-            "outros_investimentos": [],
-            "aumento_capital": [],
-            "emprestimos": [],
-            "distribuicao_lucros": [],
-        }
-
-        for cod_cta, pc in plano.items():
-            nome = pc.nome_cta.upper()
-
-            if any(t in nome for t in ["DEPRECIA", "AMORTIZA", "EXAUSTÃO"]):
-                result["depreciacao"].append(cod_cta)
-            elif any(t in nome for t in ["CLIENTES", "CONTAS A RECEBER", "DUPLICATAS A RECEBER"]):
-                result["var_contas_receber"].append(cod_cta)
-            elif any(t in nome for t in ["ESTOQUE", "MERCADORIA"]):
-                result["var_estoques"].append(cod_cta)
-            elif any(t in nome for t in ["FORNECEDOR"]):
-                result["var_fornecedores"].append(cod_cta)
-            elif any(
-                t in nome
-                for t in [
-                    "IMPOSTO",
-                    "TRIBUTO",
-                    "OBRIGAÇÕES FISC",
-                    "PIS",
-                    "COFINS",
-                    "ICMS",
-                    "IRPJ",
-                    "CSLL",
-                ]
-            ):
-                result["var_obrig_fiscais"].append(cod_cta)
-            elif any(
-                t in nome for t in ["IMOBILIZADO", "MÁQUINAS", "EQUIPAMENTO", "VEÍCULO", "MÓVEIS"]
-            ):
-                result["aquisicao_imobilizado"].append(cod_cta)
-            elif any(t in nome for t in ["INTANGÍVEL", "SOFTWARE", "MARCA", "PATENTE"]):
-                result["aquisicao_intangivel"].append(cod_cta)
-            elif any(t in nome for t in ["CAPITAL SOCIAL", "CAPITAL SUBSCRITO"]):
-                result["aumento_capital"].append(cod_cta)
-            elif any(t in nome for t in ["EMPRÉSTIMO", "FINANCIAMENTO", "DEBÊNTURE"]):
-                result["emprestimos"].append(cod_cta)
-            elif any(t in nome for t in ["LUCRO", "DIVIDENDO", "DISTRIBUIÇÃO"]):
-                result["distribuicao_lucros"].append(cod_cta)
-
-        return result
+    def _get_mapeamentos(self, empresa_id: int) -> dict[str, str]:
+        """Mapeamento da empresa, `{cod_cta: categoria}` (primeiro por ordem)."""
+        mapeamento: dict[str, str] = {}
+        for m in self.session.execute(
+            select(Mapeamento)
+            .where(Mapeamento.empresa_id == empresa_id, Mapeamento.tipo == "dfc")
+            .order_by(Mapeamento.ordem)
+        ).scalars():
+            if m.categoria in CATEGORIAS:
+                mapeamento.setdefault(m.cod_cta, m.categoria)
+        return mapeamento
 
     def _get_ecd_anterior(self) -> int | None:
         """Encontra o ID da ECD do período anterior para a mesma empresa."""
@@ -267,29 +243,66 @@ class DFC:
         ).scalar_one_or_none()
         return ecd_ant.id if ecd_ant else None
 
-    def _get_saldos_anteriores(self, ecd_anterior_id: int) -> dict[str, float]:
-        """Carrega saldos do período anterior."""
-        saldos_ant = (
-            self.session.execute(
-                select(SaldoPeriodico).where(SaldoPeriodico.ecd_id == ecd_anterior_id)
-            )
-            .scalars()
-            .all()
-        )
-        result: dict[str, float] = {}
-        for s in saldos_ant:
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            result[s.cod_cta] = vl
-        return result
+    @staticmethod
+    def _classificar(cod: str, engine: FilterEngine, mapeamento: dict[str, str]) -> str | None:
+        """Categoria da conta patrimonial; `None` para natureza fora do balanço."""
+        plano = engine.plano()
+        natureza = plano[cod].cod_nat
+        if natureza not in _REGRAS:
+            return None
+        mapeada = engine.hierarquia().atribuir(cod, mapeamento)
+        if mapeada is not None:
+            return mapeada
+        for candidata in (cod, *engine.hierarquia().ancestrais(cod)):
+            nome = _normalizar(plano[candidata].nome_cta)
+            for categoria, padrao in _REGRAS[natureza]:
+                if re.search(padrao, nome):
+                    return categoria
+        return _PADRAO_DA_NATUREZA[natureza]
+
+    @classmethod
+    def _calcular(
+        cls, engine: FilterEngine, criterios: FilterCriteria, mapeamento: dict[str, str]
+    ) -> _Fluxos:
+        """Fluxos de uma ECD: cada conta patrimonial uma vez, pela variação do saldo."""
+        fluxos = _Fluxos()
+        fluxos.lucro = -sum(somar_resultado(engine.aplicar_saldos_resultado(criterios)).values())
+
+        saldos = consolidar(engine, criterios)
+        for cod in saldos.hierarquia.contas_base(saldos.proprios):
+            categoria = cls._classificar(cod, engine, mapeamento)
+            if categoria is None:
+                continue
+            saldo = saldos.proprios[cod]
+            if categoria == "caixa":
+                fluxos.caixa_inicial += saldo.si
+                fluxos.caixa_final += saldo.sf
+                continue
+            # Menos a variação: ativo que sobe consome caixa; passivo, PL e
+            # depreciação acumulada que sobem (mais crédito) liberam caixa.
+            fluxos.categorias[categoria] += -(saldo.sf - saldo.si)
+
+        # O lucro entra no PL pelos lucros acumulados/reservas: o que a
+        # variação dessas contas não explica pelo lucro foi distribuído.
+        fluxos.categorias["distribuicao_lucros"] -= fluxos.lucro
+        fluxos.categorias["lucro_liquido"] = fluxos.lucro
+        return fluxos
 
     def gerar(
         self,
         criterios: FilterCriteria | None = None,
         empresa_id: int | None = None,
     ) -> tuple[ReportContext, list[LinhaDFC], dict[str, float]]:
-        """Gera a DFC com comparativo de período anterior."""
-        if criterios is None:
-            criterios = FilterCriteria()
+        """Gera a DFC com comparativo de período anterior.
+
+        Dos critérios, valem o período e o centro de custo: uma DFC de parte
+        das contas não fecha com o caixa, então filtro de conta não se aplica
+        (e não aparece no cabeçalho).
+        """
+        criterios = criterios or FilterCriteria()
+        criterios = FilterCriteria(
+            dt_ini=criterios.dt_ini, dt_fin=criterios.dt_fin, cod_ccus=list(criterios.cod_ccus)
+        )
 
         if empresa_id is None:
             from src.db.models import ECD
@@ -297,125 +310,103 @@ class DFC:
             ecd = self.session.get(ECD, self.ecd_id)
             empresa_id = ecd.empresa_id if ecd else 0
 
-        mapeamentos = self._get_mapeamentos(empresa_id)
+        mapeamento = self._get_mapeamentos(empresa_id)
+        atual = self._calcular(self.engine, criterios, mapeamento)
 
-        # Busca saldos atuais
-        saldos = self.engine.aplicar_saldos(criterios)
-        saldo_por_conta: dict[str, float] = {}
-        for s in saldos:
-            vl = valor_sinalizado(s.vl_sld_fin, s.ind_dc_fin)
-            saldo_por_conta[s.cod_cta] = vl
-
-        # Busca saldos do período anterior
         ecd_ant_id = self._get_ecd_anterior()
-        saldo_anterior_por_conta: dict[str, float] = {}
+        anterior = _Fluxos()
         if ecd_ant_id:
-            saldo_anterior_por_conta = self._get_saldos_anteriores(ecd_ant_id)
+            anterior = self._calcular(
+                FilterEngine(self.session, ecd_ant_id), FilterCriteria(), mapeamento
+            )
 
-        # Calcula valores por categoria (atual e anterior)
-        cat_valores: dict[str, float] = {}
-        cat_valores_ant: dict[str, float] = {}
-        for cat, contas in mapeamentos.items():
-            total = sum(saldo_por_conta.get(c, 0.0) for c in contas)
-            cat_valores[cat] = total
-            total_ant = sum(saldo_anterior_por_conta.get(c, 0.0) for c in contas)
-            cat_valores_ant[cat] = total_ant
-
-        # Monta linhas
         linhas: list[LinhaDFC] = []
-        running = 0.0
-        running_ant = 0.0
-
+        secao = secao_ant = 0.0
+        total = total_ant = 0.0
+        subtotais: list[tuple[float, float]] = []
         for i, degrau in enumerate(DFC_DEFAULT):
-            if degrau["categoria"] is None:
-                if degrau["tipo"] in ("subtotal", "total"):
-                    linhas.append(
-                        LinhaDFC(
-                            tipo=degrau["tipo"],
-                            descricao=degrau["descricao"],
-                            valor=running,
-                            valor_anterior=running_ant,
-                            ordem=i,
-                        )
-                    )
-                else:
-                    linhas.append(
-                        LinhaDFC(
-                            tipo=degrau["tipo"],
-                            descricao=degrau["descricao"],
-                            valor=0.0,
-                            valor_anterior=0.0,
-                            ordem=i,
-                        )
-                    )
+            if degrau["tipo"] == "section":
+                secao = secao_ant = 0.0
+                valor = valor_ant = 0.0
+            elif degrau["tipo"] == "subtotal":
+                # Subtotal da própria seção: antes acumulava as anteriores.
+                valor, valor_ant = secao, secao_ant
+                subtotais.append((valor, valor_ant))
+                total += valor
+                total_ant += valor_ant
+            elif degrau["tipo"] == "total":
+                valor, valor_ant = total, total_ant
             else:
-                vl = cat_valores.get(degrau["categoria"], 0.0)
-                vl_ant = cat_valores_ant.get(degrau["categoria"], 0.0)
-                vl_dfc = vl * degrau["sinal"]
-                vl_dfc_ant = vl_ant * degrau["sinal"]
-                running += vl_dfc
-                running_ant += vl_dfc_ant
-                linhas.append(
-                    LinhaDFC(
-                        tipo=degrau["tipo"],
-                        descricao=degrau["descricao"],
-                        valor=vl_dfc,
-                        valor_anterior=vl_dfc_ant,
-                        ordem=i,
-                    )
+                valor = round(atual.categorias.get(degrau["categoria"], 0.0), 2)
+                valor_ant = round(anterior.categorias.get(degrau["categoria"], 0.0), 2)
+                secao += valor
+                secao_ant += valor_ant
+            linhas.append(
+                LinhaDFC(
+                    tipo=degrau["tipo"],
+                    descricao=degrau["descricao"],
+                    valor=round(valor, 2),
+                    valor_anterior=round(valor_ant, 2),
+                    ordem=i,
                 )
+            )
 
+        diferenca = round(total - atual.variacao_saldos, 2)
+        diferenca_ant = round(total_ant - anterior.variacao_saldos, 2)
+        conciliacao = [
+            ("section", "Conciliação com caixa e equivalentes", 0.0, 0.0),
+            (
+                "conciliacao",
+                "Caixa e equivalentes no início do período",
+                atual.caixa_inicial,
+                anterior.caixa_inicial,
+            ),
+            (
+                "conciliacao",
+                "Caixa e equivalentes no fim do período",
+                atual.caixa_final,
+                anterior.caixa_final,
+            ),
+            (
+                "conciliacao",
+                "Variação de caixa nos saldos (fim − início)",
+                atual.variacao_saldos,
+                anterior.variacao_saldos,
+            ),
+            ("conciliacao", "Diferença não conciliada (fluxos − saldos)", diferenca, diferenca_ant),
+        ]
+        for tipo, descricao, valor, valor_ant in conciliacao:
+            linhas.append(
+                LinhaDFC(
+                    tipo=tipo,
+                    descricao=descricao,
+                    valor=round(valor, 2),
+                    valor_anterior=round(valor_ant, 2),
+                    ordem=len(linhas),
+                )
+            )
+
+        (fco, fco_ant), (fci, fci_ant), (fcf, fcf_ant) = subtotais
         totais = {
-            "variacao_caixa": running,
-            "variacao_caixa_anterior": running_ant,
-            "operacional": next(
-                (
-                    ln.valor
-                    for ln in linhas
-                    if "Operações" in ln.descricao and ln.tipo == "subtotal"
-                ),
-                0.0,
-            ),
-            "operacional_anterior": next(
-                (
-                    ln.valor_anterior
-                    for ln in linhas
-                    if "Operações" in ln.descricao and ln.tipo == "subtotal"
-                ),
-                0.0,
-            ),
-            "investimento": next(
-                (
-                    ln.valor
-                    for ln in linhas
-                    if "Investimento" in ln.descricao and ln.tipo == "subtotal"
-                ),
-                0.0,
-            ),
-            "investimento_anterior": next(
-                (
-                    ln.valor_anterior
-                    for ln in linhas
-                    if "Investimento" in ln.descricao and ln.tipo == "subtotal"
-                ),
-                0.0,
-            ),
-            "financiamento": next(
-                (
-                    ln.valor
-                    for ln in linhas
-                    if "Financiamento" in ln.descricao and ln.tipo == "subtotal"
-                ),
-                0.0,
-            ),
-            "financiamento_anterior": next(
-                (
-                    ln.valor_anterior
-                    for ln in linhas
-                    if "Financiamento" in ln.descricao and ln.tipo == "subtotal"
-                ),
-                0.0,
-            ),
+            "variacao_caixa": round(total, 2),
+            "variacao_caixa_anterior": round(total_ant, 2),
+            "operacional": round(fco, 2),
+            "operacional_anterior": round(fco_ant, 2),
+            "investimento": round(fci, 2),
+            "investimento_anterior": round(fci_ant, 2),
+            "financiamento": round(fcf, 2),
+            "financiamento_anterior": round(fcf_ant, 2),
+            "lucro_liquido": round(atual.lucro, 2),
+            "lucro_liquido_anterior": round(anterior.lucro, 2),
+            "caixa_inicial": round(atual.caixa_inicial, 2),
+            "caixa_final": round(atual.caixa_final, 2),
+            "variacao_caixa_saldos": round(atual.variacao_saldos, 2),
+            "diferenca_conciliacao": diferenca,
+            "conciliado": abs(diferenca) <= TOLERANCIA_CONCILIACAO,
+            "caixa_inicial_anterior": round(anterior.caixa_inicial, 2),
+            "caixa_final_anterior": round(anterior.caixa_final, 2),
+            "variacao_caixa_saldos_anterior": round(anterior.variacao_saldos, 2),
+            "diferenca_conciliacao_anterior": diferenca_ant,
             "tem_anterior": ecd_ant_id is not None,
         }
 
