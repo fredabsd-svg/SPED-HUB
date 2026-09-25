@@ -34,7 +34,14 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.api import ApiKeyService, requer_admin_de_sessao, requer_api_key
+from src.api import (
+    ApiKeyService,
+    credencial_ve_ecd,
+    escopo_da_credencial,
+    requer_admin_de_sessao,
+    requer_api_key,
+    requer_credencial_de_instancia,
+)
 from src.audit import AuditService
 from src.dashboard.services import DashboardService
 from src.db.models import (
@@ -98,24 +105,6 @@ async def health_check():
 # ── Empresas ────────────────────────────────────────────────────────────────
 
 
-def _escopo_da_credencial(stmt, credencial):
-    """Restringe uma query com `Empresa` ao escritório da credencial.
-
-    `credencial` é a API Key (ou o usuário admin de sessão) que passou pela
-    dependência. Chave **sem** escritório é chave de instância e lê tudo — é o
-    comportamento histórico, mantido para não invalidar integração existente.
-    Chave **com** escritório lê só o dele.
-
-    Antes nenhuma rota de `/api/v1` filtrava por escritório e a coluna de dono
-    não existia: uma chave entregue ao integrador do escritório A lia a
-    escrituração do B.
-    """
-    escritorio_id = getattr(credencial, "escritorio_id", None)
-    if escritorio_id is None:
-        return stmt
-    return stmt.where(Empresa.escritorio_id == escritorio_id)
-
-
 async def ecd_autorizada(ecd_id: int, credencial=Depends(requer_api_key)) -> int:
     """Confirma que a credencial pode ver esta ECD e devolve o `ecd_id`.
 
@@ -128,11 +117,7 @@ async def ecd_autorizada(ecd_id: int, credencial=Depends(requer_api_key)) -> int
     """
     session = _get_session()
     try:
-        stmt = _escopo_da_credencial(
-            select(ECD.id).join(Empresa, ECD.empresa_id == Empresa.id).where(ECD.id == ecd_id),
-            credencial,
-        )
-        if session.execute(stmt).scalar_one_or_none() is None:
+        if not credencial_ve_ecd(session, credencial, ecd_id):
             raise HTTPException(status_code=404, detail="ECD não encontrada")
     finally:
         session.close()
@@ -151,13 +136,13 @@ async def listar_empresas(
         # A contagem também é escopada: sem isso o total anunciaria empresas
         # que a página nunca mostra, e revelaria quantas existem no vizinho.
         total = (
-            session.execute(_escopo_da_credencial(select(func.count(Empresa.id)), api_key)).scalar()
+            session.execute(escopo_da_credencial(select(func.count(Empresa.id)), api_key)).scalar()
             or 0
         )
         offset = (pagina - 1) * limite
         empresas = (
             session.execute(
-                _escopo_da_credencial(select(Empresa).order_by(Empresa.nome), api_key)
+                escopo_da_credencial(select(Empresa).order_by(Empresa.nome), api_key)
                 .offset(offset)
                 .limit(limite)
             )
@@ -188,10 +173,17 @@ async def listar_empresas(
 
 @router.get("/empresas/{empresa_id}")
 async def detalhe_empresa(empresa_id: int, api_key=Depends(requer_api_key)):
-    """Detalhes de uma empresa."""
+    """Detalhes de uma empresa.
+
+    Escopada como a listagem: com `session.get` puro, a chave do escritório A
+    lia cadastro e lista de ECDs de qualquer empresa do B pedindo o id direto.
+    Empresa de outro escritório responde 404, igual à inexistente.
+    """
     session = _get_session()
     try:
-        empresa = session.get(Empresa, empresa_id)
+        empresa = session.execute(
+            escopo_da_credencial(select(Empresa).where(Empresa.id == empresa_id), api_key)
+        ).scalar_one_or_none()
         if not empresa:
             raise HTTPException(status_code=404, detail="Empresa não encontrada")
 
@@ -249,7 +241,7 @@ async def listar_ecds(
     try:
         # O `join` com Empresa é o que permite escopar: sem ele a contagem de
         # ECDs não tem por onde chegar ao escritório.
-        query = _escopo_da_credencial(
+        query = escopo_da_credencial(
             select(func.count(ECD.id)).join(Empresa, ECD.empresa_id == Empresa.id), api_key
         )
         if empresa_id:
@@ -257,7 +249,7 @@ async def listar_ecds(
         total = session.execute(query).scalar() or 0
 
         offset = (pagina - 1) * limite
-        query_ecds = _escopo_da_credencial(
+        query_ecds = escopo_da_credencial(
             select(ECD, Empresa.nome).join(Empresa).order_by(ECD.importado_em.desc()), api_key
         )
         if empresa_id:
@@ -576,6 +568,13 @@ async def api_evolucao_multi(ecd_id: int = Depends(ecd_autorizada)):
 
 
 # ── Webhooks (Fase 10) ──────────────────────────────────────────────────────
+#
+# O registro de webhook não tem escritório dono, e o evento de toda importação
+# vai para todos os inscritos.  Por isso gerir webhook exige credencial de
+# instância (`requer_credencial_de_instancia`): com qualquer chave, o
+# integrador do escritório A listava, redirecionava para um endereço seu e
+# apagava os webhooks do B.  Só o catálogo de eventos segue aberto a toda
+# chave — é informação estática, sem dado de ninguém.
 
 
 @router.get("/webhooks/eventos")
@@ -587,7 +586,7 @@ async def listar_eventos(api_key=Depends(requer_api_key)):
 
 
 @router.get("/webhooks")
-async def listar_webhooks(api_key=Depends(requer_api_key)):
+async def listar_webhooks(api_key=Depends(requer_credencial_de_instancia)):
     """Lista todos os webhooks registrados."""
     svc = WebhookService(_get_db_path())
     webhooks = svc.listar()
@@ -612,7 +611,7 @@ async def listar_webhooks(api_key=Depends(requer_api_key)):
 @router.post("/webhooks")
 async def registrar_webhook(
     payload: dict = Body(...),
-    api_key=Depends(requer_api_key),
+    api_key=Depends(requer_credencial_de_instancia),
 ):
     """Registra um novo webhook.
 
@@ -659,7 +658,7 @@ async def registrar_webhook(
 async def atualizar_webhook(
     webhook_id: int,
     payload: dict = Body(...),
-    api_key=Depends(requer_api_key),
+    api_key=Depends(requer_credencial_de_instancia),
 ):
     """Atualiza um webhook existente."""
     svc = WebhookService(_get_db_path())
@@ -699,7 +698,7 @@ async def atualizar_webhook(
 
 
 @router.delete("/webhooks/{webhook_id}")
-async def remover_webhook(webhook_id: int, api_key=Depends(requer_api_key)):
+async def remover_webhook(webhook_id: int, api_key=Depends(requer_credencial_de_instancia)):
     """Remove um webhook."""
     svc = WebhookService(_get_db_path())
     removido = svc.remover(webhook_id)
@@ -720,7 +719,7 @@ def _descricao_evento(tipo: str) -> str:
 
 
 @router.get("/webhooks/dashboard")
-async def webhook_dashboard_stats(api_key=Depends(requer_api_key)):
+async def webhook_dashboard_stats(api_key=Depends(requer_credencial_de_instancia)):
     """Estatísticas agregadas do dashboard de webhooks."""
     svc = WebhookService(_get_db_path())
     return svc.get_dashboard_stats()
@@ -731,7 +730,7 @@ async def listar_deliveries(
     webhook_id: int | None = None,
     status: str | None = None,
     limite: int = 50,
-    api_key=Depends(requer_api_key),
+    api_key=Depends(requer_credencial_de_instancia),
 ):
     """Lista histórico de entregas de webhooks."""
     svc = WebhookService(_get_db_path())
@@ -758,7 +757,7 @@ async def listar_deliveries(
 @router.post("/webhooks/retry")
 async def retry_webhooks(
     webhook_id: int | None = None,
-    api_key=Depends(requer_api_key),
+    api_key=Depends(requer_credencial_de_instancia),
 ):
     """Reenvia entregas com falha (retry manual)."""
     svc = WebhookService(_get_db_path())
@@ -885,11 +884,16 @@ async def status_rate_limit(key_id: int, admin=Depends(requer_admin_de_sessao)):
 
 
 # ── Auditoria (Fase 13) ────────────────────────────────────────────────────
+#
+# A trilha de auditoria é uma tabela só, da instância inteira — no dashboard,
+# `/api/audit*` é só de administrador.  Aqui valia qualquer API Key: a chave
+# de um escritório lia os eventos de todos e, com `/audit/limpar?dias=1`,
+# apagava a trilha que registraria o que ela mesma fez.
 
 
 @router.get("/audit/logs")
 async def listar_audit_logs(
-    api_key=Depends(requer_api_key),
+    api_key=Depends(requer_credencial_de_instancia),
     usuario_id: int | None = Query(None),
     acao: str | None = Query(None),
     limite: int = Query(100, ge=1, le=500),
@@ -914,7 +918,7 @@ async def listar_audit_logs(
 
 @router.get("/audit/stats")
 async def audit_stats(
-    api_key=Depends(requer_api_key),
+    api_key=Depends(requer_credencial_de_instancia),
     horas: int = Query(24, ge=1, le=720),
 ):
     """Estatísticas de auditoria das últimas N horas."""
@@ -924,7 +928,7 @@ async def audit_stats(
 
 @router.post("/audit/limpar")
 async def limpar_audit_logs(
-    api_key=Depends(requer_api_key),
+    api_key=Depends(requer_credencial_de_instancia),
     dias: int = Query(90, ge=1, le=3650),
 ):
     """Remove logs de auditoria mais antigos que o número de dias especificado."""

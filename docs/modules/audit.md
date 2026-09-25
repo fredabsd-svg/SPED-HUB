@@ -66,6 +66,8 @@ pytest tests/test_multibackend.py -k auditoria -q  # campos gigantes sobrevivem
 - Não captura requisição automaticamente — não há middleware, apesar da
   docstring.
 - Não aplica isolamento por tenant: `listar` devolve logs de todos os
-  escritórios; o controle de acesso à página `/auditoria` é do dashboard.
+  escritórios. O controle de acesso é de quem chama: a página `/auditoria` e
+  `/api/audit*` exigem admin no dashboard, e `/api/v1/audit/*` exige
+  credencial de instância (chave de escritório recebe 403).
 - Não agenda a retenção: `limpar_antigos` só roda quando alguém chama.
 - Não exporta nem assina os logs.

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from src.db.models import (
+    ApiKey,
     criar_engine,
     get_session,
     init_db,
@@ -22,6 +23,12 @@ from src.reports.base import ReportContext
 from src.reports.export_engine import ExportEngine
 
 # ── Fixture ──────────────────────────────────────────────────────────────────
+
+# O schema escopa pela credencial do contexto e recusa executar sem uma (o
+# router a põe lá).  Chamado direto, recebe uma chave de instância — sem
+# escritório, lê tudo —, que é o que estes testes exercitam.  O escopo por
+# escritório é coberto em tests/test_isolamento_api.py.
+_CONTEXTO = {"credencial": ApiKey(nome="teste", escritorio_id=None)}
 
 
 @pytest.fixture
@@ -238,7 +245,7 @@ class TestGraphQLSchema:
     def test_query_health(self, db):
         from src.api.graphql import schema
 
-        result = schema.execute_sync("{ health }")
+        result = schema.execute_sync("{ health }", context_value=_CONTEXTO)
         assert result.errors is None
         assert result.data["health"] == "ok"
 
@@ -246,7 +253,8 @@ class TestGraphQLSchema:
         from src.api.graphql import schema
 
         result = schema.execute_sync(
-            "{ empresas(pagina: 1, limite: 10) { dados { id cnpj nome } pageInfo { total } } }"
+            "{ empresas(pagina: 1, limite: 10) { dados { id cnpj nome } pageInfo { total } } }",
+            context_value=_CONTEXTO,
         )
         assert result.errors is None
         assert result.data["empresas"]["pageInfo"]["total"] >= 1
@@ -254,9 +262,13 @@ class TestGraphQLSchema:
     def test_query_empresa_por_id(self, db):
         from src.api.graphql import schema
 
-        result = schema.execute_sync("{ empresas(pagina: 1, limite: 1) { dados { id } } }")
+        result = schema.execute_sync(
+            "{ empresas(pagina: 1, limite: 1) { dados { id } } }", context_value=_CONTEXTO
+        )
         empresa_id = result.data["empresas"]["dados"][0]["id"]
-        result = schema.execute_sync(f"{{ empresa(id: {empresa_id}) {{ id cnpj nome }} }}")
+        result = schema.execute_sync(
+            f"{{ empresa(id: {empresa_id}) {{ id cnpj nome }} }}", context_value=_CONTEXTO
+        )
         assert result.errors is None
         assert result.data["empresa"]["id"] == empresa_id
 
@@ -264,7 +276,8 @@ class TestGraphQLSchema:
         from src.api.graphql import schema
 
         result = schema.execute_sync(
-            "{ ecds(pagina: 1, limite: 10) { dados { id empresaNome leiaute } pageInfo { total } } }"
+            "{ ecds(pagina: 1, limite: 10) { dados { id empresaNome leiaute } pageInfo { total } } }",
+            context_value=_CONTEXTO,
         )
         assert result.errors is None
         assert result.data["ecds"]["pageInfo"]["total"] >= 1
@@ -272,9 +285,13 @@ class TestGraphQLSchema:
     def test_query_ecd_por_id(self, db):
         from src.api.graphql import schema
 
-        result = schema.execute_sync("{ ecds(pagina: 1, limite: 1) { dados { id } } }")
+        result = schema.execute_sync(
+            "{ ecds(pagina: 1, limite: 1) { dados { id } } }", context_value=_CONTEXTO
+        )
         ecd_id = result.data["ecds"]["dados"][0]["id"]
-        result = schema.execute_sync(f"{{ ecd(id: {ecd_id}) {{ id empresaNome leiaute }} }}")
+        result = schema.execute_sync(
+            f"{{ ecd(id: {ecd_id}) {{ id empresaNome leiaute }} }}", context_value=_CONTEXTO
+        )
         assert result.errors is None
         assert result.data["ecd"]["id"] == ecd_id
 
@@ -282,7 +299,8 @@ class TestGraphQLSchema:
         from src.api.graphql import schema
 
         result = schema.execute_sync(
-            f"{{ balanco(ecdId: {db}) {{ titulo totalAtivo totalPassivo totalPl fecha }} }}"
+            f"{{ balanco(ecdId: {db}) {{ titulo totalAtivo totalPassivo totalPl fecha }} }}",
+            context_value=_CONTEXTO,
         )
         assert result.errors is None
         assert result.data["balanco"]["titulo"] == "Balanço Patrimonial"
@@ -291,7 +309,8 @@ class TestGraphQLSchema:
         from src.api.graphql import schema
 
         result = schema.execute_sync(
-            f"{{ dre(ecdId: {db}) {{ titulo resultadoLiquido receitaBruta }} }}"
+            f"{{ dre(ecdId: {db}) {{ titulo resultadoLiquido receitaBruta }} }}",
+            context_value=_CONTEXTO,
         )
         assert result.errors is None
         assert result.data["dre"]["titulo"] == "Demonstração do Resultado do Exercício"
@@ -299,7 +318,9 @@ class TestGraphQLSchema:
     def test_query_dfc(self, db):
         from src.api.graphql import schema
 
-        result = schema.execute_sync(f"{{ dfc(ecdId: {db}) {{ titulo variacaoCaixa }} }}")
+        result = schema.execute_sync(
+            f"{{ dfc(ecdId: {db}) {{ titulo variacaoCaixa }} }}", context_value=_CONTEXTO
+        )
         assert result.errors is None
         assert result.data["dfc"]["titulo"] == "Demonstração dos Fluxos de Caixa"
 
@@ -307,7 +328,8 @@ class TestGraphQLSchema:
         from src.api.graphql import schema
 
         result = schema.execute_sync(
-            f"{{ diario(ecdId: {db}, pagina: 1, limite: 10) {{ titulo totalLancamentos }} }}"
+            f"{{ diario(ecdId: {db}, pagina: 1, limite: 10) {{ titulo totalLancamentos }} }}",
+            context_value=_CONTEXTO,
         )
         assert result.errors is None
         assert result.data["diario"]["titulo"] == "Livro Diário"
@@ -316,7 +338,8 @@ class TestGraphQLSchema:
         from src.api.graphql import schema
 
         result = schema.execute_sync(
-            f"{{ kpis(ecdId: {db}) {{ empresa ativoTotal patrimonioLiquido }} }}"
+            f"{{ kpis(ecdId: {db}) {{ empresa ativoTotal patrimonioLiquido }} }}",
+            context_value=_CONTEXTO,
         )
         assert result.errors is None
         assert result.data["kpis"]["empresa"] != ""
@@ -324,7 +347,9 @@ class TestGraphQLSchema:
     def test_query_notas(self, db):
         from src.api.graphql import schema
 
-        result = schema.execute_sync(f"{{ notas(ecdId: {db}) {{ numero titulo tipo }} }}")
+        result = schema.execute_sync(
+            f"{{ notas(ecdId: {db}) {{ numero titulo tipo }} }}", context_value=_CONTEXTO
+        )
         assert result.errors is None
         assert len(result.data["notas"]) >= 1
 
@@ -332,7 +357,8 @@ class TestGraphQLSchema:
         from src.api.graphql import schema
 
         result = schema.execute_sync(
-            f"{{ validar(ecdId: {db}) {{ status totalInconsistencias erros alertas }} }}"
+            f"{{ validar(ecdId: {db}) {{ status totalInconsistencias erros alertas }} }}",
+            context_value=_CONTEXTO,
         )
         assert result.errors is None
         assert result.data["validar"]["status"] in ("OK", "ERROS")
@@ -340,7 +366,9 @@ class TestGraphQLSchema:
     def test_query_evolucao_multi(self, db):
         from src.api.graphql import schema
 
-        result = schema.execute_sync(f"{{ evolucaoMulti(ecdId: {db}) {{ numPeriodos }} }}")
+        result = schema.execute_sync(
+            f"{{ evolucaoMulti(ecdId: {db}) {{ numPeriodos }} }}", context_value=_CONTEXTO
+        )
         assert result.errors is None
 
 
@@ -525,7 +553,7 @@ class TestIntegracaoFase9:
             }}
         }}
         """
-        result = schema.execute_sync(query)
+        result = schema.execute_sync(query, context_value=_CONTEXTO)
         assert result.errors is None
         assert result.data["balanco"]["titulo"] == "Balanço Patrimonial"
         assert len(result.data["balanco"]["ativo"]) > 0
@@ -544,7 +572,7 @@ class TestIntegracaoFase9:
             }}
         }}
         """
-        result = schema.execute_sync(query)
+        result = schema.execute_sync(query, context_value=_CONTEXTO)
         assert result.errors is None
         assert len(result.data["dre"]["linhas"]) == 11
 
@@ -563,7 +591,7 @@ class TestIntegracaoFase9:
             }}
         }}
         """
-        result = schema.execute_sync(query)
+        result = schema.execute_sync(query, context_value=_CONTEXTO)
         assert result.errors is None
         assert len(result.data["dfc"]["linhas"]) > 0
 
@@ -581,7 +609,7 @@ class TestIntegracaoFase9:
             }}
         }}
         """
-        result = schema.execute_sync(query)
+        result = schema.execute_sync(query, context_value=_CONTEXTO)
         assert result.errors is None
         assert result.data["diario"]["totalLancamentos"] > 0
 
@@ -599,6 +627,6 @@ class TestIntegracaoFase9:
             }}
         }}
         """
-        result = schema.execute_sync(query)
+        result = schema.execute_sync(query, context_value=_CONTEXTO)
         assert result.errors is None
         assert "status" in result.data["validar"]

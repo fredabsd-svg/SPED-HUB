@@ -34,10 +34,18 @@ Depende de `db.models`, `settings` (`webhook_allow_http`); externas: httpx,
 SQLAlchemy, stdlib (`ipaddress`, `socket`, `hmac`).
 
 Consumido por `api/routes.py` (rotas `/api/v1/webhooks*`). O dashboard
-consome via essas rotas, não importa o módulo diretamente.
+consome via essas rotas, não importa o módulo diretamente. Gerir webhook por
+essas rotas exige credencial de instância — chave sem escritório ou sessão de
+admin; chave de escritório recebe 403 (ver `docs/modules/api.md`).
 
 ## Decisões não óbvias e armadilhas
 
+- **Webhook é da instância, não de um escritório.** `WebhookRegistration` não
+  tem coluna de dono e `dispatch` entrega o evento de toda importação a todos
+  os inscritos. Por isso a API recusa (403) a chave de escritório em
+  `/webhooks*`: com ela, o integrador do A listava, redirecionava para um
+  endereço seu e apagava os webhooks do B — e, registrando um, passaria a
+  receber os eventos das importações de todos.
 - **Proteção SSRF em duas etapas.** No registro, recusa IP literal não
   global (privado, loopback, link-local) e `localhost`; no envio, revalida
   com `resolve=True`, resolvendo o hostname e exigindo que **todos** os
@@ -144,6 +152,7 @@ pytest tests/test_fase11.py -k "Webhook or webhook" -q   # deliveries, stats, re
 pytest tests/test_review_regressions.py -k Webhook -q    # SSRF e retry real
 pytest tests/test_webhooks_entregas_orfas.py -q          # estados, taxa, órfãs
 pytest tests/test_migrations.py -k Reconciliacao -q      # migração dos resíduos
+pytest tests/test_isolamento_api.py -k Webhooks -q       # chave de escritório não gere
 ```
 
 ## O que não faz
@@ -161,4 +170,6 @@ pytest tests/test_migrations.py -k Reconciliacao -q      # migração dos resíd
   chama periodicamente é o laço de manutenção do `dashboard.app`. Rodando o
   módulo fora da aplicação (CLI, script), o expurgo não acontece.
 - Não suporta mTLS nem validação de certificado customizada.
+- Não separa webhook nem evento por escritório: não há dono no registro, e o
+  evento vai a todos os inscritos. Quem gere é a instância.
 - Não deduplica eventos nem garante ordem de entrega.
