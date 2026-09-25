@@ -63,8 +63,14 @@ Quem depende: os relatórios de `reports/`, `dashboard` (app e services) e
   case-insensitive para ASCII e o do Postgres não — com `like`, buscar
   "recebi" funcionava em desenvolvimento e devolvia nada em produção.
 - **Busca por nome ignora acento e caixa** (`unidecode` dos dois lados).
-- **`fins_de_semana` usa `func.strftime('%w', ...)`** — função do SQLite;
-  esse filtro não é portável para Postgres como está.
+- **Os flags de auditoria são portáveis.** `fins_de_semana` usa
+  `extract("dow", ...)`, que o SQLAlchemy traduz para `STRFTIME('%w')` no
+  SQLite e `EXTRACT(dow)` no Postgres (0 = domingo, 6 = sábado nos dois).
+  `vl_redondo_acima` compara o valor com o próprio `round()`. Antes, o
+  `strftime` só existia no SQLite, e o `vl_dc % 1 == 0` era verdadeiro para
+  todo valor no SQLite (o `%` converte para inteiro) e erro de operador no
+  Postgres. `tests/test_multibackend.py::TestFiltrosDeAuditoria` roda nos
+  dois bancos.
 - **`to_dict` só grava o que difere do padrão**: a visão salva é compacta,
   mas um flag explicitamente `False` não sobrevive à ida e volta.
 - `FilterCriteria()` vazio significa "sem filtro": devolve tudo da ECD.

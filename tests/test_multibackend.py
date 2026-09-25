@@ -212,6 +212,74 @@ class TestRelatoriosIdenticos:
         assert [lanc.num_lcto for lanc in lancamentos] == [str(n) for n in range(1, 16)]
 
 
+@pytest.fixture
+def sessao_auditoria(backend, tmp_path):
+    """A amostra com um lançamento de centavos (12.345,67) e um redondo abaixo do limite.
+
+    Na amostra, o lançamento 2 é de sábado (20/01/2024) e o 6 de domingo
+    (10/03/2024); os demais caem em dia útil.
+    """
+    from src.ecd_importer import ECDImportService
+
+    extras = (
+        "|I200|20|10042024|12345,67|N||\n"
+        "|I250|1.1.2||12345,67|D|||NAO REDONDO||\n"
+        "|I250|1.1.3||12345,67|C||||\n"
+        "|I200|21|11042024|9000,00|N||\n"
+        "|I250|1.1.2||9000,00|D|||REDONDO ABAIXO DO LIMITE||\n"
+        "|I250|1.1.3||9000,00|C||||\n"
+    )
+    arquivo = tmp_path / "auditoria.txt"
+    arquivo.write_text(
+        FIXTURE.read_text(encoding="utf-8").replace("|I350|", extras + "|I350|", 1),
+        encoding="utf-8",
+    )
+    session = get_session(backend)
+    try:
+        session.ecd_id = ECDImportService(session).importar(arquivo).ecd_id
+        yield session
+    finally:
+        session.close()
+
+
+class TestFiltrosDeAuditoria:
+    """Os dois flags de auditoria, com o mesmo resultado nos dois bancos.
+
+    `vl_dc % 1 == 0` é verdadeiro para qualquer valor no SQLite (o `%` de lá
+    converte para inteiro) e não existe no Postgres para `double precision`;
+    `strftime` só existe no SQLite. O filtro de valores redondos devolvia
+    tudo num banco e derrubava a consulta no outro.
+    """
+
+    @staticmethod
+    def _numeros(sessao, criterios) -> set[str]:
+        from src.filters.engine import FilterEngine
+
+        return {
+            lanc.num_lcto
+            for _p, lanc in FilterEngine(sessao, sessao.ecd_id).aplicar_lancamentos(criterios)
+        }
+
+    def test_valores_redondos(self, sessao_auditoria):
+        from src.filters.engine import FilterCriteria
+
+        numeros = self._numeros(sessao_auditoria, FilterCriteria(vl_redondo_acima=10_000.0))
+        assert (
+            "20" not in numeros
+        ), "12.345,67 tem centavos e saiu como valor redondo: `vl_dc % 1` é inteiro no SQLite"
+        assert "21" not in numeros, "9.000 está abaixo do limite de 10.000"
+        assert numeros == {str(n) for n in range(1, 10)}
+
+    def test_fins_de_semana(self, sessao_auditoria):
+        from src.filters.engine import FilterCriteria
+
+        numeros = self._numeros(sessao_auditoria, FilterCriteria(fins_de_semana=True))
+        assert numeros == {"2", "6"}, (
+            f"lançamentos de fim de semana: {sorted(numeros)}; 20/01/2024 é sábado e "
+            "10/03/2024 é domingo"
+        )
+
+
 class TestBuscaTextualCaseInsensitive:
     """`LIKE` diverge entre os backends; `ilike` uniformiza."""
 

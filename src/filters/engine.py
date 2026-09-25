@@ -7,7 +7,7 @@ Visões salvas em filter_views.
 import datetime
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select
+from sqlalchemy import extract, func, select
 from sqlalchemy.orm import Session
 
 from src.db.models import (
@@ -371,11 +371,16 @@ class FilterEngine:
 
         # Flags de auditoria
         if criterios.vl_redondo_acima is not None:
+            # "Redondo" é sem centavos: o valor igual ao próprio arredondamento.
+            # `vl_dc % 1 == 0` era verdadeiro para tudo no SQLite (o `%` de lá
+            # converte para inteiro) e não existe no Postgres para double.
             limite = criterios.vl_redondo_acima
-            stmt = stmt.where((Partida.vl_dc >= limite) & (Partida.vl_dc % 1 == 0))
+            stmt = stmt.where(Partida.vl_dc >= limite, Partida.vl_dc == func.round(Partida.vl_dc))
         if criterios.fins_de_semana:
-            # SQLite: strftime('%w', date) — 0=Domingo, 6=Sábado
-            stmt = stmt.where(func.strftime("%w", Lancamento.dt_lcto).in_(["0", "6"]))
+            # `extract("dow")` vira STRFTIME('%w') no SQLite e EXTRACT(dow) no
+            # Postgres — nos dois, 0 é domingo e 6 é sábado. O `strftime` de
+            # antes só existia no SQLite.
+            stmt = stmt.where(extract("dow", Lancamento.dt_lcto).in_([0, 6]))
 
         stmt = stmt.order_by(Lancamento.dt_lcto, Lancamento.num_lcto, Partida.cod_cta)
         return list(self.session.execute(stmt).all())
