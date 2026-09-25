@@ -9,6 +9,28 @@ interno da implementação.
 ## [Não publicado]
 
 ### Alterado
+- **O painel foi redesenhado com cara de aplicativo moderno** (ADR 0010).
+  Menu lateral com as telas agrupadas em Contábil, Fiscal e Sistema, busca
+  `Ctrl+K` no topo do menu, barra superior com a trilha da página, ícones
+  próprios e um só design system para todas as telas. Em tela estreita o menu
+  recolhe atrás de um botão. Login e cadastro ganharam painel de marca.
+- **O painel ganhou um cartão de destaques**: se o balanço fecha, lucro e
+  margem, endividamento, variação do ativo contra o exercício anterior e
+  movimento da escrituração — calculados dos saldos importados, sem
+  estimativa. Balanço que difere exatamente pelo resultado é explicado como
+  saldo anterior ao encerramento, não acusado como erro.
+- **DRE e DFC no painel em barras horizontais**, com os rótulos inteiros; a
+  composição do ativo mostra o total no centro.
+- **Com o registro público fechado, a tela de cadastro avisa antes do
+  formulário** e o login deixa de oferecer "Criar conta".
+- **O arquivo SPED gerado sai em ISO-8859-1**, como o leiaute exige. A
+  barra vertical ou a quebra de linha na descrição do produto não partem mais
+  o registro. **Atenção:** escrituração arquivada antes desta versão guarda o
+  hash calculado sobre o UTF-8 da época; se ela tiver acento, o arquivo baixado
+  agora (em Latin-1) não confere com esse hash guardado.
+- **README reescrito como página de entrada do repositório**, com logo,
+  capturas geradas por `scripts/capturar_telas.py` e o que funciona hoje por
+  área.
 - **A importação de ECD agora mostra o andamento até terminar.** A tela envia
   o arquivo para processamento em segundo plano, informa o progresso e deixa
   claro quando a escrituração foi gravada ou quando houve um erro. As abas e a
@@ -56,6 +78,12 @@ interno da implementação.
   reavaliada fase a fase sob o critério novo (ADR 0008).
 
 ### Adicionado
+- **Logo do SPED-HUB**: as duas barras delimitadoras de um registro SPED com
+  o nó do hub entre elas, na paleta "Tinta & Latão". Gerado por
+  `scripts/gerar_logo.py`, em versão clara e escura, com ícone do navegador e
+  imagem de prévia para o GitHub (`docs/assets/previa-social.png`).
+- **Ícone nas abas do navegador**; `/favicon.ico` deixou de responder 404 a
+  cada página aberta.
 - **As propostas de classificação fiscal podem ser baixadas em CSV.** O
   arquivo repete empresa, período e obrigação escolhidos na tela, traz regra,
   justificativa e impacto, e continua sendo apenas para revisão: baixar não
@@ -367,6 +395,72 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **Balancete e balanço de ECD mensal.** Com um I150 por mês, o balancete
+  somava os doze saldos iniciais e finais; agora usa o inicial do primeiro mês
+  e o final do último. A validação de saldos confere mês a mês, e erros que se
+  anulavam entre meses passam a ser acusados.
+- **Contas sintéticas com saldo.** O I155 só existe para conta analítica, e
+  ATIVO, ATIVO CIRCULANTE e os demais grupos saíam zerados no balanço e no
+  balancete; os totais do balancete deixavam contas de fora (na amostra,
+  820.000 de débitos em vez de 2.980.000).
+- **Saldos por centro de custo passam a ser somados** no balanço, na DRE, na
+  DFC e na validação, em vez de valer só o último lido.
+- **DFC refeita pelo método indireto**, com subtotais por atividade e
+  conciliação com o caixa. Antes usava saldos finais em vez da variação,
+  tratava aumento de ativo como entrada e nunca trazia o lucro líquido.
+- **Livro Razão** com contrapartidas, saldo partindo do saldo inicial da conta
+  e uma linha por partida; Razão e Diário ordenam por data e o lançamento 9 vem
+  antes do 10.
+- **Filtro de conta sem correspondência devolve relatório vazio**, e não a
+  escrituração inteira; o filtro de subárvore segue a hierarquia do plano.
+- **Valores terminando em ,995 deixaram de sair como "1,100"**; saldo que
+  arredonda para zero sai "0,00", não "(0,00)".
+- **Planilhas XLSX formatam moeda corretamente** no Excel e no LibreOffice.
+- **ECD com valor monetário ilegível é recusada** com a linha e o campo, em
+  vez de entrar com 0,00; o indicador de grande porte passa a ser gravado.
+- **Resumos de EFD-Contribuições e ECF** leem CNPJ, nome, período, PIS e
+  COFINS dos campos certos; a ECF deixou de chamar a CSLL de IRPJ.
+- **Filtros de auditoria (valores redondos, fins de semana)** funcionam no
+  PostgreSQL e deixaram de aceitar valores com centavos no SQLite.
+- **Nota cancelada e nota denegada deixaram de entrar no imposto** do E110,
+  do M200/M600 e da apuração de IBS/CBS. A cancelada sai no C100 só com a
+  identificação; a denegada fica fora do arquivo, com aviso.
+- **O VL_OPR do C190 soma frete, seguro, outras despesas, ICMS-ST, FCP-ST e
+  IPI** e desconta o desconto, como manda o Guia Prático.
+- **Valor digitado com vírgula ("190,00") é aceito** nas correções, e valor não
+  numérico é recusado na hora, em vez de quebrar a geração no fechamento.
+- **A planilha corrigida passa pelas mesmas travas da correção em massa** e
+  recompõe os totais do C100.
+- **EFD-Contribuições**: M200/M600 sem campo obrigatório vazio e com o crédito
+  limitado à contribuição; IND_ESCRI, IND_REG_CUM e IND_PGTO preenchidos.
+- **NF-e com IPI não tributado, item do Simples Nacional e XML com namespace
+  prefixado** são lidos corretamente; o 0150 leva município, país e endereço
+  do participante; a quantidade do C170 aceita até 5 casas; período invertido
+  ou de mais de um mês é recusado; dedução maior que o saldo devedor vai para o
+  saldo credor a transportar.
+- **Regra de classificação de prioridade menor não sobrepõe a maior** já
+  cumprida, e `em`/`nao_em` funcionam pela linha de comando.
+- **Substituir documento que já está numa escrituração arquivada** é recusado
+  com motivo, sem abortar o lote inteiro.
+- **Painel**: gráficos voltaram a ter altura fixa (chegavam a 14.000 px de
+  página no celular); o seletor de escrituração troca a empresa exibida; PDF e
+  XLSX baixam (o XLSX respondia erro em toda instalação); cartões em formato
+  brasileiro (`R$ 830.000,00`, `31,3%`), CNPJ com máscara e período em
+  DD/MM/AAAA; a margem líquida, que nunca aparecia, aparece; endividamento
+  saudável deixou de sair em vermelho; filtro com data inválida explica o erro.
+- **A marca de campo corrigido aparece em qualquer nota**, não só na primeira
+  importada; o monitoramento consulta o servidor uma vez por ciclo; a auditoria
+  volta à primeira página ao trocar o filtro.
+- **Enviar uma segunda ECD não zera mais o progresso da primeira** nem impede
+  cancelá-la.
+- **Configuração inválida cai no padrão**: upload de 0 MB, janela de limite
+  por IP igual a zero e booleano não reconhecido (`SMTP_USE_TLS=sim`) deixaram
+  de desligar recursos em silêncio. O monitoramento mostra o tamanho real do
+  banco SQLite.
+- **O schema continua o mesmo com o SQLAlchemy 2.1**, que passou a criar
+  colunas `float` como `DOUBLE`.
+- **O `.gitignore` ignora o diretório real de uploads**: o arquivo enviado pelo
+  cliente podia entrar num commit.
 - **O CNPJ alfanumérico não era lido — e não dava erro.** A Receita implantou
   o primeiro em **31 de julho de 2026**. No registro de abertura da ECD o
   campo estava declarado como numérico, e um CNPJ com letras virava **nulo**:
@@ -551,6 +645,27 @@ interno da implementação.
   arquivo que está lá). O container ficava reiniciando sem parar. Nenhuma
   verificação automática pegava: todas rodam em Linux, onde a conversão não
   acontece.
+
+### Segurança
+- **Nenhum usuário lê mais a ECD de outro escritório pelo painel.** O
+  identificador escrito como `+2`, `2.0` ou `2_0` escapava da conferência de
+  dono e abria indicadores, balanço, DRE, notas e exportações do vizinho.
+- **A chave de API de um escritório não lê mais dados de outro pelo GraphQL**
+  (`/api/v2/graphql`, que não tinha escopo nenhum) nem pelo detalhe de empresa
+  (`GET /api/v1/empresas/{id}`). Id de outro escritório responde como id
+  inexistente, e as listas do GraphQL ganharam teto.
+- **Chave de escritório não gere mais webhooks nem a trilha de auditoria**
+  (403). Antes podia redirecionar o webhook de outro escritório para um
+  endereço próprio, e ler ou apagar a auditoria da instância.
+- **O limite de tentativas de login volta a valer atrás do nginx do
+  projeto**: trocar o `X-Forwarded-For` a cada tentativa não gera mais cota
+  nova.
+- **Desativar um usuário encerra o acesso na hora**; antes a sessão aberta
+  seguia valendo até expirar.
+- **O log não carrega mais a senha de URLs de banco e Redis**, e o traceback
+  em formato texto mascara CNPJ, CPF e e-mail.
+- **`/api/health/full`, rota pública, não trava mais a aplicação** por cerca de
+  2 s a cada chamada quando o Redis está fora do ar.
 
 ## [0.19.0] — 2026-07-30
 
