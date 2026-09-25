@@ -257,6 +257,12 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 - **`SUBSTITUIR` apaga os ajustes do documento antigo** (cascade). Por isso o
   padrão é `IGNORAR`: reimportar uma pasta com a política errada descartaria
   horas de classificação sem avisar.
+- **`SUBSTITUIR` não substitui documento que já entrou em arquivo.** Apagá-lo
+  apagaria a resposta a "esta nota entrou em qual arquivo?", e o banco recusa
+  o `DELETE` com `IntegrityError` — que o lote não trata: a importação inteira
+  abortava no meio, levando os arquivos seguintes. O documento escriturado
+  vira `rejeitado`, com o número das escriturações no motivo, e o lote segue.
+  A correção dele é pela camada efetiva, e o arquivo novo, outra geração.
 - **Condições e ações de regra são JSON estruturado, não expressão avaliada.**
   Um campo de texto que o sistema executasse transformaria a tabela de regras
   em superfície de execução de código no servidor — quem escrevesse nela
@@ -315,6 +321,7 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 
 ```bash
 pytest tests/test_documentos_fiscais.py -q  # adaptador, reforma, XML hostil, duplicidade
+pytest tests/test_substituir_documento_escriturado.py -q  # SUBSTITUIR recusa o que já foi escriturado
 pytest tests/test_camada_efetiva.py -q      # ajustes, tipos, reversão por lote
 pytest tests/test_valor_digitado_no_formato_brasileiro.py -q  # "1.234,56" aceito, texto recusado
 pytest tests/test_classificacao_fiscal.py -q  # regras, prioridade, conflito, vigência

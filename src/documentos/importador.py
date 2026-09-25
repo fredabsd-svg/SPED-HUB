@@ -10,7 +10,7 @@ from enum import StrEnum
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.db.models import DocumentoFiscal, Empresa, ItemDocumentoFiscal
+from src.db.models import DocumentoFiscal, Empresa, EscrituracaoDocumento, ItemDocumentoFiscal
 from src.documentos.adaptadores import (
     DocumentoNormalizado,
     OrigemNaoReconhecida,
@@ -192,6 +192,25 @@ class ImportadorDeDocumentos:
             raise ValueError(f"documento {novo.chave} já importado ({detalhe})")
 
         if self.politica is PoliticaDeDuplicidade.SUBSTITUIR:
+            # Documento que já entrou num arquivo não é substituído. Apagá-lo
+            # apagaria a resposta a "esta nota entrou em qual arquivo?" — e o
+            # banco recusa o DELETE com IntegrityError, que o lote não trata:
+            # a importação inteira abortava no meio. Recusar este e seguir é o
+            # que o lote faz com qualquer outro arquivo ruim.
+            if arquivos := self._escrituracoes_de(existente):
+                return Ocorrencia(
+                    Desfecho.REJEITADO,
+                    origem=nome,
+                    chave=novo.chave,
+                    documento_id=existente.id,
+                    motivo=(
+                        f"documento {novo.chave} já entrou na(s) escrituração(ões) "
+                        f"{', '.join(f'#{n}' for n in arquivos)} e não é substituído — "
+                        "o arquivo guardado precisa continuar apontando para o que foi "
+                        f"escriturado ({detalhe}). Corrija pela camada efetiva "
+                        "(`sped-hub fiscal alterar`) e gere de novo"
+                    ),
+                )
             # Apagar leva junto os ajustes do documento antigo — por isso
             # substituir nunca é o padrão.
             self.session.delete(existente)
@@ -211,6 +230,20 @@ class ImportadorDeDocumentos:
             chave=novo.chave,
             documento_id=existente.id,
             motivo=detalhe,
+        )
+
+    def _escrituracoes_de(self, documento: DocumentoFiscal) -> list[int]:
+        """Os ids das escriturações arquivadas em que o documento entrou.
+
+        Consulta a ligação direto, e não `escrituracoes.arquivadas`: este
+        módulo é dependência daquele, e importá-lo daqui fecharia um ciclo.
+        """
+        return list(
+            self.session.execute(
+                select(EscrituracaoDocumento.escrituracao_id)
+                .where(EscrituracaoDocumento.documento_id == documento.id)
+                .order_by(EscrituracaoDocumento.escrituracao_id)
+            ).scalars()
         )
 
     def _gravar(
