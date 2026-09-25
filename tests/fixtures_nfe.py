@@ -10,6 +10,11 @@ sobre o total do documento concordar com um documento que a SEFAZ recusaria.
 
 Não usa arquivo de cliente: XML real de NF-e traz CNPJ, endereço e produtos de
 terceiros, que não podem ser versionados.
+
+O endereço do emitente e o do destinatário ficam em municípios diferentes do
+`cMunFG` de propósito quando a nota é venda: o 0150 do participante leva o
+município **dele**, e um fixture em que os três coincidissem esconderia quem
+lesse o campo errado.
 """
 
 from __future__ import annotations
@@ -114,13 +119,21 @@ def nfe_xml(
       <emit>
         <CNPJ>{emitente_cnpj}</CNPJ>
         <xNome>INDUSTRIA EXEMPLO LTDA</xNome>
-        <enderEmit><xMun>SAO PAULO</xMun><UF>SP</UF></enderEmit>
+        <enderEmit>
+          <xLgr>RUA DAS INDUSTRIAS</xLgr><nro>100</nro><xBairro>MOOCA</xBairro>
+          <cMun>3550308</cMun><xMun>SAO PAULO</xMun><UF>SP</UF><CEP>03101000</CEP>
+          <cPais>1058</cPais><xPais>BRASIL</xPais>
+        </enderEmit>
         <IE>110042490114</IE>
       </emit>
       <dest>
         <CNPJ>{destinatario_cnpj}</CNPJ>
         <xNome>COMERCIO EXEMPLO LTDA</xNome>
-        <enderDest><xMun>PALMAS</xMun><UF>TO</UF></enderDest>
+        <enderDest>
+          <xLgr>AVENIDA JK</xLgr><nro>1500</nro><xCpl>SALA 2</xCpl>
+          <xBairro>PLANO DIRETOR SUL</xBairro><cMun>1721000</cMun><xMun>PALMAS</xMun>
+          <UF>TO</UF><CEP>77001000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais>
+        </enderDest>
         <IE>293456789</IE>
       </dest>
 {corpo_itens}

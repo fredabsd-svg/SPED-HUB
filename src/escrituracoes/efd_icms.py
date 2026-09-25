@@ -52,8 +52,10 @@ from src.escrituracoes.base import (
     GeradorBase,
     ResultadoGeracao,
     cancelado,
+    conferir_periodo,
     denegado,
     formatar_data,
+    formatar_quantidade,
     formatar_valor,
     formatar_valor_obrigatorio,
 )
@@ -106,7 +108,8 @@ def cod_ver(data_fim: datetime.date) -> str:
     """A versão do leiaute válida para o período que termina em `data_fim`.
 
     É o `DT_FIN` que decide, não o `DT_INI`: é contra ele que o validador
-    confere.  Um período que atravessa a virada do ano usa a versão do fim.
+    confere.  (Período que atravessa o mês — e portanto a virada do ano — nem
+    chega aqui: `conferir_periodo` o recusa antes de gerar.)
 
     Período anterior a 2024 **levanta**, em vez de cair na versão mais antiga
     conhecida.  Devolver `018` para um arquivo de 2020 seria repetir em menor
@@ -236,6 +239,7 @@ class GeradorEFDICMS(GeradorBase):
     # ── Entrada ────────────────────────────────────────────────────────────
 
     def gerar(self) -> ResultadoGeracao:
+        conferir_periodo(self.data_inicio, self.data_fim)
         self._conferir_cadastro()
         documentos = self._documentos()
         todas = [self._visao(d) for d in documentos]
@@ -259,6 +263,7 @@ class GeradorEFDICMS(GeradorBase):
         self._avisar_reforma_fora_do_arquivo(visoes)
         self._avisar_fcp_st_sem_item(visoes)
         self._avisar_csosn_convertido()
+        self._avisar_participante_sem_endereco()
         return self._resultado
 
     def _avisar_fcp_st_sem_item(self, visoes: Sequence[dict]) -> None:
@@ -403,19 +408,22 @@ class GeradorEFDICMS(GeradorBase):
                 )
             if not cnpj or cnpj in vistos:
                 continue
+            # Prevalece a primeira ocorrência, como na descrição: o endereço é
+            # lido do XML só uma vez por participante.
+            endereco = self._endereco_0150(visao)
             vistos[cnpj] = [
                 cnpj,  # COD_PART: o próprio CNPJ, estável entre períodos
                 _texto(nome),
-                "",  # COD_PAIS
+                endereco["COD_PAIS"],
                 cnpj if len(cnpj) == 14 else "",
                 cnpj if len(cnpj) == 11 else "",
                 _texto(ie),
-                _texto(c["municipio_codigo"]),
+                endereco["COD_MUN"],
                 "",  # SUFRAMA
-                "",  # ENDERECO
-                "",  # NUM
-                "",  # COMPL
-                "",  # BAIRRO
+                endereco["END"],
+                endereco["NUM"],
+                endereco["COMPL"],
+                endereco["BAIRRO"],
             ]
             _ = uf
         return list(vistos.values())
@@ -530,7 +538,7 @@ class GeradorEFDICMS(GeradorBase):
             _texto(item["numero_item"]),
             _texto(item["codigo"]),
             _texto(item["descricao"]),
-            formatar_valor(item["quantidade"]),
+            formatar_quantidade(item["quantidade"]),
             _texto(item["unidade"]),
             formatar_valor(item["valor_total"]),
             formatar_valor(item["valor_desconto"]),
@@ -750,7 +758,24 @@ class GeradorEFDICMS(GeradorBase):
         )
         # As deduções entram DEPOIS do saldo apurado, não dentro dele: é a
         # diferença entre o que se apurou e o que se recolhe.
-        a_recolher = saldo - ajustado("VL_TOT_DED")
+        deducoes = ajustado("VL_TOT_DED")
+        apurado = saldo if saldo > 0 else 0.0
+        a_recolher = apurado - deducoes
+        # Guia Prático 3.2.2, E110: o campo 13 é "VL_SLD_APURADO − VL_TOT_DED"
+        # e, "se o resultado dessa operação for negativo, informe o valor zero
+        # neste campo, e o valor absoluto correspondente no campo
+        # VL_SLD_CREDOR_TRANSPORTAR"; o campo 14 é o valor absoluto da
+        # expressão inteira — com as deduções — quando ela é negativa. A
+        # dedução acima do devedor sumia: ia para campo nenhum.
+        credor_a_transportar = deducoes - saldo if deducoes - saldo > 0 else 0.0
+        if deducoes > apurado:
+            self._resultado.avisos.append(
+                f"as deduções do período ({formatar_valor(deducoes)}) passam do saldo "
+                f"devedor apurado ({formatar_valor_obrigatorio(apurado)}): o excedente "
+                "foi para o VL_SLD_CREDOR_TRANSPORTAR, como manda o Guia — que também "
+                "manda verificar se a legislação da UF permite dedução maior que o "
+                "saldo devedor"
+            )
 
         self._add(
             "E110",
@@ -766,10 +791,10 @@ class GeradorEFDICMS(GeradorBase):
             formatar_valor_obrigatorio(ajustado("VL_TOT_AJ_CREDITOS")),
             formatar_valor_obrigatorio(ajustado("VL_ESTORNOS_DEB")),
             formatar_valor_obrigatorio(credor_anterior),
-            formatar_valor_obrigatorio(saldo if saldo > 0 else 0.0),
-            formatar_valor_obrigatorio(ajustado("VL_TOT_DED")),
+            formatar_valor_obrigatorio(apurado),
+            formatar_valor_obrigatorio(deducoes),
             formatar_valor_obrigatorio(a_recolher if a_recolher > 0 else 0.0),
-            formatar_valor_obrigatorio(-saldo if saldo < 0 else 0.0),
+            formatar_valor_obrigatorio(credor_a_transportar),
             formatar_valor_obrigatorio(ajustado("DEB_ESP")),
         )
         self._avisar_sobre_os_ajustes(ajustes)

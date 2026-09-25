@@ -59,6 +59,8 @@ existisse.
 | `MODALIDADES_DE_FRETE` | Os códigos válidos de `modFrete` / `IND_FRT`. |
 | `Registro` | Uma linha, com os campos ainda em lista. |
 | `formatar_valor` / `formatar_data` | Vírgula decimal e `ddmmaaaa`. |
+| `formatar_quantidade` | A QTD do C170: até cinco casas, sempre preenchida. |
+| `conferir_periodo(inicio, fim)` / `PeriodoInvalido` | Recusa período invertido ou que atravessa o mês. |
 | `CampoObrigatorioAusente` | Falta cadastro sem o qual o arquivo sairia errado. |
 | `COD_VER` | Versão do leiaute da EFD ICMS/IPI declarada no 0000. |
 | `valor_da_operacao(item)` / `PARCELAS_DO_VL_OPR` | O `VL_OPR` do C190 por item, pela fórmula do Guia. |
@@ -316,6 +318,33 @@ a porta de entrada humana de tudo isto.
   entre o que se apurou e o que se recolhe; somá-la no saldo daria o mesmo
   total a recolher e um `VL_SLD_APURADO` errado — que é o número conferido
   contra os E111.
+- **Dedução maior que o devedor vai para o saldo credor a transportar.** Ela
+  sumia: o `VL_SLD_CREDOR_TRANSPORTAR` só recebia o saldo credor da
+  apuração. Pelo Guia (E110, campos 13 e 14), o campo 14 é o valor absoluto
+  da expressão inteira — deduções incluídas — quando ela é negativa; com saldo
+  credor, a dedução se soma a ele. O resultado avisa, porque o mesmo Guia
+  manda "verificar se a legislação da UF permite que dedução seja maior que o
+  saldo devedor".
+- **O 0150 leva o endereço do participante, lido do XML original.** O
+  `COD_MUN` vinha do `cMunFG`, que numa venda é o município **da empresa** — e
+  o validador confere a IE do participante contra a UF do `COD_MUN` —, e
+  `COD_PAIS` e `END`, obrigatórios, saíam vazios. Agora vêm do `enderEmit`
+  (entrada) ou do `enderDest` (saída), via `documentos.endereco_da_parte`, com
+  os tamanhos do Guia. É leitura da primeira camada, como a convenção do ICMS
+  desonerado: o endereço não é classificação que alguém corrija, e assim vale
+  para todo documento já importado. Sem endereço no XML, a entrada cai no
+  `cMunFG` (o município de quem emitiu), e o participante entra num aviso.
+- **QTD do C170 com até cinco casas.** O campo é "N - 05" e obrigatório;
+  `formatar_valor` fazia `0,004` virar vazio e `2,12345` virar `2,12`.
+  `formatar_quantidade` tira os zeros à direita até sobrarem duas casas, e a
+  quantidade inteira continua saindo `10,00`.
+- **O período é um mês civil ou fração, e em ordem.** A CLI gerava e
+  arquivava `--de 2026-07-31 --ate 2026-07-01`, e períodos de dois meses. O
+  Guia diz que o arquivo "tem periodicidade mensal" e que o `DT_FIN` pertence
+  ao mesmo mês/ano do `DT_INI`; a fração vale (início ou encerramento de
+  atividade). `conferir_periodo` levanta `PeriodoInvalido` antes de gerar,
+  nos dois geradores e em `criar_ajuste` — que casa com a geração por
+  igualdade de período.
 - **O período do ajuste casa por igualdade, não por sobreposição.** Um mês
   fechado e uma quinzena começam no mesmo dia; aproximar faria o mesmo valor
   entrar em duas apurações.
@@ -427,5 +456,6 @@ pytest tests/test_gerador_efd_icms.py tests/test_gerador_efd_contribuicoes.py \
        tests/test_escrituracao_arquivada.py \
        tests/test_documentos_cancelados_e_denegados.py \
        tests/test_arquivo_sped_em_latin1.py \
-       tests/test_c190_valor_da_operacao.py -q
+       tests/test_c190_valor_da_operacao.py \
+       tests/test_participante_quantidade_periodo_e_deducao.py -q
 ```

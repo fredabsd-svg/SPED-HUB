@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.models import AjusteApuracao, Empresa
+from src.escrituracoes.base import conferir_periodo
 
 # A quarta posição do código: para onde o valor vai no E110, e como se lê.
 #
@@ -139,6 +140,9 @@ def criar_ajuste(
     um jeito que o validador não entende, e a apuração sairia com o sinal
     trocado sem que ninguém visse.
     """
+    # O ajuste casa com a geração por igualdade de período; um período que a
+    # geração recusa seria um ajuste que nunca entra em arquivo nenhum.
+    conferir_periodo(data_inicio, data_fim)
     codigo = validar_codigo(cod_aj, uf=empresa.uf)
     if valor < 0:
         rotulo, _ = utilizacao(codigo)

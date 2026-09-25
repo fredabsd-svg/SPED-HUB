@@ -23,6 +23,7 @@ As três camadas que a suíte separa:
 | `registrar_adaptador(a)` | Põe um adaptador na fila; o primeiro que reconhecer vence. |
 | `DocumentoNormalizado` / `ItemNormalizado` | A estrutura única para onde toda origem converge. |
 | `carregar_xml(conteudo)` | Lê o XML recusando `DOCTYPE`; levanta `XMLPerigoso`. |
+| `endereco_da_parte(xml_original, parte)` / `Endereco` | O endereço do emitente ou do destinatário, lido do original — para o 0150. |
 | `ImportadorDeDocumentos(session, escritorio_id=, politica=)` | Grava, deduplica e resolve o sentido. |
 | `.importar(conteudo)` / `.importar_lote(arquivos)` | Um documento ou vários; devolve `Ocorrencia` / `ResultadoImportacao`. |
 | `PoliticaDeDuplicidade` | `IGNORAR` (padrão), `SUBSTITUIR`, `ERRO`. |

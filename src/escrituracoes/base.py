@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from src.documentos.adaptadores import Endereco, endereco_da_parte
 from src.escrituracoes.leiaute import conferir
 
 
@@ -67,6 +68,50 @@ def formatar_valor_obrigatorio(valor: float | Decimal | None) -> str:
     """
     formatado = formatar_valor(valor)
     return formatado or "0,00"
+
+
+def formatar_quantidade(valor: float | Decimal | None) -> str:
+    """A quantidade do C170: até cinco casas, e sempre preenchida.
+
+    O campo QTD é "N - 05" e obrigatório ("O") nas duas colunas do Guia
+    Prático da EFD ICMS/IPI 3.2.2. Com `formatar_valor`, `0,004` virava campo
+    vazio e `2,12345` virava `2,12`. Os zeros à direita saem até restarem duas
+    casas — a quantidade inteira continua `10,00`, como sempre saiu, e dois
+    arquivos do mesmo mês não divergem por causa disto.
+    """
+    numero = Decimal(str(valor or 0)).quantize(Decimal("0.00001"), rounding=ROUND_HALF_UP)
+    inteiro, decimais = f"{numero:.5f}".split(".")
+    return f"{inteiro},{decimais.rstrip('0').ljust(2, '0')}"
+
+
+class PeriodoInvalido(ValueError):
+    """Período que a escrituração não admite — invertido ou de mais de um mês."""
+
+
+def conferir_periodo(inicio: datetime.date, fim: datetime.date) -> None:
+    """Levanta `PeriodoInvalido` se o período não cabe num arquivo.
+
+    "Os arquivos da EFD-ICMS/IPI têm periodicidade mensal e devem apresentar
+    informações relativas a um mês civil ou fração", e o `DT_FIN` "pertence
+    ao mesmo mês/ano da data informada no campo DT_INI" (Guia Prático 3.2.2,
+    Seção 4 e 0000); o Guia da EFD-Contribuições diz o mesmo do 0000 dela.
+    A fração vale — início ou encerramento de atividade —, então o que se
+    confere é a ordem e o mês, não o primeiro e o último dia.
+
+    Até aqui a CLI gerava e **arquivava** `--de 2026-07-31 --ate 2026-07-01`:
+    um arquivo que o validador recusa, no histórico como se valesse.
+    """
+    if fim < inicio:
+        raise PeriodoInvalido(
+            f"período invertido: o fim ({fim:%d/%m/%Y}) é anterior ao começo "
+            f"({inicio:%d/%m/%Y})"
+        )
+    if (inicio.year, inicio.month) != (fim.year, fim.month):
+        raise PeriodoInvalido(
+            f"período de {inicio:%d/%m/%Y} a {fim:%d/%m/%Y} atravessa o mês: a "
+            "escrituração é mensal, e o fim precisa estar no mesmo mês do começo "
+            "(gere um arquivo por mês)"
+        )
 
 
 def formatar_data(data: datetime.date | None) -> str:
@@ -245,6 +290,9 @@ PAGAMENTO_OUTROS = "2"
 #     descontinuados", e o B020/C100 dizem que "não deverão ser informados os
 #     documentos fiscais eletrônicos denegados".  O leiaute mais antigo que o
 #     gerador conhece é de 2024, então não há período em que o 04 valha.
+# COD_PAIS do Brasil na tabela de países do 0150.
+BRASIL = "1058"
+
 CANCELADO = "cancelado"
 DENEGADO = "denegado"
 COD_SIT_REGULAR = "00"
@@ -295,6 +343,7 @@ class GeradorBase:
         self._resultado = ResultadoGeracao()
         self._frete_sem_modalidade: list[str] = []
         self._csosn_convertido: set[tuple[str, str]] = set()
+        self._participante_sem_endereco: set[str] = set()
 
     def _reiniciar(self, documentos_ids: list[int]) -> None:
         """Zera o estado de uma geração.
@@ -307,6 +356,53 @@ class GeradorBase:
         self._frete_sem_modalidade = []
         self._pagamento_sem_indicador: list[str] = []
         self._csosn_convertido = set()
+        self._participante_sem_endereco = set()
+
+    def _endereco_0150(self, visao: dict) -> dict[str, str]:
+        """COD_PAIS, COD_MUN, END, NUM, COMPL e BAIRRO do participante.
+
+        Do endereço **do participante** no XML — `enderEmit` numa entrada,
+        `enderDest` numa saída —, e não do `cMunFG`, que numa venda é o
+        município da própria empresa: o validador confere a IE do participante
+        contra a UF do `COD_MUN`, e a venda interestadual saía com o cliente
+        no estado errado. `COD_PAIS` e `END` são obrigatórios no 0150 da EFD
+        ICMS/IPI ("informar, inclusive, quando o participante for estabelecido
+        no Brasil (01058 ou 1058)"), e saíam vazios.
+
+        Os tamanhos são os do Guia (END, COMPL e BAIRRO com 60, NUM com 10).
+        Documento sem endereço no XML cai no `cMunFG` só na entrada — onde ele
+        é o município de quem emitiu — e entra no aviso.
+        """
+        c = visao["cabecalho"]
+        entrada = c["sentido"] == "entrada"
+        documento = visao.get("documento")
+        endereco = (
+            endereco_da_parte(
+                getattr(documento, "xml_original", None), "emitente" if entrada else "destinatario"
+            )
+            or Endereco()
+        )
+        cod_mun = endereco.cod_mun or (c.get("municipio_codigo") if entrada else None)
+        if not endereco.cod_mun or not endereco.logradouro:
+            participante = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
+            self._participante_sem_endereco.add(texto(participante))
+        return {
+            "COD_PAIS": texto(endereco.cod_pais) or BRASIL,
+            "COD_MUN": texto(cod_mun),
+            "END": texto((endereco.logradouro or "")[:60]),
+            "NUM": texto((endereco.numero or "")[:10]),
+            "COMPL": texto((endereco.complemento or "")[:60]),
+            "BAIRRO": texto((endereco.bairro or "")[:60]),
+        }
+
+    def _avisar_participante_sem_endereco(self) -> None:
+        if not self._participante_sem_endereco:
+            return
+        self._resultado.avisos.append(
+            "participante(s) sem município ou logradouro no XML: "
+            f"{', '.join(sorted(self._participante_sem_endereco))}. O 0150 saiu com o "
+            "que havia — END e COD_MUN são obrigatórios; complete antes de transmitir"
+        )
 
     def _cst_icms(self, item: dict, cabecalho: dict) -> str:
         """O CST_ICMS do item: origem + Tabela B, com três dígitos.

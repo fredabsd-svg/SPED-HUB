@@ -129,6 +129,11 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   não tem crédito — `0,00` faria parecer que tem e ficou zerado. O saldo credor
   sai na própria linha do tributo: numa linha à parte, pareceria um quarto
   tributo.
+- **Período invertido é recusado em toda ação; o que atravessa o mês, em
+  `gerar`, `espelho` e `ajuste`.** Os três saem com código 1 e a mensagem, sem
+  arquivar nada — a CLI chegou a gerar e arquivar `--de 2026-07-31 --ate
+  2026-07-01`. A escrituração é mensal (um mês civil ou fração); `apurar`, que
+  é só leitura, aceita mais de um mês.
 - **`gerar` sempre arquiva, e não existe `--sem-arquivar`.** A ausência é
   deliberada. A terceira camada existe para responder "o que você enviou", e
   um arquivo que sai do sistema sem deixar registro é exatamente o buraco que

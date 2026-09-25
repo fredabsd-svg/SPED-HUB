@@ -696,6 +696,54 @@ class AdaptadorNFe:
             item.valor_estorno_credito_cbs = _numero(estorno, "vCBSEstCred")
 
 
+@dataclass(frozen=True)
+class Endereco:
+    """O endereço de uma das partes, como o documento o declara."""
+
+    logradouro: str | None = None
+    numero: str | None = None
+    complemento: str | None = None
+    bairro: str | None = None
+    cod_mun: str | None = None
+    cod_pais: str | None = None
+
+
+# A parte → (grupo da parte, grupo do endereço), no leiaute 4.00.
+_PARTES = {"emitente": ("emit", "enderEmit"), "destinatario": ("dest", "enderDest")}
+
+
+def endereco_da_parte(xml_original: str | None, parte: str) -> Endereco | None:
+    """O endereço do emitente ou do destinatário, lido do documento original.
+
+    Lido da primeira camada, e não de colunas, de propósito: o endereço não é
+    classificação que alguém corrija por documento, e a leitura vale para todo
+    documento já importado — colunas novas ficariam vazias para eles. É o que
+    o 0150 precisa: o município, o país e o logradouro **do participante**, e
+    não o `cMunFG`, que numa venda é o município da própria empresa.
+
+    Devolve `None` quando o XML não é de NF-e ou não traz a parte.
+    """
+    if not xml_original or parte not in _PARTES:
+        return None
+    try:
+        raiz = carregar_xml(xml_original.encode("utf-8"))
+    except ValueError:
+        return None
+    nfe = raiz if _sem_ns(raiz.tag) == "NFe" else _achar(raiz, "NFe")
+    grupo, endereco = _PARTES[parte]
+    ender = _achar(nfe, "infNFe", grupo, endereco)
+    if ender is None:
+        return None
+    return Endereco(
+        logradouro=_texto(ender, "xLgr"),
+        numero=_texto(ender, "nro"),
+        complemento=_texto(ender, "xCpl"),
+        bairro=_texto(ender, "xBairro"),
+        cod_mun=_texto(ender, "cMun"),
+        cod_pais=_texto(ender, "cPais"),
+    )
+
+
 # cStat do protocolo de autorização.  Só os desfechos que mudam a escrituração.
 _SITUACAO_POR_CSTAT = {
     "100": "autorizado",

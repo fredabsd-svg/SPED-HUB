@@ -112,7 +112,18 @@ def _empresa(sessao: Session, empresa_id: int) -> Empresa:
 
 
 def _periodo(args) -> tuple[datetime.date, datetime.date]:
-    return _data(args.de), _data(args.ate)
+    """O `--de`/`--ate`, recusando período invertido em qualquer ação.
+
+    Se cabe num arquivo — um mês civil ou fração — quem confere é o gerador
+    (`conferir_periodo`), e o ajuste de apuração, que tem de casar com ele;
+    `apurar` é só leitura e aceita mais de um mês.
+    """
+    inicio, fim = _data(args.de), _data(args.ate)
+    if fim < inicio:
+        raise ValueError(
+            f"período invertido: --ate {fim:%d/%m/%Y} é anterior a --de {inicio:%d/%m/%Y}"
+        )
+    return inicio, fim
 
 
 def _data(valor: str) -> datetime.date:

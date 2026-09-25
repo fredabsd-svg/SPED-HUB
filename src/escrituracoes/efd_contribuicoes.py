@@ -46,8 +46,10 @@ from src.escrituracoes.base import (
     GeradorBase,
     ResultadoGeracao,
     cancelado,
+    conferir_periodo,
     denegado,
     formatar_data,
+    formatar_quantidade,
     formatar_valor,
 )
 from src.escrituracoes.base import texto as _texto
@@ -163,6 +165,7 @@ class GeradorEFDContribuicoes(GeradorBase):
     # ── Entrada ────────────────────────────────────────────────────────────
 
     def gerar(self) -> ResultadoGeracao:
+        conferir_periodo(self.data_inicio, self.data_fim)
         self._conferir_cadastro()
         documentos = self._documentos()
         todas = [self._visao(d) for d in documentos]
@@ -180,6 +183,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             )
         self._avisar_frete_sem_modalidade()
         self._avisar_csosn_convertido()
+        self._avisar_participante_sem_endereco()
         return self._resultado
 
     def _natureza_pj(self) -> str:
@@ -311,19 +315,22 @@ class GeradorEFDContribuicoes(GeradorBase):
             nome = c["emitente_nome"] if entrada else c["destinatario_nome"]
             if not cnpj or cnpj in vistos:
                 continue
+            # O mesmo endereço do 0150 da EFD ICMS/IPI: o do participante, e
+            # não o `cMunFG`. COD_PAIS é obrigatório aqui também (Guia 1.35).
+            endereco = self._endereco_0150(visao)
             vistos[cnpj] = [
                 cnpj,
                 _texto(nome),
-                "",  # COD_PAIS
+                endereco["COD_PAIS"],
                 cnpj if len(cnpj) == 14 else "",
                 cnpj if len(cnpj) == 11 else "",
                 "",  # IE
-                _texto(c["municipio_codigo"]),
+                endereco["COD_MUN"],
                 "",  # SUFRAMA
-                "",  # ENDERECO
-                "",
-                "",
-                "",
+                endereco["END"],
+                endereco["NUM"],
+                endereco["COMPL"],
+                endereco["BAIRRO"],
             ]
         return list(vistos.values())
 
@@ -431,7 +438,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             _texto(item["numero_item"]),
             _texto(item["codigo"]),
             _texto(item["descricao"]),
-            formatar_valor(item["quantidade"]),
+            formatar_quantidade(item["quantidade"]),
             _texto(item["unidade"]),
             formatar_valor(item["valor_total"]),
             formatar_valor(item["valor_desconto"]),
