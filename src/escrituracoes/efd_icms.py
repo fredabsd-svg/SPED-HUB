@@ -258,6 +258,7 @@ class GeradorEFDICMS(GeradorBase):
         self._avisar_pagamento_sem_indicador()
         self._avisar_reforma_fora_do_arquivo(visoes)
         self._avisar_fcp_st_sem_item(visoes)
+        self._avisar_csosn_convertido()
         return self._resultado
 
     def _avisar_fcp_st_sem_item(self, visoes: Sequence[dict]) -> None:
@@ -519,11 +520,11 @@ class GeradorEFDICMS(GeradorBase):
 
         if leva_itens_no_arquivo(c):
             for item in visao["itens"]:
-                self._item_c170(item)
+                self._item_c170(item, c)
         for campos in self._analitico_c190(visao):
             self._add("C190", *campos)
 
-    def _item_c170(self, item: dict) -> None:
+    def _item_c170(self, item: dict, cabecalho: dict) -> None:
         self._add(
             "C170",
             _texto(item["numero_item"]),
@@ -534,7 +535,7 @@ class GeradorEFDICMS(GeradorBase):
             formatar_valor(item["valor_total"]),
             formatar_valor(item["valor_desconto"]),
             "0",  # IND_MOV: 0 = movimentação física sim
-            f"{_texto(item['origem_mercadoria']) or '0'}{_texto(item['cst_icms'])}",
+            self._cst_icms(item, cabecalho),
             _texto(item["cfop"]),
             "",  # COD_NAT
             formatar_valor(item["base_icms"]),
@@ -578,7 +579,7 @@ class GeradorEFDICMS(GeradorBase):
         )
         for item in visao["itens"]:
             chave = (
-                f"{_texto(item['origem_mercadoria']) or '0'}{_texto(item['cst_icms'])}",
+                self._cst_icms(item, visao["cabecalho"]),
                 _texto(item["cfop"]),
                 formatar_valor(item["aliquota_icms"]),
             )

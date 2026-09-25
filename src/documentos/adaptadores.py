@@ -334,6 +334,9 @@ def _primeiro_filho(no: ET.Element | None) -> ET.Element | None:
 
 # ── NF-e / NFC-e ───────────────────────────────────────────────────────────
 
+# A primeira tag `nfeProc` ou `NFe` da amostra, com o prefixo, se houver.
+_RAIZ_NFE = re.compile(rb"<(?:([A-Za-z_][\w.\-]*):)?(?:nfeProc|NFe)[\s/>]")
+
 
 class AdaptadorNFe:
     """NF-e (modelo 55) e NFC-e (modelo 65), leiaute 4.00.
@@ -345,10 +348,26 @@ class AdaptadorNFe:
     nome = "nfe"
 
     def reconhece(self, conteudo: bytes) -> bool:
-        amostra = conteudo[:2048]
-        return b"portalfiscal.inf.br/nfe" in amostra and (
-            b"<NFe" in amostra or b"<nfeProc" in amostra
+        """A raiz é `nfeProc` ou `NFe` **no namespace da NF-e**.
+
+        O que decide é o URI do namespace, não o texto da tag: o mesmo
+        documento pode vir com o namespace padrão (`<nfeProc xmlns="…">`) ou
+        prefixado (`<ns0:nfeProc xmlns:ns0="…">`), que é o que sai de
+        qualquer programa que reserializa o XML com ElementTree — e que era
+        recusado como origem desconhecida quando se procurava o texto `<NFe`.
+        Sem parsear: o reconhecimento não pode levantar, e o XML ainda não
+        passou pela conferência de `carregar_xml`.
+        """
+        amostra = conteudo[:4096]
+        raiz = _RAIZ_NFE.search(amostra)
+        if raiz is None:
+            return False
+        prefixo = raiz.group(1)
+        atributo = b"xmlns:" + prefixo if prefixo else b"xmlns"
+        declaracao = re.compile(
+            rb"\s" + re.escape(atributo) + rb"\s*=\s*([\"'])" + re.escape(NS_NFE.encode()) + rb"\1"
         )
+        return declaracao.search(amostra) is not None
 
     def normalizar(
         self, conteudo: bytes, *, nome_arquivo: str | None = None
@@ -475,14 +494,15 @@ class AdaptadorNFe:
             item.valor_fcp = _numero(icms, "vFCP")
             item.valor_fcp_st = _numero(icms, "vFCPST")
 
-        ipi = _primeiro_filho(_achar(imposto, "IPI", "IPITrib")) or _achar(
-            imposto, "IPI", "IPITrib"
-        )
-        if ipi is None:
-            ipi = _achar(imposto, "IPI")
-        if ipi is not None:
-            item.cst_ipi = _texto(ipi, "CST") or _texto(_achar(imposto, "IPI", "IPITrib"), "CST")
-            item.valor_ipi = _numero(_achar(imposto, "IPI", "IPITrib"), "vIPI")
+        # O IPI vem em UM de dois grupos: `IPITrib` (tributado, com valor) ou
+        # `IPINT` (não tributado — CST 01 a 05 e 51 a 55 —, só com o CST).
+        # Procurar o CST só no primeiro deixava o `IPINT` sem CST, e o C170
+        # saía com CST_IPI vazio.
+        tributado = _achar(imposto, "IPI", "IPITrib")
+        grupo_ipi = tributado if tributado is not None else _achar(imposto, "IPI", "IPINT")
+        if grupo_ipi is not None:
+            item.cst_ipi = _texto(grupo_ipi, "CST")
+            item.valor_ipi = _numero(tributado, "vIPI")
 
         pis = _primeiro_filho(_achar(imposto, "PIS"))
         if pis is not None:

@@ -251,6 +251,29 @@ COD_SIT_REGULAR = "00"
 COD_SIT_CANCELADO = "02"
 
 
+# O item do Simples Nacional traz CSOSN e não CST.  O CST_ICMS do C170/C190 é
+# "N 003*" — origem mais os dois dígitos da Tabela B —, e escrever só a origem
+# ("0") dava um campo de um caractere, recusado pelo validador.
+#
+# O Guia Prático da EFD ICMS/IPI 3.2.2 (C170, campo 10) diz que o CSOSN "é
+# utilizado somente na emissão da NF-e, não é utilizado no registro das
+# mercadorias nas entradas": a entrada leva o CST do Convênio SN/70 "sob o
+# enfoque do declarante", que só quem escritura sabe.  O gerador escreve o
+# código que menos afirma e avisa — a mesma decisão do IND_PGTO e do IND_FRT:
+#
+#   * `60` quando o CSOSN diz que o ICMS já foi cobrado por substituição
+#     tributária (201, 202 e 203 com cobrança por ST; 500 cobrado
+#     anteriormente) — é o exemplo 2 do mesmo campo: "aquisição de mercadorias
+#     para comercialização com ICMS retido por ST - informar código 60";
+#   * `90` (outros) no resto — o exemplo 1 usa o 90 para a aquisição sem
+#     crédito, e o item do Simples não traz ICMS destacado.
+#
+# O CST gravado na camada efetiva (classificação, `alterar`) sempre vence.
+CSOSN_COM_ST_COBRADA = {"201", "202", "203", "500"}
+CST_DE_ST_COBRADA = "60"
+CST_OUTRAS = "90"
+
+
 def cancelado(cabecalho: dict) -> bool:
     """O documento foi cancelado — pela camada efetiva, não pelo XML."""
     return cabecalho.get("situacao") == CANCELADO
@@ -271,6 +294,7 @@ class GeradorBase:
     def __init__(self) -> None:
         self._resultado = ResultadoGeracao()
         self._frete_sem_modalidade: list[str] = []
+        self._csosn_convertido: set[tuple[str, str]] = set()
 
     def _reiniciar(self, documentos_ids: list[int]) -> None:
         """Zera o estado de uma geração.
@@ -282,6 +306,49 @@ class GeradorBase:
         self._resultado = ResultadoGeracao(documentos_ids=documentos_ids)
         self._frete_sem_modalidade = []
         self._pagamento_sem_indicador: list[str] = []
+        self._csosn_convertido = set()
+
+    def _cst_icms(self, item: dict, cabecalho: dict) -> str:
+        """O CST_ICMS do item: origem + Tabela B, com três dígitos.
+
+        Do CST quando o item tem um (o efetivo: a classificação vence o XML);
+        do CSOSN, convertido como descrito em `CSOSN_COM_ST_COBRADA`, quando
+        só tem CSOSN — e aí o documento entra no aviso.
+        """
+        origem = texto(item.get("origem_mercadoria")) or "0"
+        cst = texto(item.get("cst_icms"))
+        if cst:
+            return f"{origem}{cst}"
+        csosn = texto(item.get("csosn"))
+        if not csosn:
+            return f"{origem}{cst}"
+        tabela_b = CST_DE_ST_COBRADA if csosn in CSOSN_COM_ST_COBRADA else CST_OUTRAS
+        self._csosn_convertido.add(
+            (texto(cabecalho.get("sentido")), texto(cabecalho.get("numero")) or "sem número")
+        )
+        return f"{origem}{tabela_b}"
+
+    def _avisar_csosn_convertido(self) -> None:
+        """Um aviso por sentido, com os documentos nomeados."""
+        entradas = sorted(n for s, n in self._csosn_convertido if s == "entrada")
+        saidas = sorted(n for s, n in self._csosn_convertido if s != "entrada")
+        if entradas:
+            self._resultado.avisos.append(
+                "item(ns) de fornecedor do Simples Nacional (CSOSN, sem CST) saíram com "
+                f"CST_ICMS {CST_DE_ST_COBRADA} (ICMS cobrado por ST) ou {CST_OUTRAS} "
+                f"(outros) nos documentos {', '.join(entradas)}. O Guia manda escriturar "
+                "a entrada com o CST do Convênio SN/70 sob o enfoque de quem escritura — "
+                "classifique com `sped-hub fiscal alterar --campo cst_icms` antes de "
+                "transmitir"
+            )
+        if saidas:
+            self._resultado.avisos.append(
+                "item(ns) de saída com CSOSN e sem CST saíram com CST_ICMS "
+                f"{CST_DE_ST_COBRADA} ou {CST_OUTRAS} nos documentos {', '.join(saidas)}. "
+                "Para o declarante optante pelo Simples, o Guia manda usar a Tabela B "
+                "do CSOSN nas saídas; o sistema não tem o regime da empresa — confira "
+                "antes de transmitir"
+            )
 
     def _no_arquivo(self, visoes: Sequence[dict]) -> list[dict]:
         """Os documentos que entram no arquivo — todos menos os denegados.

@@ -311,6 +311,17 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   cancelado. CSOSN em empresa não optante exigiria o
   regime tributário cadastrado — fingir que verifica seria pior que não
   verificar.
+- **O IPI vem em um de dois grupos.** `IPITrib` (tributado, com valor) ou
+  `IPINT` (não tributado, só com o CST). O CST era procurado só no primeiro, e
+  o `CST 53` do `IPINT` virava `None` — o C170 saía sem CST_IPI.
+- **A NF-e é reconhecida pelo namespace, não pelo texto da tag.** O mesmo
+  documento pode vir com o namespace padrão ou prefixado (`<ns0:nfeProc
+  xmlns:ns0="…/nfe">`), que é o que sai de qualquer programa que reserializa o
+  XML com ElementTree; procurar o texto `<NFe` recusava esse como origem
+  desconhecida. `reconhece` acha a tag raiz com o prefixo que tiver e confere
+  que ele aponta para `http://www.portalfiscal.inf.br/nfe` — sem parsear, porque
+  o reconhecimento não pode levantar e o XML ainda não passou por
+  `carregar_xml`.
 - **O ICMS vem embrulhado na variante** (`ICMS00`, `ICMS60`, `ICMSSN102`…). O
   adaptador desce no primeiro filho em vez de listar as ~20 formas, que mudam
   a cada nota técnica. De lá sai também o FCP-ST do item (`vFCPST`, coluna
@@ -322,6 +333,7 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 ```bash
 pytest tests/test_documentos_fiscais.py -q  # adaptador, reforma, XML hostil, duplicidade
 pytest tests/test_substituir_documento_escriturado.py -q  # SUBSTITUIR recusa o que já foi escriturado
+pytest tests/test_nfe_casos_de_borda.py -q  # IPINT, CSOSN, namespace prefixado
 pytest tests/test_camada_efetiva.py -q      # ajustes, tipos, reversão por lote
 pytest tests/test_valor_digitado_no_formato_brasileiro.py -q  # "1.234,56" aceito, texto recusado
 pytest tests/test_classificacao_fiscal.py -q  # regras, prioridade, conflito, vigência

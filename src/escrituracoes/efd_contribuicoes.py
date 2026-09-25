@@ -179,6 +179,7 @@ class GeradorEFDContribuicoes(GeradorBase):
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
         self._avisar_frete_sem_modalidade()
+        self._avisar_csosn_convertido()
         return self._resultado
 
     def _natureza_pj(self) -> str:
@@ -421,9 +422,9 @@ class GeradorEFDContribuicoes(GeradorBase):
             "",
         )
         for item in visao["itens"]:
-            self._item_c170(item)
+            self._item_c170(item, c)
 
-    def _item_c170(self, item: dict) -> None:
+    def _item_c170(self, item: dict, cabecalho: dict) -> None:
         """O item, com o detalhamento de PIS e Cofins que interessa aqui."""
         self._add(
             "C170",
@@ -435,7 +436,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             formatar_valor(item["valor_total"]),
             formatar_valor(item["valor_desconto"]),
             "0",  # IND_MOV
-            f"{_texto(item['origem_mercadoria']) or '0'}{_texto(item['cst_icms'])}",
+            self._cst_icms(item, cabecalho),
             _texto(item["cfop"]),
             "",  # COD_NAT
             formatar_valor(item["base_icms"]),

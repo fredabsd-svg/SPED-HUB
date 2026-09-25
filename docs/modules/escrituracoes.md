@@ -401,6 +401,19 @@ a porta de entrada humana de tudo isto.
 - **`IND_NAT_PJ` sai fixo como `00`** (sociedade empresária em geral).
   Cooperativa (`01`) e entidade que apura o PIS/Pasep sobre a folha de salários
   (`02`) precisam de correção à mão — o resultado avisa em toda geração.
+- **Item do Simples Nacional sai com CST de três dígitos, e com aviso.** O
+  item traz CSOSN e não CST, e o gerador escrevia só a origem no CST_ICMS
+  ("0", num campo N 003*). O Guia Prático da EFD ICMS/IPI 3.2.2 (C170, campo
+  10) diz que o CSOSN "não é utilizado no registro das mercadorias nas
+  entradas" — a entrada leva o CST do Convênio SN/70 "sob o enfoque do
+  declarante", que só quem escritura sabe. Como no IND_PGTO, sai o código que
+  menos afirma: `60` para CSOSN 201, 202, 203 e 500 (ICMS já cobrado por ST —
+  o exemplo 2 do mesmo campo) e `90` (outros) no resto, com aviso que nomeia
+  os documentos e aponta `fiscal alterar --campo cst_icms`; o CST da camada
+  efetiva sempre vence. Na **saída** o Guia manda o declarante optante usar a
+  Tabela B do CSOSN, e isto **não** está resolvido: o sistema não tem o regime
+  da empresa, e o campo tem três posições para um código de três dígitos mais
+  a origem. Sai o mesmo 60/90, com aviso próprio dizendo isso.
 - **Participantes, unidades e itens são derivados dos documentos.** Já estão
   dentro das notas; pedir recadastro seria pedir para divergir. Quando o mesmo
   código aparece com descrições diferentes, prevalece a **primeira** ocorrência
