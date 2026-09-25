@@ -13,10 +13,31 @@ Uso:
 
 import json
 import logging
+import threading
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 logger = logging.getLogger("sped-hub.cache.redis")
+
+
+def url_sem_senha(url: str) -> str:
+    """``redis://:segredo@redis:6379/0`` → ``redis://:***@redis:6379/0``.
+
+    Para log e mensagem.  A URL do Redis carrega a senha, e ela era logada
+    inteira a cada conexão — em toda subida e, pelo `/api/health/full`, a
+    cada requisição anônima.  O filtro de log também mascara URL com senha;
+    isto aqui é para a senha nem chegar ao logger.
+    """
+    try:
+        partes = urlsplit(url)
+        if partes.password is None:
+            return url
+        usuario = partes.username or ""
+        destino = partes.netloc.rsplit("@", 1)[1]
+        return urlunsplit(partes._replace(netloc=f"{usuario}:***@{destino}"))
+    except ValueError:
+        return "<url do redis ilegível>"
 
 
 class RedisCacheService:
@@ -62,7 +83,7 @@ class RedisCacheService:
             )
             self._redis.ping()
             self._redis_available = True
-            logger.info("Redis conectado: %s", self._redis_url)
+            logger.info("Redis conectado: %s", url_sem_senha(self._redis_url))
         except Exception as e:
             self._redis_available = False
             logger.warning("Redis indisponível (%s) — usando cache em memória", e)
@@ -198,3 +219,38 @@ class RedisCacheService:
             "hit_rate_pct": hit_rate,
             "backend": "redis" if self._redis_available else "memory",
         }
+
+
+# ── Instância compartilhada ────────────────────────────────────────────────
+
+#: Intervalo mínimo entre duas tentativas de reconexão de uma instância
+#: compartilhada que está no fallback de memória.
+RECONEXAO_SEGUNDOS = 30.0
+
+_compartilhados: dict[tuple[str, str], tuple[RedisCacheService, float]] = {}
+_trava_compartilhados = threading.Lock()
+
+
+def cache_compartilhado(redis_url: str, prefix: str = "sped:") -> RedisCacheService:
+    """Instância reaproveitada por ``(redis_url, prefix)``.
+
+    Construir `RedisCacheService` conecta e faz `ping` com timeout de 2 s.  O
+    `/api/health/full` — público — construía uma a cada requisição: com o
+    Redis fora do ar, cada chamada anônima prendia 2 s de conexão.  Aqui a
+    instância é criada uma vez e reaproveitada.
+
+    Como o fallback de uma instância é definitivo (ela nunca reconecta), a
+    que estiver em memória é trocada por uma nova — no máximo uma tentativa a
+    cada `RECONEXAO_SEGUNDOS` —, para o Redis que volta ser percebido.
+    """
+    chave = (redis_url, prefix)
+    with _trava_compartilhados:
+        existente = _compartilhados.get(chave)
+        agora = time.monotonic()
+        if existente is not None:
+            servico, criado_em = existente
+            if servico._redis_available or agora - criado_em < RECONEXAO_SEGUNDOS:
+                return servico
+        servico = RedisCacheService(redis_url=redis_url, prefix=prefix)
+        _compartilhados[chave] = (servico, agora)
+        return servico

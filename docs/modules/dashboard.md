@@ -22,7 +22,8 @@ vem de `reports/`.
 | Upload | `POST /api/upload` (ECD síncrona, compatibilidade), `/api/upload-async` + `/api/jobs/*` (importação com progresso usada pela tela), `/api/upload-efd`, `/api/upload-ecf` (só resumo) |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
 | Exportação | `/api/export/pdf`, `/xlsx` (os dois devolvem o arquivo como download), `/multi-formato` (ZIP), `/lote` |
-| Administração (admin) | `/api/audit/*`, `/api/email/*`, `/api/worker/status`, `/api/monitoring/*`, `/api/health/full` |
+| Administração (admin) | `/api/audit/*`, `/api/email/*`, `/api/worker/status`, `/api/monitoring/*` |
+| Saúde (pública, sem login) | `/api/health/full` |
 
 `destaques.py` — `gerar_destaques(data)`: as frases do cartão "Destaques"
 (fechamento do balanço, resultado e margem, endividamento, variação contra o
@@ -233,12 +234,20 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   abas, para que a área de seleção preserve sua largura.
 - As APIs externas (`/api/v1`, `/api/v2/graphql`) têm autenticação própria
   por API Key — o middleware do dashboard as ignora de propósito.
+- **`/api/health/full` é público e é `def`, não `async def`.** A checagem é
+  síncrona (sessão do banco, cliente Redis com timeout de 2 s) e, dentro de
+  uma corrotina, parava o event loop: com o Redis fora do ar, cada chamada
+  anônima congelava a aplicação inteira por ~2 s. Como `def`, roda no
+  threadpool. O cliente Redis vem de `cache_compartilhado` — criado uma vez,
+  com nova tentativa de conexão no máximo a cada 30 s enquanto o Redis estiver
+  fora — em vez de ser reconstruído a cada requisição anônima.
 
 ## Como testar isoladamente
 
 ```bash
 pytest tests/test_fase13.py tests/test_fase14.py tests/test_fase16.py -q
 pytest tests/test_hardening.py tests/test_vendor_assets.py -q
+pytest tests/test_saude_publica.py -q            # health público não trava o loop
 pytest tests/test_hierarquia_ciclica.py -q       # trava de ciclo
 pytest tests/test_fase7.py tests/test_fase10.py -q   # DashboardService
 pytest tests/test_telas_classificar_corrigir.py tests/test_identidade_dashboard.py -q

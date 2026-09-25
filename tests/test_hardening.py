@@ -273,6 +273,64 @@ class TestSaneamentoDePII:
         mensagem = "Importação concluída: 23 contas, 9 lançamentos"
         assert sanitizar(mensagem) == mensagem
 
+    @pytest.mark.parametrize(
+        "entrada,esperado",
+        [
+            ("Redis conectado: redis://:S3nhaRedis!@redis:6379/0", "redis://:***@redis:6379/0"),
+            (
+                "DB: postgresql+psycopg://sped:SenhaPg123@db:5432/sped",
+                "postgresql+psycopg://sped:***@db:5432/sped",
+            ),
+            # Senha com `@`: a máscara vai até o último `@` antes do host.
+            ("amqp://fila:p@ss@broker:5672/", "amqp://fila:***@broker:5672/"),
+            # Senha que também parece e-mail (`senha@host.com.br`).
+            (
+                "smtp://contador:Segredo1@smtp.escritorio.com.br:587",
+                "smtp://contador:***@smtp.escritorio.com.br:587",
+            ),
+        ],
+    )
+    def test_senha_dentro_de_url_nao_sobrevive(self, entrada, esperado):
+        """`DATABASE_URL` e `REDIS_URL` carregam a senha, e iam para o log inteiras."""
+        saida = sanitizar(entrada)
+        assert esperado in saida, f"senha da URL sobreviveu no log: {saida!r}"
+
+    def test_url_sem_senha_passa_intacta(self):
+        """Porta e caminho não são senha — mascarar ali só atrapalharia o diagnóstico."""
+        mensagem = "GET https://sped.escritorio.com.br:8443/api/v1/health redis://redis:6379/0"
+        assert sanitizar(mensagem) == mensagem
+
+    def test_traceback_em_formato_texto_sai_sanitizado(self):
+        """O formato padrão montava o traceback depois do filtro, e ele saía inteiro.
+
+        A mensagem de exceção é onde o dado digitado pelo usuário aparece
+        ("CNPJ ... inválido"). Só o formato JSON sanitizava a exceção.
+        """
+        from src.logging_config import configurar_logging
+
+        configurar_logging(forcar_json=False)
+        handler = next(h for h in logging.getLogger().handlers if getattr(h, "_sped_hub", False))
+        saida = io.StringIO()
+        anterior = handler.setStream(saida)
+        try:
+            try:
+                raise ValueError(
+                    "CNPJ 12.345.678/0001-95 do contador joao.silva@escritorio.com.br inválido"
+                )
+            except ValueError:
+                logging.getLogger("teste.pii").exception("falha ao importar")
+            logging.getLogger("teste.pii").warning(
+                "banco: %s", "postgresql+psycopg://sped:SenhaPg123@db:5432/sped"
+            )
+        finally:
+            handler.setStream(anterior)
+
+        texto = saida.getvalue()
+        assert "Traceback" in texto, "o traceback precisa continuar no log"
+        assert "0001-95" in texto, "a cauda do CNPJ fica, para a investigação"
+        for vazado in ("12.345.678", "joao.silva", "SenhaPg123"):
+            assert vazado not in texto, f"{vazado!r} saiu no log em formato texto:\n{texto}"
+
     def test_filtro_aplica_no_registro_de_log(self):
         registro = logging.LogRecord(
             "t", logging.WARNING, __file__, 1, "email %s", ("ana@x.com.br",), None

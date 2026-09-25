@@ -3512,8 +3512,17 @@ async def api_redis_cache_stats(request: Request):
 
 
 @app.get("/api/health/full")
-async def api_health_full():
-    """Health check completo — verifica DB, cache, workers."""
+def api_health_full():
+    """Health check completo — verifica DB, cache, workers.
+
+    `def`, não `async def`: a checagem é toda síncrona (sessão do banco,
+    cliente Redis com timeout de 2 s), e dentro de uma corrotina ela parava o
+    event loop — com o Redis fora do ar, cada chamada a esta rota PÚBLICA
+    congelava a aplicação inteira por ~2 s.  Como `def`, o FastAPI a roda no
+    threadpool.  O cliente Redis é compartilhado (`cache_compartilhado`) em vez
+    de reconstruído a cada chamada anônima.
+    """
+    from src.cache.redis_cache import cache_compartilhado
 
     status = {"database": "ok", "cache": "unknown", "workers": "unknown"}
 
@@ -3529,7 +3538,7 @@ async def api_health_full():
     # Cache
     try:
         redis_url = get_settings().redis_url_or_local
-        cache = RedisCacheService(redis_url=redis_url, prefix="health:")
+        cache = cache_compartilhado(redis_url, prefix="health:")
         cache.set("health", "ok", ttl=10)
         if cache.get("health") == "ok":
             status["cache"] = f"ok ({cache.stats()['backend']})"

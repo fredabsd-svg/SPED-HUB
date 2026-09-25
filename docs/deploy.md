@@ -260,14 +260,15 @@ restauração do backup.  É por isso que o backup vem antes da migração.
 
 | O quê | Onde |
 |---|---|
-| Saúde | `GET /api/v1/health` (público), `GET /api/health/full` |
+| Saúde | `GET /api/v1/health` (público), `GET /api/health/full` (público; banco, cache e workers) |
 | Métricas operacionais | `GET /monitoring` (admin) |
 | Auditoria | `GET /auditoria` (admin) |
 | Logs | `docker compose logs`; com `SPED_HUB_LOG_JSON=true`, uma linha JSON por evento |
 
-Os logs mascaram e-mail, CNPJ, CPF e tokens antes de sair — a cauda dos
-documentos é preservada para que ainda dê para casar a linha com o registro
-certo numa investigação.
+Os logs mascaram e-mail, CNPJ, CPF, tokens e a senha de URLs
+(`postgresql://usuario:***@host`) antes de sair, na mensagem e no traceback —
+a cauda dos documentos é preservada para que ainda dê para casar a linha com
+o registro certo numa investigação.
 
 ---
 

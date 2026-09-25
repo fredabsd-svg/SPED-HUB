@@ -17,6 +17,8 @@ Ambas expõem `get`, `set`, `delete`, `invalidate_prefix`, `clear` e `stats`.
 | `init_cache(max_entries)` / `get_cache()` | Instância global do `CacheService`. |
 | `cached(ttl=300, prefix="")` | Decorator: chave = SHA-256 de nome da função + args/kwargs, truncado a 32 hex, com prefixo. |
 | `RedisCacheService(redis_url, max_entries, prefix="sped:")` | Redis com fallback para memória; `stats()` inclui `"backend": "redis"` ou `"memory"`. |
+| `cache_compartilhado(redis_url, prefix)` | Instância reaproveitada por URL e prefixo; no fallback, nova tentativa de conexão no máximo a cada `RECONEXAO_SEGUNDOS` (30 s). |
+| `url_sem_senha(url)` | URL do Redis com a senha trocada por `***`, para log. |
 
 ## Depende de / quem depende
 
@@ -35,6 +37,15 @@ Consumido por: `dashboard.app` (`/api/cache/stats`, `/api/redis/cache/stats`,
   fora do ar de propósito — o CI não tem Redis.
 - **Redis quebrado não derruba nada**: a conexão usa timeout de 2 s e o
   construtor apenas loga warning. É o desenho para deploy progressivo.
+- **Construir conecta — e bloqueia.** O construtor faz `ping` síncrono com
+  timeout de 2 s. Quem precisa do Redis numa rota usa `cache_compartilhado`
+  em vez de construir a cada chamada: o `/api/health/full`, público, fazia
+  isso e cada chamada anônima pagava a conexão. Como o fallback de uma
+  instância é definitivo, `cache_compartilhado` troca a instância que está em
+  memória por uma nova depois de `RECONEXAO_SEGUNDOS`, para perceber o Redis
+  que voltou.
+- **A URL vai para o log sem a senha** (`url_sem_senha`). Antes o
+  `Redis conectado: <REDIS_URL>` levava a senha a cada conexão.
 - **Os dois lados do fallback não são espelhos.** O fallback em memória do
   `RedisCacheService` não tem lock (o `CacheService` tem), e os valores
   passam por JSON (`default=str`): tuplas viram listas, objetos viram string.

@@ -40,6 +40,13 @@ _EMAIL = re.compile(r"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-
 # Tokens de sessão (128 hex) e API keys (prefixo spd_).
 _TOKEN = re.compile(r"\b[0-9a-f]{32,}\b")
 _API_KEY = re.compile(r"\bspd_[0-9a-f]{8,}\b")
+# Senha dentro de URL: `esquema://usuario:senha@host`.  É como chegam
+# `DATABASE_URL` e `REDIS_URL`, e o `RedisCacheService` logava a URL inteira
+# ao conectar — a senha do Redis ia para o log em toda subida.  O usuário e o
+# host ficam (servem para diagnosticar); a senha vira `***`.  A senha vai até
+# o ÚLTIMO `@` antes do caminho, para que uma senha com `@` não deixe a
+# própria cauda para trás.
+_URL_COM_SENHA = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*://[^\s:/@]*):[^\s/]*@")
 
 
 def _mascarar_cnpj(match: re.Match) -> str:
@@ -61,6 +68,9 @@ def _mascarar_cpf(match: re.Match) -> str:
 
 def sanitizar(texto: str) -> str:
     """Mascara identificadores pessoais e segredos em uma linha de log."""
+    # A URL vem primeiro: `usuario:senha@host.com.br` também casa com o padrão
+    # de e-mail, que mascararia só o começo da senha e deixaria o resto.
+    texto = _URL_COM_SENHA.sub(r"\1:***@", texto)
     texto = _API_KEY.sub("spd_***", texto)
     texto = _TOKEN.sub("***", texto)
     texto = _CNPJ.sub(_mascarar_cnpj, texto)
@@ -70,13 +80,31 @@ def sanitizar(texto: str) -> str:
 
 
 class FiltroPII(logging.Filter):
-    """Aplica :func:`sanitizar` à mensagem já formatada."""
+    """Aplica :func:`sanitizar` à mensagem já formatada e ao traceback.
+
+    O traceback precisa de tratamento próprio.  O formato texto (o padrão) o
+    monta em `Formatter.format`, DEPOIS do filtro, a partir de
+    `record.exc_info` — e a mensagem de uma exceção é justamente onde vai
+    parar o que o usuário digitou ("CNPJ 12.345.678/0001-95 inválido").  Só o
+    formato JSON sanitizava a exceção; no texto ela saía inteira.  Aqui o
+    traceback é formatado de antemão em `record.exc_text`, que o `Formatter`
+    reaproveita em vez de refazer, e sai sanitizado nos dois formatos.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             record.msg = sanitizar(record.getMessage())
             record.args = ()
         except Exception:  # nunca derrube a aplicação por causa do log
+            pass
+        try:
+            if record.exc_info and not record.exc_text:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            if record.exc_text:
+                record.exc_text = sanitizar(record.exc_text)
+            if record.stack_info:
+                record.stack_info = sanitizar(record.stack_info)
+        except Exception:
             pass
         return True
 
