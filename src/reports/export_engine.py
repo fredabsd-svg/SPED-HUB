@@ -15,6 +15,14 @@ from src.reports.base import fmt_data, fmt_data_hora, fmt_moeda
 
 logger = logging.getLogger("sped-hub.export")
 
+# Formato de moeda das células XLSX. O código de formato do OOXML é gravado
+# sempre em notação en-US — "." é o separador decimal, "," o de milhar (e,
+# depois dos dígitos, escala por mil) —, e o Excel e o LibreOffice o exibem
+# com os separadores do idioma de quem abre: em pt-BR, 1.234,56. O
+# '#.##0,00' de antes, escrito "à brasileira", não era formato de moeda.
+# Negativo entre parênteses e zero como "-", a convenção dos relatórios.
+FORMATO_MOEDA_XLSX = '#,##0.00;(#,##0.00);"-"'
+
 
 @dataclass
 class WhiteLabel:
@@ -151,7 +159,7 @@ class ExportEngine:
                 bottom=Side(style="thin", color="E2DCCB"),
             )
             data_font = Font(name="Calibri", size=10)
-            moeda_format = '#.##0,00;(#.##0,00);"-"'
+            moeda_format = FORMATO_MOEDA_XLSX
 
             # ── Cabeçalho do relatório ──
             row = 1
@@ -302,7 +310,7 @@ class ExportEngine:
             bottom=Side(style="thin", color="E2DCCB"),
         )
         data_font = Font(name="Calibri", size=10)
-        moeda_format = '#.##0,00;(#.##0,00);"-"'
+        moeda_format = FORMATO_MOEDA_XLSX
 
         row = 1
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(colunas))

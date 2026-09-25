@@ -92,6 +92,11 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard`,
   inteira). Valor que arredonda para zero sai "0,00", nunca "(0,00)".
 - **Números idênticos em SQLite e Postgres** é garantia da §6.3, coberta por
   `tests/test_multibackend.py::TestRelatoriosIdenticos`.
+- **O formato de moeda do XLSX é `#,##0.00;(#,##0.00);"-"`**
+  (`FORMATO_MOEDA_XLSX`). O código de formato do OOXML é gravado em notação
+  en-US — "." decimal, "," milhar — e o Excel/LibreOffice o exibem com os
+  separadores de quem abre (1.234,56 em pt-BR). O `#.##0,00` de antes,
+  escrito "à brasileira", não era um formato de moeda.
 - O XLSX usa Calibri de propósito: a planilha abre na máquina do cliente,
   onde as fontes da identidade não estão instaladas. A paleta acompanha a
   identidade; a tipografia não.
