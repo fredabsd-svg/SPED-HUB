@@ -233,12 +233,23 @@ Teste a restauração pelo menos uma vez.  Backup não verificado não é backup
 ## 7. Atualizar versão
 
 ```bash
-docker compose pull                            # imagem nova do GHCR
+git fetch --tags
+git checkout vX.Y.Z                            # a versão a instalar
+docker compose build                           # reconstrói a aplicação e o nginx
 # BACKUP (passo 6) — antes da migração, não depois
 docker compose run --rm migrate                # aplica migrações pendentes
 docker compose up -d
 docker compose logs -f --tail=50 web
 ```
+
+O `docker-compose.yml` constrói as imagens a partir do código do checkout
+(`build: .`, e `deploy/nginx` para o nginx).  Por isso atualizar é trocar o
+código e reconstruir: `docker compose pull` sozinho só atualiza as imagens de
+terceiros (Redis, certbot) e deixa a aplicação na versão antiga — era o que
+este passo mandava fazer até a 0.20.0.  A imagem que o `release.yml` publica
+no GHCR serve a quem trocar o `build:` do `web`, do `worker` e do `migrate`
+por `image: ghcr.io/<dono>/sped-hub:X.Y.Z`; nesse caso, `docker compose pull`
+entra no lugar do `build` para esses três.
 
 Migrações rodam sob advisory lock, então `web` e `worker` subindo juntos não
 se atropelam.  Ainda assim o serviço `migrate` existe para que a falha, se
@@ -248,7 +259,8 @@ houver, apareça num log só.
 
 ```bash
 docker compose down
-# volte a imagem para a versão anterior no .env / compose
+git checkout vX.Y.Z                            # a versão anterior
+docker compose build
 docker compose up -d
 ```
 

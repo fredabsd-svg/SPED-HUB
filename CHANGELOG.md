@@ -6,7 +6,23 @@ Atualizado ao fim de cada fase, não só em release (§1.7).
 As entradas descrevem o efeito para quem usa o sistema, não o detalhe
 interno da implementação.
 
-## [Não publicado]
+## [0.20.0] — 2026-09-25
+
+**Como atualizar a partir da 0.19.0.** Esta versão traz migrações de schema
+(a última é `e3a91c7d5b28`, a coluna de FCP-ST por item) e muda o
+`deploy/nginx/proxy.conf`, que é embutido na imagem do nginx. Faça o backup
+antes (`docs/deploy.md`, passo 6), depois:
+
+```bash
+git fetch --tags && git checkout v0.20.0
+docker compose build
+docker compose run --rm migrate
+docker compose up -d
+```
+
+O `build` é obrigatório: o compose constrói a aplicação e o nginx a partir do
+código. Sem reconstruir o nginx, ele continua repassando o `X-Forwarded-For`
+do cliente, e o limite de tentativas de login segue contornável.
 
 ### Alterado
 - **O painel foi redesenhado com cara de aplicativo moderno** (ADR 0010).
@@ -395,6 +411,10 @@ interno da implementação.
   que veio no XML nunca foi alterado.
 
 ### Corrigido
+- **O passo de atualização do `docs/deploy.md` não atualizava a aplicação.**
+  Mandava `docker compose pull`, mas o compose constrói as imagens a partir do
+  código: o comando só renovava Redis e certbot. O guia agora manda trocar o
+  checkout para a tag e reconstruir, e o rollback segue o mesmo caminho.
 - **Balancete e balanço de ECD mensal.** Com um I150 por mês, o balancete
   somava os doze saldos iniciais e finais; agora usa o inicial do primeiro mês
   e o final do último. A validação de saldos confere mês a mês, e erros que se
