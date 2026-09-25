@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import uuid
 from pathlib import Path
 
@@ -418,3 +419,345 @@ class TestReconciliacaoDeDeliveries:
         _migrar_para(banco.url, "a1c7f2b9e40d")
 
         assert self._estados(banco.url) == antes
+
+
+# Última revisão antes de `b182f5a414b4`, que criou `signatarios` e as colunas
+# `responsavel_*` de `empresas`.  Um banco nela é o de quem atualizou o código
+# da 0.20.0 e não migrou.
+ANTES_DOS_SIGNATARIOS = "e3a91c7d5b28"
+
+
+def _banco_da_versao_anterior(url: str) -> None:
+    """Banco parado antes de `b182f5a414b4`, com uma empresa cadastrada."""
+    from sqlalchemy import text
+
+    _migrar_para(url, ANTES_DOS_SIGNATARIOS)
+    engine = criar_engine(url=url)
+    try:
+        with engine.begin() as conexao:
+            conexao.execute(
+                text(
+                    "INSERT INTO empresas (cnpj, nome) VALUES ('11222333000181', 'EMPRESA ANTIGA')"
+                )
+            )
+    finally:
+        engine.dispose()
+
+
+def _empresas(engine) -> list[tuple]:
+    from src.db.models import Empresa, get_session
+
+    session = get_session(engine)
+    try:
+        return [(e.nome, e.responsavel_nome) for e in session.query(Empresa).all()]
+    finally:
+        session.close()
+
+
+class TestCodigoNovoSobreBancoDaVersaoAnterior:
+    """Atualizar o código sem migrar o banco não pode derrubar o painel.
+
+    Depois do merge da 0.20.0, quem subiu o painel direto sobre o SQLite de
+    antes recebeu "Internal Server Error" na página inicial: o `create_all`
+    criou a tabela nova `signatarios`, mas não acrescentou as colunas
+    `responsavel_*` em `empresas`, que já existia, e toda consulta à empresa
+    passou a falhar com "no such column".  Pior: com `signatarios` já criada,
+    `sped-hub migrar aplicar` falhava em seguida com "table already exists",
+    e o banco ficava sem saída pelo caminho documentado.
+    """
+
+    def test_painel_le_as_empresas_de_banco_nao_migrado(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'antigo.db'}"
+        _banco_da_versao_anterior(url)
+        engine = criar_engine(url=url)
+        try:
+            init_db(engine)  # o que o painel faz ao subir
+
+            assert _empresas(engine) == [("EMPRESA ANTIGA", None)], (
+                "o painel não lê a empresa de um banco que ainda não migrou — "
+                "é o 500 da página inicial"
+            )
+        finally:
+            engine.dispose()
+
+    def test_banco_sem_alembic_tambem_ganha_as_colunas(self, tmp_path):
+        """Banco nascido do `create_all`, que nunca passou pelo Alembic."""
+        url = f"sqlite:///{tmp_path / 'sem_alembic.db'}"
+        _banco_da_versao_anterior(url)
+        engine = criar_engine(url=url)
+        try:
+            with engine.begin() as conexao:
+                conexao.exec_driver_sql("DROP TABLE alembic_version")
+            assert revisao_atual(engine) is None
+
+            init_db(engine)
+
+            assert _empresas(engine) == [("EMPRESA ANTIGA", None)]
+        finally:
+            engine.dispose()
+
+    @pytest.mark.parametrize("banco", BACKENDS, indirect=True)
+    def test_migrar_depois_que_o_painel_subiu(self, banco):
+        """A ordem errada — painel antes da migração — ainda termina em `head`."""
+        _banco_da_versao_anterior(banco.url)
+        engine = criar_engine(url=banco.url)
+        try:
+            init_db(engine)  # cria `signatarios` antes da migração que a cria
+
+            assert upgrade_head(banco.url) == revisao_head(), (
+                "`migrar aplicar` falha depois que o painel subiu sobre o banco "
+                "antigo — o banco fica sem caminho documentado para migrar"
+            )
+            assert _empresas(engine) == [("EMPRESA ANTIGA", None)]
+        finally:
+            engine.dispose()
+
+    @pytest.mark.parametrize("banco", BACKENDS, indirect=True)
+    def test_a_migracao_mais_recente_aplica_depois_que_o_painel_subiu(self, banco):
+        """Vale para toda revisão nova, não só a `b182f5a414b4`.
+
+        Migração que cria tabela, índice ou coluna sem conferir se já existe
+        quebra aqui: o painel sobe antes dela e cria o que ela ia criar.
+        """
+        from alembic.script import ScriptDirectory
+
+        from src.db.migrations import alembic_config
+
+        anterior = ScriptDirectory.from_config(alembic_config()).get_revision(revisao_head())
+        _migrar_para(banco.url, anterior.down_revision)
+        engine = criar_engine(url=banco.url)
+        try:
+            init_db(engine)
+
+            assert upgrade_head(banco.url) == revisao_head(), (
+                f"a revisão {revisao_head()} não confere se o que cria já existe "
+                "(ADR 0013) — falha em quem subiu o painel antes de migrar"
+            )
+        finally:
+            engine.dispose()
+
+    def test_schema_completado_e_igual_ao_migrado(self, tmp_path):
+        """O que o painel completa sozinho é o mesmo que a migração faria."""
+        completado = f"sqlite:///{tmp_path / 'completado.db'}"
+        _banco_da_versao_anterior(completado)
+        migrado = f"sqlite:///{tmp_path / 'migrado.db'}"
+        _banco_da_versao_anterior(migrado)
+
+        engine_completado = criar_engine(url=completado)
+        engine_migrado = criar_engine(url=migrado)
+        try:
+            init_db(engine_completado)
+            upgrade_head(migrado)
+
+            assert _retrato(engine_completado) == _retrato(engine_migrado)
+        finally:
+            engine_completado.dispose()
+            engine_migrado.dispose()
+
+
+class TestCompletarColunas:
+    """O que `completar_colunas` acrescenta, e o que ela deixa para a migração."""
+
+    @staticmethod
+    def _tabela_antiga(tmp_path):
+        engine = criar_engine(url=f"sqlite:///{tmp_path / 'colunas.db'}")
+        with engine.begin() as conexao:
+            conexao.exec_driver_sql("CREATE TABLE coisas (id INTEGER PRIMARY KEY)")
+            conexao.exec_driver_sql("INSERT INTO coisas (id) VALUES (1)")
+        return engine
+
+    @staticmethod
+    def _modelo():
+        from sqlalchemy import Column, Integer, MetaData, String, Table
+
+        metadata = MetaData()
+        Table(
+            "coisas",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("apelido", String(20), nullable=True),
+            Column("contagem", Integer, nullable=False, server_default="0"),
+            Column("obrigatoria", String(5), nullable=False),
+            Column("codigo", String(5), unique=True),
+            Column("nome", String(20)),
+        )
+        Table(
+            "tabela_nova",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("rotulo", String(10)),
+        )
+        return metadata
+
+    def test_acrescenta_so_o_que_o_sqlite_aceita_numa_tabela_com_linhas(self, tmp_path):
+        from src.db.models import completar_colunas
+
+        engine = self._tabela_antiga(tmp_path)
+        try:
+            acrescentadas = completar_colunas(engine, self._modelo())
+
+            assert acrescentadas == ["coisas.apelido", "coisas.contagem", "coisas.nome"]
+            colunas = {c["name"] for c in inspect(engine).get_columns("coisas")}
+            assert colunas == {"id", "apelido", "contagem", "nome"}, (
+                "coluna NOT NULL sem default ou UNIQUE não entra por ALTER TABLE "
+                "numa tabela com linhas — fica para a migração"
+            )
+            assert (
+                "tabela_nova" not in inspect(engine).get_table_names()
+            ), "tabela nova é trabalho do create_all, não desta função"
+            with engine.connect() as conexao:
+                assert conexao.exec_driver_sql("SELECT contagem FROM coisas").scalar() == 0
+        finally:
+            engine.dispose()
+
+    @pytest.mark.skipif(
+        not TEST_DATABASE_URL, reason="defina TEST_DATABASE_URL para exercitar o PostgreSQL"
+    )
+    def test_postgres_fica_so_com_a_migracao(self, tmp_path):
+        """PostgreSQL é versionado por migração: o painel não mexe no schema dele."""
+        from src.db.models import completar_colunas
+
+        alvo = _BancoDescartavel("postgres", tmp_path, "sem_completar")
+        try:
+            _banco_da_versao_anterior(alvo.url)
+            engine = criar_engine(url=alvo.url)
+            try:
+                assert completar_colunas(engine) == []
+                colunas = {c["name"] for c in inspect(engine).get_columns("empresas")}
+                assert "responsavel_nome" not in colunas
+            finally:
+                engine.dispose()
+        finally:
+            alvo.limpar()
+
+    def test_segunda_chamada_nao_faz_nada(self, tmp_path):
+        from src.db.models import completar_colunas
+
+        engine = self._tabela_antiga(tmp_path)
+        try:
+            completar_colunas(engine, self._modelo())
+            assert completar_colunas(engine, self._modelo()) == []
+        finally:
+            engine.dispose()
+
+    def test_avisa_o_que_nao_conseguiu_acrescentar(self, tmp_path, caplog):
+        from src.db.models import completar_colunas
+
+        engine = self._tabela_antiga(tmp_path)
+        try:
+            with caplog.at_level(logging.WARNING, logger="sped-hub.db"):
+                completar_colunas(engine, self._modelo())
+            avisos = " ".join(r.getMessage() for r in caplog.records)
+            assert "coisas.obrigatoria" in avisos
+            assert "coisas.codigo" in avisos
+            assert "migrar status" in avisos
+        finally:
+            engine.dispose()
+
+
+class TestPainelSobreBancoDaVersaoAnterior:
+    """O mesmo defeito pela porta de entrada: login e página inicial (§7.1).
+
+    O banco nasce na versão atual, recebe escritório, usuário e ECD, e perde
+    o que a `b182f5a414b4` trouxe: `signatarios` e as colunas
+    `responsavel_*`.  É o SQLite de quem usava a versão anterior e atualizou
+    só o código.
+    """
+
+    SENHA = "senha-de-teste"
+
+    @pytest.fixture
+    def cliente(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from src.audit import init_audit_service
+        from src.auth import init_auth
+        from src.db.models import Escritorio, Usuario, get_session
+        from src.ecd_importer import ECDImportService
+        from src.ratelimit import init_limiter
+        from src.settings import reset_settings_cache
+
+        preparo = f"sqlite:///{tmp_path / 'preparo.db'}"
+        monkeypatch.setenv("DATABASE_URL", preparo)
+        monkeypatch.delenv("SPED_HUB_DB", raising=False)
+        reset_settings_cache()
+
+        upgrade_head(preparo)
+        engine = criar_engine(url=preparo)
+        try:
+            with get_session(engine) as sessao:
+                escritorio = Escritorio(nome="Escritório", slug="escritorio")
+                sessao.add(escritorio)
+                sessao.flush()
+                senha_hash, salt = Usuario.hash_senha(self.SENHA)
+                sessao.add(
+                    Usuario(
+                        email="contador@teste.local",
+                        nome="Contador",
+                        senha_hash=senha_hash,
+                        salt=salt,
+                        admin=True,
+                        escritorio_id=escritorio.id,
+                    )
+                )
+                sessao.commit()
+                escritorio_id = escritorio.id
+            with get_session(engine) as sessao:
+                amostra = Path(__file__).parent / "fixtures" / "ecd_sample.txt"
+                ecd_id = (
+                    ECDImportService(sessao).importar(amostra, escritorio_id=escritorio_id).ecd_id
+                )
+        finally:
+            engine.dispose()
+
+        # O `downgrade` recria `empresas` pelo modo batch e esbarra nas chaves
+        # estrangeiras das ECDs; o SQLite remove a coluna direto.
+        engine = criar_engine(url=preparo)
+        try:
+            with engine.begin() as conexao:
+                for coluna in ("responsavel_nome", "responsavel_cpf", "responsavel_qualificacao"):
+                    conexao.exec_driver_sql(f"ALTER TABLE empresas DROP COLUMN {coluna}")
+                conexao.exec_driver_sql("DROP TABLE signatarios")
+                conexao.exec_driver_sql(
+                    f"UPDATE alembic_version SET version_num = '{ANTES_DOS_SIGNATARIOS}'"
+                )
+            colunas = {c["name"] for c in inspect(engine).get_columns("empresas")}
+            assert "responsavel_nome" not in colunas, "o banco não voltou à versão anterior"
+        finally:
+            engine.dispose()
+
+        # O painel encontra o banco num arquivo que nenhuma engine do processo
+        # conhece, como ao subir.  No de preparo, a importação deixou uma
+        # engine em cache marcada como pronta (`init_db_once`) com o schema
+        # novo, e ninguém conferiria as colunas de novo.
+        shutil.copy(tmp_path / "preparo.db", tmp_path / "painel_antigo.db")
+        referencia = f"sqlite:///{tmp_path / 'painel_antigo.db'}"
+        monkeypatch.setenv("DATABASE_URL", referencia)
+        reset_settings_cache()
+
+        init_auth(referencia)
+        init_audit_service(referencia)
+        init_limiter(referencia)
+        from src.dashboard.app import app
+
+        cliente = TestClient(app, raise_server_exceptions=False)
+        resposta = cliente.post(
+            "/api/login", data={"email": "contador@teste.local", "senha": self.SENHA}
+        )
+        assert resposta.status_code == 200, resposta.text
+        return cliente, ecd_id
+
+    def test_pagina_inicial_abre(self, cliente):
+        cliente, _ = cliente
+        resposta = cliente.get("/")
+
+        assert resposta.status_code == 200, (
+            f"a página inicial respondeu {resposta.status_code} sobre o banco da "
+            "versão anterior — é o 'Internal Server Error' de quem atualizou sem migrar"
+        )
+
+    def test_assinaturas_da_ecd_abrem(self, cliente):
+        cliente, ecd_id = cliente
+        resposta = cliente.get("/api/assinaturas", params={"ecd_id": ecd_id})
+
+        assert resposta.status_code == 200, resposta.text[:200]

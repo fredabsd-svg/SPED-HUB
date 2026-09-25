@@ -21,6 +21,23 @@ Por isso:
 As migrações são exercitadas **contra os dois backends** no CI mesmo assim,
 para não apodrecerem sem ninguém notar.
 
+### Colunas novas num SQLite que já tem dados
+
+O `create_all` não acrescenta coluna em tabela existente.  Por isso, no
+SQLite, `init_db` roda em seguida `completar_colunas`, que acrescenta as
+colunas dos modelos que faltam — só as que o `ALTER TABLE ADD COLUMN` aceita
+numa tabela com linhas: coluna que admite nulo ou tem `server_default`, e
+que não é única nem chave primária.  O resto vai para o log, pedindo a
+migração (ADR 0013).
+
+Sem isso, quem atualizou para a 0.20.0 e subiu o painel direto, sem
+`migrar aplicar`, recebia "Internal Server Error" na página inicial: faltava
+`empresas.responsavel_nome`.
+
+O `alembic_version` não muda: `migrar status` segue mostrando a revisão
+pendente, e `migrar aplicar` (ou `adotar`, em banco que nunca teve Alembic)
+a registra.  No PostgreSQL, nada disso roda: o schema é só da migração.
+
 ## Comandos
 
 ```bash
@@ -62,6 +79,16 @@ tabelas e colunas novas, e erra com frequência em:
 - alterações de tipo que precisam de `USING` no PostgreSQL;
 - coluna nova `NOT NULL` em tabela com dados — precisa de default ou de um
   passo de preenchimento antes do `ALTER`.
+
+**Toda criação confere antes se já existe.**  O painel pode ter subido antes
+da migração: o `create_all` cria a tabela nova (com os índices) e, no SQLite,
+`completar_colunas` acrescenta a coluna nova.  Uma migração que cria de novo
+falha com "already exists", e o banco fica sem saída pelo caminho
+documentado.  Veja a `b182f5a414b4`: `if "signatarios" not in _tabelas()`,
+o mesmo para o índice e para cada coluna.  O teste
+`test_a_migracao_mais_recente_aplica_depois_que_o_painel_subiu` sobe o painel
+antes da revisão `head` e migra em seguida, nos dois backends: esquecer a
+guarda quebra o CI.
 
 O teste `test_schema_migrado_e_identico_ao_dos_modelos` compara, coluna a
 coluna e índice a índice, o schema produzido pela migração com o produzido

@@ -10,7 +10,8 @@ interno da implementação.
 
 **Como atualizar.** Há uma migração nova, `b182f5a414b4` (signatários da ECD
 e responsável legal da empresa): faça o backup e rode
-`docker compose run --rm migrate`. ECD importada antes dela não tem os
+`docker compose run --rm migrate`. Sem Docker, rode `sped-hub migrar status`
+e siga o que ele indicar. ECD importada antes dela não tem os
 signatários — importe-a de novo para que o contador saia na assinatura.
 
 ### Adicionado
@@ -67,6 +68,13 @@ signatários — importe-a de novo para que o contador saia na assinatura.
   "(15.540,00)" não dizia se a conta estava credora ou devedora.
 
 ### Corrigido
+- **"Internal Server Error" na página inicial depois de atualizar** sem
+  rodar a migração. O painel subia sobre o SQLite antigo, criava a tabela
+  nova de signatários e deixava a tabela de empresas sem as colunas do
+  responsável legal. Depois disso, `sped-hub migrar aplicar` também falhava
+  ("table signatarios already exists"). Agora, no SQLite, o painel completa
+  sozinho as colunas novas ao subir, e a migração passa mesmo depois que o
+  painel já subiu (ADR 0013).
 - **O balanço mostra o saldo anterior** mesmo sem a ECD do ano anterior
   importada: é o saldo de abertura do exercício, o mesmo do balanço
   publicado. As colunas levam as datas (31/12 de cada ano).

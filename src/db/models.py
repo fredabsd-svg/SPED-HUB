@@ -11,6 +11,7 @@ import datetime
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import threading
@@ -20,6 +21,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    MetaData,
     String,
     Text,
     UniqueConstraint,
@@ -28,8 +30,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
+from sqlalchemy.schema import CreateColumn
 
 from src.settings import get_settings
+
+logger = logging.getLogger("sped-hub.db")
 
 
 class Base(DeclarativeBase):
@@ -1597,7 +1602,66 @@ def init_db(engine: Engine | None = None) -> None:
     if engine is None:
         engine = criar_engine()
     Base.metadata.create_all(engine)
+    completar_colunas(engine)
     _SCHEMA_PRONTO.add(engine)
+
+
+def completar_colunas(engine: Engine, metadata: MetaData | None = None) -> list[str]:
+    """Acrescenta no SQLite as colunas dos modelos que faltam em tabelas existentes.
+
+    O ``create_all`` cria a tabela que falta e não toca nas que já existem.
+    Quem atualiza o código e sobe o painel sem ``sped-hub migrar aplicar``
+    ficava com a tabela velha: a primeira consulta à coluna nova derrubava a
+    página com "no such column" (ADR 0013).
+
+    Só entra o que o ``ALTER TABLE ADD COLUMN`` aceita numa tabela com linhas:
+    coluna que admite nulo ou tem ``server_default``, e que não é única nem
+    chave primária.  O resto vai para o log, porque precisa de migração.
+    O ``alembic_version`` não muda: ``migrar status`` segue mostrando a revisão
+    pendente, e ``migrar aplicar`` (ou ``adotar``) a registra.
+
+    Fora do SQLite não faz nada: PostgreSQL é versionado por migração.
+    Devolve ``["tabela.coluna", ...]`` do que acrescentou, na ordem do modelo.
+    """
+    if engine.dialect.name != "sqlite":
+        return []
+    metadata = Base.metadata if metadata is None else metadata
+    acrescentadas: list[str] = []
+    with engine.begin() as conexao:
+        # Uma consulta para o banco inteiro: o `inspect` faz uma por tabela e
+        # custava 5,2 ms por `init_db`; assim a função inteira leva 1,2 ms (35 tabelas).
+        existentes: dict[str, set[str]] = {}
+        for nome_tabela, nome_coluna in conexao.exec_driver_sql(
+            "SELECT m.name, p.name FROM sqlite_master AS m "
+            "JOIN pragma_table_info(m.name) AS p WHERE m.type = 'table'"
+        ):
+            existentes.setdefault(nome_tabela, set()).add(nome_coluna)
+        for tabela in metadata.sorted_tables:
+            if tabela.name not in existentes:
+                continue
+            presentes = existentes[tabela.name]
+            for coluna in tabela.columns:
+                if coluna.name in presentes:
+                    continue
+                sem_valor = not coluna.nullable and coluna.server_default is None
+                if coluna.primary_key or coluna.unique or sem_valor:
+                    logger.warning(
+                        "Coluna %s.%s falta no banco e só entra por migração: "
+                        "veja `sped-hub migrar status`.",
+                        tabela.name,
+                        coluna.name,
+                    )
+                    continue
+                definicao = CreateColumn(coluna).compile(dialect=engine.dialect)
+                conexao.exec_driver_sql(f'ALTER TABLE "{tabela.name}" ADD COLUMN {definicao}')
+                acrescentadas.append(f"{tabela.name}.{coluna.name}")
+    if acrescentadas:
+        logger.warning(
+            "Banco sem migrar: colunas acrescentadas (%s). Veja `sped-hub migrar "
+            "status` para registrar a revisão.",
+            ", ".join(acrescentadas),
+        )
+    return acrescentadas
 
 
 def init_db_once(engine: Engine) -> None:
