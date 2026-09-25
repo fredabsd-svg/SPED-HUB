@@ -309,6 +309,28 @@ class TestCoercaoBooleana:
         cfg = get_settings()
         assert getattr(cfg, campo) is esperado
 
+    @pytest.mark.parametrize("valor", ["sim", "ligado", "verdadeiro", "treu", "2"])
+    def test_valor_nao_reconhecido_mantem_o_default(self, monkeypatch, valor):
+        """`SMTP_USE_TLS=sim` desligava o TLS do SMTP — o contrário do pedido.
+
+        Tudo que não era grafia de "verdadeiro" virava `False`. Valor que não
+        se reconhece não diz nem sim nem não: fica o default do campo.
+        """
+        monkeypatch.setenv("SMTP_USE_TLS", valor)
+        monkeypatch.setenv("EMAIL_ENABLED", valor)
+        cfg = get_settings()
+
+        assert (
+            cfg.smtp_use_tls is True
+        ), f"SMTP_USE_TLS={valor!r} desligou o TLS: a senha do SMTP passaria em claro"
+        assert cfg.email_enabled is False, f"EMAIL_ENABLED={valor!r} ligou o envio de e-mail"
+
+    @pytest.mark.parametrize("valor", ["off", "n", "f", " FALSE "])
+    def test_grafias_de_falso_continuam_desligando(self, monkeypatch, valor):
+        """O conserto não pode fazer `false` voltar a ligar (§2.3)."""
+        monkeypatch.setenv("SMTP_USE_TLS", valor)
+        assert get_settings().smtp_use_tls is False
+
 
 class TestCaminhoSqlite:
     """Conversão caminho → URL, em especial o caso absoluto."""
@@ -378,6 +400,36 @@ class TestLimiteDeUpload:
     def test_override_invalido_cai_no_mb(self, monkeypatch):
         monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_BYTES", "-1")
         assert get_settings().max_upload_bytes == 200 * 1024 * 1024
+
+    @pytest.mark.parametrize("valor", ["0", "-5"])
+    def test_mb_nao_positivo_cai_no_default(self, monkeypatch, tmp_path, valor):
+        """`SPED_HUB_MAX_UPLOAD_MB=0` dava limite de 0 byte: todo upload levava 413.
+
+        Conferido pelo efeito em `save_upload`, que é o que as rotas de upload
+        chamam: uma ECD de poucos bytes precisa passar.
+        """
+        import asyncio
+        import io
+
+        from starlette.datastructures import UploadFile
+
+        from src.uploads import save_upload
+
+        monkeypatch.delenv("SPED_HUB_MAX_UPLOAD_BYTES", raising=False)
+        monkeypatch.setenv("SPED_HUB_MAX_UPLOAD_MB", valor)
+        monkeypatch.setenv("SPED_HUB_UPLOAD_DIR", str(tmp_path / "uploads"))
+        assert get_settings().max_upload_bytes == 200 * 1024 * 1024
+
+        ecd = b"|0000|LECD|01012024|31122024|EMPRESA|00123456000199|SP||\n"
+        salvo = asyncio.run(
+            save_upload(UploadFile(file=io.BytesIO(ecd), filename="e.txt"), (".txt",))
+        )
+        try:
+            assert salvo.size_bytes == len(
+                ecd
+            ), f"SPED_HUB_MAX_UPLOAD_MB={valor} recusou uma ECD de {len(ecd)} bytes"
+        finally:
+            salvo.path.unlink(missing_ok=True)
 
 
 class TestDatabaseReferenceNosServicos:

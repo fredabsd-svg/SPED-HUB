@@ -19,6 +19,7 @@ import functools
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -171,10 +172,43 @@ def get_cache() -> CacheService:
     return _cache_service
 
 
+# `<pacote.Classe object at 0x7f...>`: a representação padrão de objeto, que
+# só diz ONDE ele está na memória.
+_REPR_POR_ENDERECO = re.compile(r" at 0x[0-9a-fA-F]+>")
+
+
+def _parte_estavel(valor: Any) -> Any:
+    """Converte, para a chave do `@cached`, um argumento que o JSON não serializa.
+
+    Usa `valor.__cache_key__()` quando o objeto o define.  Sem ele, usa
+    `str(valor)` — desde que isso descreva o VALOR, e não o endereço.  Num
+    método decorado, `self` entrava na chave como
+    `<DashboardService object at 0x7f…>`.  O endereço de um objeto coletado é
+    reaproveitado pelo próximo, então o serviço de uma ECD receberia o
+    resultado cacheado de outra — número de outra escrituração, e
+    possivelmente de outro escritório.  Argumento assim é recusado com
+    `TypeError`, em vez de virar chave que colide em silêncio.
+    """
+    chave = getattr(valor, "__cache_key__", None)
+    if callable(chave):
+        return [type(valor).__module__, type(valor).__qualname__, chave()]
+    texto = str(valor)
+    if _REPR_POR_ENDERECO.search(texto):
+        raise TypeError(
+            f"@cached: argumento do tipo {type(valor).__qualname__} não tem chave estável "
+            f"({texto!r} identifica o endereço na memória, que é reaproveitado). "
+            "Defina __cache_key__() nele ou não passe o objeto à função cacheada."
+        )
+    return texto
+
+
 def cached(ttl: int = 300, prefix: str = ""):
     """Decorator que cacheia o resultado de uma função.
 
-    A chave é gerada a partir do nome da função + args/kwargs (hash SHA-256).
+    A chave é gerada a partir do módulo e nome qualificado da função +
+    args/kwargs (hash SHA-256).  Argumento que o JSON não serializa entra na
+    chave por `__cache_key__()` ou por `str()`; objeto cuja representação é só
+    o endereço na memória é recusado (`TypeError`) — ver `_parte_estavel`.
 
     Args:
         ttl: Tempo de vida em segundos (default: 5 minutos)
@@ -184,6 +218,13 @@ def cached(ttl: int = 300, prefix: str = ""):
         @cached(ttl=60, prefix="dashboard:")
         def get_kpis(ecd_id: int) -> dict:
             ...
+
+        class Servico:
+            def __cache_key__(self):
+                return self.ecd_id
+
+            @cached(ttl=60)
+            def total(self): ...
     """
 
     def decorator(func: Callable):
@@ -191,10 +232,12 @@ def cached(ttl: int = 300, prefix: str = ""):
         def wrapper(*args, **kwargs):
             cache = get_cache()
 
-            # Gera chave única
-            key_parts = [prefix, func.__name__]
-            key_parts.append(json.dumps(args, default=str))
-            key_parts.append(json.dumps(kwargs, default=str, sort_keys=True))
+            # Gera chave única.  Módulo e nome qualificado, não só `__name__`:
+            # duas funções `total` em classes ou módulos diferentes não podem
+            # dividir entrada.
+            key_parts = [prefix, func.__module__, func.__qualname__]
+            key_parts.append(json.dumps(args, default=_parte_estavel))
+            key_parts.append(json.dumps(kwargs, default=_parte_estavel, sort_keys=True))
             key_raw = "|".join(key_parts)
             digest = hashlib.sha256(key_raw.encode()).hexdigest()[:32]
             key = f"{prefix}{digest}"

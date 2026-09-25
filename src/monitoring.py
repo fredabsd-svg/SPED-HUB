@@ -240,7 +240,7 @@ def _database_metrics(db_path: str, minutes: int) -> dict:
             "failed_webhooks": failed_webhooks,
             "audit_events": audit_events,
             "audit_errors": audit_errors,
-            "size_bytes": _database_size(db_path),
+            "size_bytes": _database_size(engine.url),
         }
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
@@ -249,10 +249,21 @@ def _database_metrics(db_path: str, minutes: int) -> dict:
         engine.dispose()
 
 
-def _database_size(db_path: str) -> int:
-    if db_path == ":memory:":
+def _database_size(url) -> int:
+    """Bytes em disco do banco SQLite: arquivo principal, `-wal` e `-shm`.
+
+    Recebe a URL da engine (`engine.url`), não o `db_path` cru.  A aplicação
+    passa URL (`sqlite:////app/data/sped_hub.db`), e tratá-la como caminho de
+    arquivo procurava um arquivo chamado `sqlite:////…`, que não existe: o
+    painel mostrava 0 byte para todo banco.  `url.database` é o caminho que o
+    próprio SQLite abre.  Banco que não é SQLite (ou `:memory:`) responde 0.
+    """
+    if url.get_backend_name() != "sqlite":
         return 0
-    base = Path(db_path)
+    caminho = url.database
+    if not caminho or caminho == ":memory:":
+        return 0
+    base = Path(caminho)
     return sum(
         candidate.stat().st_size
         for candidate in (base, Path(f"{base}-wal"), Path(f"{base}-shm"))

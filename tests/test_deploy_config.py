@@ -149,7 +149,7 @@ class TestOrigemDaRequisicaoAtrasDoNginx:
     aqui, o lado do nginx.
     """
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture
     def cabecalhos(self) -> dict[str, str]:
         proxy = (REPO_ROOT / "deploy" / "nginx" / "proxy.conf").read_text("utf-8")
         return dict(re.findall(r"^\s*proxy_set_header\s+(\S+)\s+(\S+);", proxy, re.M))
