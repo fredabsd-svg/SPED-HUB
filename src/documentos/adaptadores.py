@@ -60,6 +60,7 @@ class ItemNormalizado:
     base_icms_st: float = 0.0
     valor_icms_st: float = 0.0
     valor_fcp: float = 0.0
+    valor_fcp_st: float = 0.0
     cst_ipi: str | None = None
     valor_ipi: float = 0.0
     cst_pis: str | None = None
@@ -472,6 +473,7 @@ class AdaptadorNFe:
             item.base_icms_st = _numero(icms, "vBCST")
             item.valor_icms_st = _numero(icms, "vICMSST")
             item.valor_fcp = _numero(icms, "vFCP")
+            item.valor_fcp_st = _numero(icms, "vFCPST")
 
         ipi = _primeiro_filho(_achar(imposto, "IPI", "IPITrib")) or _achar(
             imposto, "IPI", "IPITrib"

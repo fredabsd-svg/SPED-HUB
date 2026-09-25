@@ -52,8 +52,18 @@ def nfe_xml(
         data_saida
         or (datetime.date.fromisoformat(data_emissao) + datetime.timedelta(days=1)).isoformat()
     )
+    # O frete do documento é rateado entre os itens, como a NF-e faz: o
+    # `vFrete` do `ICMSTot` é a soma dos `vFrete` de cada `prod`.  Sem o
+    # rateio, quem soma pelo item — o C190 — não enxergaria frete nenhum.
+    frete_item = round(valor_frete / itens, 2) if itens else 0.0
     corpo_itens = "".join(
-        _item(n, com_reforma=com_reforma, is_especifico=is_especifico, beneficios=beneficios)
+        _item(
+            n,
+            com_reforma=com_reforma,
+            is_especifico=is_especifico,
+            beneficios=beneficios,
+            valor_frete=frete_item,
+        )
         for n in range(1, itens + 1)
     )
     total_prod = 1000.00 * itens
@@ -143,7 +153,15 @@ def nfe_xml(
 """.encode()
 
 
-def _item(numero: int, *, com_reforma: bool, is_especifico: bool, beneficios: bool = False) -> str:
+def _item(
+    numero: int,
+    *,
+    com_reforma: bool,
+    is_especifico: bool,
+    beneficios: bool = False,
+    valor_frete: float = 0.0,
+) -> str:
+    frete = f"\n          <vFrete>{valor_frete:.2f}</vFrete>" if valor_frete else ""
     reforma = ""
     if com_reforma:
         seletivo = (
@@ -230,7 +248,7 @@ def _item(numero: int, *, com_reforma: bool, is_especifico: bool, beneficios: bo
           <uCom>UN</uCom>
           <qCom>10.0000</qCom>
           <vUnCom>100.0000000000</vUnCom>
-          <vProd>1000.00</vProd>
+          <vProd>1000.00</vProd>{frete}
           <vDesc>0.00</vDesc>
         </prod>
         <imposto>

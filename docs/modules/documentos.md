@@ -298,7 +298,9 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   verificar.
 - **O ICMS vem embrulhado na variante** (`ICMS00`, `ICMS60`, `ICMSSN102`…). O
   adaptador desce no primeiro filho em vez de listar as ~20 formas, que mudam
-  a cada nota técnica.
+  a cada nota técnica. De lá sai também o FCP-ST do item (`vFCPST`, coluna
+  `valor_fcp_st`), que o `VL_OPR` do C190 soma por item; o total do documento
+  não diz de qual item ele é.
 
 ## Como testar isoladamente
 

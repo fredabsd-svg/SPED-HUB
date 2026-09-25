@@ -371,6 +371,7 @@ _CAMPOS_DE_ITEM = (
     "base_icms_st",
     "valor_icms_st",
     "valor_fcp",
+    "valor_fcp_st",
     "cst_ipi",
     "valor_ipi",
     "cst_pis",

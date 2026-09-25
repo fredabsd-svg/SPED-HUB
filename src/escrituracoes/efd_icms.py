@@ -180,6 +180,38 @@ def leva_itens_no_arquivo(cabecalho: dict) -> bool:
     return True
 
 
+# As parcelas do `VL_OPR` do C190, com o sinal de cada uma.  Guia Prático da
+# EFD ICMS/IPI 3.2.2, C190, campo 05: "o valor das mercadorias somadas aos
+# valores de fretes, seguros e outras despesas acessórias e os valores de
+# ICMS_ST, FCP_ST e IPI (somente quando o IPI está destacado na NF), subtraídos
+# o desconto incondicional e o abatimento não tributado e não comercial. Não
+# devem ser incluídos neste campo os valores relativos a CBS, IBS e IS".
+#
+# O IPI do item é o destacado (`vIPI` do `IPITrib`), então entra como está. O
+# abatimento não tributado não existe no modelo — o `VL_ABAT_NT` sai vazio —,
+# e por isso não aparece aqui.
+PARCELAS_DO_VL_OPR = (
+    ("valor_total", 1),  # vProd: as mercadorias
+    ("valor_frete", 1),
+    ("valor_seguro", 1),
+    ("valor_outras", 1),
+    ("valor_icms_st", 1),
+    ("valor_fcp_st", 1),
+    ("valor_ipi", 1),
+    ("valor_desconto", -1),
+)
+
+
+def valor_da_operacao(item: dict) -> float:
+    """O `VL_OPR` de um item, pela fórmula do Guia.
+
+    Era só o `vProd`: numa venda de 1.000,00 com 30,00 de frete e 50,00 de
+    IPI o C100 dizia 1080,00 e o C190 1000,00 — e no leiaute 019 (2025) o
+    validador ainda confere um contra o outro.
+    """
+    return sum(sinal * (item.get(campo) or 0.0) for campo, sinal in PARCELAS_DO_VL_OPR)
+
+
 class GeradorEFDICMS(GeradorBase):
     """Monta a EFD ICMS/IPI de um período."""
 
@@ -225,7 +257,29 @@ class GeradorEFDICMS(GeradorBase):
         self._avisar_frete_sem_modalidade()
         self._avisar_pagamento_sem_indicador()
         self._avisar_reforma_fora_do_arquivo(visoes)
+        self._avisar_fcp_st_sem_item(visoes)
         return self._resultado
+
+    def _avisar_fcp_st_sem_item(self, visoes: Sequence[dict]) -> None:
+        """Documento com FCP-ST no total e em nenhum item.
+
+        É o documento importado antes de o `vFCPST` do item ser lido: o
+        `VL_OPR` do C190 sai sem ele, e a diferença tem a cara de um defeito
+        do gerador. Um aviso por geração, com os números.
+        """
+        sem_item = [
+            _texto(v["cabecalho"]["numero"]) or "sem número"
+            for v in visoes
+            if not cancelado(v["cabecalho"])
+            and (v["cabecalho"].get("valor_fcp_st") or 0.0) > 0
+            and not any(i.get("valor_fcp_st") for i in v["itens"])
+        ]
+        if sem_item:
+            self._resultado.avisos.append(
+                "o VL_OPR do C190 saiu SEM o FCP-ST em documento(s) cujo total tem "
+                f"FCP-ST e os itens não: {', '.join(sem_item)}. São documentos "
+                "importados antes de o FCP-ST do item ser lido — reimporte o XML"
+            )
 
     def _conferir_cadastro(self) -> None:
         faltando = []
@@ -529,7 +583,7 @@ class GeradorEFDICMS(GeradorBase):
                 formatar_valor(item["aliquota_icms"]),
             )
             grupo = grupos[chave]
-            grupo["valor_operacao"] += item["valor_total"] or 0.0
+            grupo["valor_operacao"] += valor_da_operacao(item)
             grupo["base_icms"] += item["base_icms"] or 0.0
             grupo["valor_icms"] += item["valor_icms"] or 0.0
             grupo["base_icms_st"] += item["base_icms_st"] or 0.0

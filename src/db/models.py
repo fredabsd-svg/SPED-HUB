@@ -1021,6 +1021,10 @@ class ItemDocumentoFiscal(Base):
     base_icms_st: Mapped[float] = mapped_column(default=0.0)
     valor_icms_st: Mapped[float] = mapped_column(default=0.0)
     valor_fcp: Mapped[float] = mapped_column(default=0.0)
+    # `vFCPST` do grupo do ICMS (N23d).  Entra no `VL_OPR` do C190, que o Guia
+    # Prático define por item — "valor das mercadorias [...] e os valores de
+    # ICMS_ST, FCP_ST e IPI" —, e o total do documento não diz de qual item é.
+    valor_fcp_st: Mapped[float] = mapped_column(default=0.0)
     cst_ipi: Mapped[str | None] = mapped_column(String(2))
     valor_ipi: Mapped[float] = mapped_column(default=0.0)
     cst_pis: Mapped[str | None] = mapped_column(String(2), index=True)

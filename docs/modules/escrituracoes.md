@@ -61,6 +61,7 @@ existisse.
 | `formatar_valor` / `formatar_data` | Vírgula decimal e `ddmmaaaa`. |
 | `CampoObrigatorioAusente` | Falta cadastro sem o qual o arquivo sairia errado. |
 | `COD_VER` | Versão do leiaute da EFD ICMS/IPI declarada no 0000. |
+| `valor_da_operacao(item)` / `PARCELAS_DO_VL_OPR` | O `VL_OPR` do C190 por item, pela fórmula do Guia. |
 | `REGIMES` | Os valores válidos de `cod_inc_trib` (registro 0110). |
 | `CST_ENTRADA_COM_CREDITO` / `CST_ENTRADA_SEM_CREDITO` | Quais aquisições geram crédito (tabela 4.3.4). |
 | `CST_SAIDA_TRIBUTADA` / `CST_SAIDA_SEM_DEBITO` | Quais saídas geram contribuição (tabela 4.3.3). |
@@ -368,6 +369,16 @@ a porta de entrada humana de tudo isto.
 - **O C190 sai dos mesmos valores que alimentaram os C170.** O validador
   confere o consolidado contra a soma dos itens; uma segunda leitura poderia
   divergir da primeira.
+- **O `VL_OPR` do C190 é o valor da operação, não o das mercadorias.** Era só
+  a soma do `vProd`: uma venda de 1.000,00 com 30,00 de frete e 50,00 de IPI
+  saía com `VL_DOC` 1080,00 e `VL_OPR` 1000,00, e no leiaute 019 (2025) o
+  validador ainda confere um contra o outro. Pelo Guia Prático da EFD
+  ICMS/IPI 3.2.2 (C190, campo 05) é mercadorias + frete + seguro + outras
+  despesas + ICMS-ST + FCP-ST + IPI destacado − desconto, sem CBS, IBS nem
+  IS — `PARCELAS_DO_VL_OPR`, somadas por item. O FCP-ST passou a ser lido por
+  item (`vFCPST`, coluna `valor_fcp_st`) para isso; documento importado antes
+  da coluna tem o FCP-ST só no total, sai sem ele no `VL_OPR` e o resultado
+  avisa com o número de cada um.
 - **Zero vira campo vazio.** O leiaute trata ausente e zero como a mesma coisa
   na maioria dos campos, e `0,00` onde se espera vazio gera advertência.
 - **Arredondamento é meio para cima, não para o par.** O padrão do
@@ -402,5 +413,6 @@ a porta de entrada humana de tudo isto.
 pytest tests/test_gerador_efd_icms.py tests/test_gerador_efd_contribuicoes.py \
        tests/test_escrituracao_arquivada.py \
        tests/test_documentos_cancelados_e_denegados.py \
-       tests/test_arquivo_sped_em_latin1.py -q
+       tests/test_arquivo_sped_em_latin1.py \
+       tests/test_c190_valor_da_operacao.py -q
 ```

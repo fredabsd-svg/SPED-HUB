@@ -301,7 +301,12 @@ class TestBlocoC:
             return sum(float(c[indice].replace(",", ".") or 0) for c in c170)
 
         consolidado = c190[0]
-        assert float(consolidado[3].replace(",", ".")) == pytest.approx(soma(5)), "valor"
+        # O VL_OPR não é a soma dos VL_ITEM: o Guia (C190, campo 05) soma frete,
+        # seguro, outras despesas, ICMS-ST, FCP-ST e IPI e tira o desconto. Sem
+        # frete nem ST no fixture, sobram o item e o IPI (campo 23 do C170).
+        assert float(consolidado[3].replace(",", ".")) == pytest.approx(
+            soma(5) + soma(22) - soma(6)
+        ), "valor da operação"
         assert float(consolidado[4].replace(",", ".")) == pytest.approx(soma(11)), "base"
         assert float(consolidado[5].replace(",", ".")) == pytest.approx(soma(13)), "ICMS"
 
