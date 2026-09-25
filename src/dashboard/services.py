@@ -35,6 +35,11 @@ class KPICard:
     tendencia: str = "neutro"
     descricao: str = ""
     icone: str = ""
+    # Só para a tela, fora da API. `tendencia` tem sentido diferente em cada
+    # cartão ("down" é bom no endividamento e ruim no PL), e colorir por ela
+    # pintava de vermelho um endividamento saudável. `tom` diz a cor.
+    tom: str = "neutro"  # positivo | negativo | neutro
+    variacao: float | None = None  # % contra o exercício anterior
 
 
 @dataclass
@@ -51,6 +56,15 @@ class DashboardData:
     resultado_liquido: float = 0.0
     num_lancamentos: int = 0
     num_contas: int = 0
+    ativo_anterior: float | None = None
+    pl_anterior: float | None = None
+
+
+def _variacao(atual: float, anterior: float | None) -> float | None:
+    """Variação percentual, ou None quando não há base para comparar."""
+    if anterior is None or abs(anterior) < 0.005:
+        return None
+    return (atual - anterior) / abs(anterior) * 100
 
 
 class DashboardService:
@@ -104,6 +118,8 @@ class DashboardService:
             resultado_liquido=totais_dre.get("resultado_liquido", 0.0),
             num_lancamentos=num_lancs,
             num_contas=num_contas,
+            ativo_anterior=totais.get("ativo_anterior") if totais.get("tem_anterior") else None,
+            pl_anterior=totais.get("pl_anterior") if totais.get("tem_anterior") else None,
         )
 
     def _calcular_kpis(self, totais, totais_dre, num_lancs, num_contas) -> list[KPICard]:
@@ -111,7 +127,10 @@ class DashboardService:
         ativo = totais["ativo"]
         passivo = totais["passivo"]
         pl = totais["pl"]
-        receita_bruta = totais_dre.get("receita_bruta", 0.0)
+        # A DRE devolve a receita com o sinal contábil (crédito negativo). O
+        # cartão comparava `receita_bruta > 0`, e numa empresa com receita — o
+        # caso normal — a margem líquida nunca aparecia.
+        receita_bruta = abs(totais_dre.get("receita_bruta", 0.0))
         resultado = totais_dre.get("resultado_liquido", 0.0)
 
         kpis.append(
@@ -122,6 +141,11 @@ class DashboardService:
                 tendencia="neutro",
                 descricao="Total de bens e direitos",
                 icone="💰",
+                variacao=(
+                    _variacao(ativo, totais.get("ativo_anterior"))
+                    if totais.get("tem_anterior")
+                    else None
+                ),
             )
         )
         kpis.append(
@@ -132,6 +156,10 @@ class DashboardService:
                 tendencia="up" if pl > 0 else "down",
                 descricao="Capital próprio da empresa",
                 icone="🏛️",
+                tom="positivo" if pl > 0 else "negativo" if pl < 0 else "neutro",
+                variacao=(
+                    _variacao(pl, totais.get("pl_anterior")) if totais.get("tem_anterior") else None
+                ),
             )
         )
 
@@ -145,6 +173,7 @@ class DashboardService:
                     tendencia="down" if endividamento < 60 else "up",
                     descricao="Passivo ÷ Ativo Total",
                     icone="📊",
+                    tom="negativo" if endividamento >= 100 else "neutro",
                 )
             )
 
@@ -156,6 +185,7 @@ class DashboardService:
                 tendencia="up" if resultado > 0 else "down",
                 descricao="Lucro ou prejuízo do período",
                 icone="📈",
+                tom="positivo" if resultado > 0 else "negativo" if resultado < 0 else "neutro",
             )
         )
 
@@ -169,6 +199,7 @@ class DashboardService:
                     tendencia="up" if margem > 10 else "neutro",
                     descricao="Resultado ÷ Receita Bruta",
                     icone="🎯",
+                    tom="positivo" if margem > 0 else "negativo" if margem < 0 else "neutro",
                 )
             )
 

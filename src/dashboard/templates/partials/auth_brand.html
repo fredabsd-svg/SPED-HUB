@@ -1,14 +1,20 @@
-{# Painel de marca das telas de entrada.  Só descreve o que a aplicação faz
-   hoje — nada de rota da área logada, que a tela anônima não anuncia. #}
+{#- Painel de marca das telas de entrada.  Só descreve o que a aplicação faz
+    hoje — nada de rota da área logada, que a tela anônima não anuncia. -#}
+{%- import "partials/icones.html" as ic -%}
 <div class="auth-brand">
     <div class="auth-brand-logo">
-        <img src="/static/marca.svg" alt="" width="48" height="48">
+        <img src="/static/marca.svg" alt="" width="40" height="40">
         <span>SPED<span>-HUB</span></span>
     </div>
-    <h2>Escrituração, apuração e demonstrações num só lugar.</h2>
+    <div>
+        <h2>A escrituração do escritório, <em>conferida e pronta</em> para entregar.</h2>
+        <p class="auth-lede">Contabilidade e fiscal no mesmo lugar, com as conferências que o
+            validador do Fisco faria — antes de o arquivo sair.</p>
+    </div>
     <ul class="auth-points">
-        <li>Importe ECD, EFD-Contribuições e ECF e confira a integridade contábil.</li>
-        <li>Gere a EFD ICMS/IPI e a EFD-Contribuições a partir do XML das notas.</li>
-        <li>Exporte Balanço, DRE, DFC e Diário em PDF e Excel.</li>
+        <li>{{ ic.icone("painel") }}<span>Importe ECD, EFD-Contribuições e ECF e confira a integridade contábil.</span></li>
+        <li>{{ ic.icone("gerar") }}<span>Gere a EFD ICMS/IPI e a EFD-Contribuições a partir do XML das notas.</span></li>
+        <li>{{ ic.icone("baixar") }}<span>Exporte Balanço, DRE, DFC e Diário em PDF e Excel.</span></li>
     </ul>
+    <p class="auth-rodape">Área privada do escritório.</p>
 </div>

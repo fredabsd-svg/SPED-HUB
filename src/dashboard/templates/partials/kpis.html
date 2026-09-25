@@ -1,22 +1,44 @@
-<!-- KPIs Cards (HTMX partial) -->
-{# Moeda e percentual no formato brasileiro.  O cartão usava "%.2f": o ativo
-   aparecia como "R$ 830000.00", sem milhar e com ponto decimal, na mesma
-   tela em que as tabelas mostravam "830.000,00". #}
+{#- Cartões de indicadores (também servidos sozinhos por /api/kpis).
+
+    Moeda e percentual no formato brasileiro.  A cor do valor vem de `tom`,
+    não de `tendencia`: esta tem sentido diferente em cada cartão ("down" é
+    bom no endividamento e ruim no PL) e pintava de vermelho um
+    endividamento saudável.  Valor negativo sai também entre parênteses —
+    a cor nunca é a única pista. -#}
+{%- import "partials/icones.html" as ic -%}
+{%- set ICONES = {
+    "Ativo Total": "carteira",
+    "Patrimônio Líquido": "patrimonio",
+    "Endividamento": "percentual",
+    "Resultado Líquido": "tendencia",
+    "Margem Líquida": "alvo",
+    "Lançamentos": "lista",
+} -%}
 <div class="kpi-grid">
     {% for kpi in data.kpis %}
-    <div class="kpi-card">
-        <div class="kpi-icon" aria-hidden="true">{{ kpi.icone }}</div>
-        <div class="kpi-titulo">{{ kpi.titulo }}</div>
-        <div class="kpi-valor {% if kpi.tendencia == 'up' %}kpi-tendencia-up{% elif kpi.tendencia == 'down' %}kpi-tendencia-down{% endif %}">
-            {% if kpi.formato == 'moeda' %}
-                <span class="kpi-moeda">R$</span>{{ fmt_moeda(kpi.valor) }}
-            {% elif kpi.formato == 'percentual' %}
-                {{ kpi.valor | percentual }}
-            {% else %}
-                {{ kpi.valor | int }}
-            {% endif %}
+    <article class="kpi-card">
+        <div class="kpi-topo">
+            <h3 class="kpi-titulo">{{ kpi.titulo }}</h3>
+            <span class="kpi-icon" aria-hidden="true">
+                {%- if ICONES.get(kpi.titulo) %}{{ ic.icone(ICONES[kpi.titulo]) }}{% else %}{{ kpi.icone }}{% endif -%}
+            </span>
         </div>
-        <div class="kpi-descricao">{{ kpi.descricao }}</div>
-    </div>
+        <div class="kpi-valor{% if kpi.tom == 'positivo' %} kpi-positivo{% elif kpi.tom == 'negativo' %} kpi-negativo{% endif %}">
+            {%- if kpi.formato == 'moeda' -%}
+                <span class="kpi-moeda">R$</span>{{ fmt_moeda(kpi.valor) }}
+            {%- elif kpi.formato == 'percentual' -%}
+                {{ kpi.valor | percentual }}
+            {%- else -%}
+                {{ "{:,}".format(kpi.valor | int).replace(",", ".") }}
+            {%- endif -%}
+        </div>
+        <p class="kpi-descricao">{{ kpi.descricao }}</p>
+        {% if kpi.variacao is not none %}
+        <span class="kpi-variacao{% if kpi.variacao > 0 %} sobe{% elif kpi.variacao < 0 %} desce{% endif %}">
+            <span aria-hidden="true">{% if kpi.variacao > 0 %}▲{% elif kpi.variacao < 0 %}▼{% else %}■{% endif %}</span>
+            {{ (kpi.variacao | abs) | percentual }} <span class="sr-only">em relação ao</span> vs. exercício anterior
+        </span>
+        {% endif %}
+    </article>
     {% endfor %}
 </div>

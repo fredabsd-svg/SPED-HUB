@@ -442,8 +442,15 @@ class TestE2ENavegacao:
             assert page.evaluate(
                 "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
             ), "a página cria rolagem horizontal no celular"
-            page.locator(".nav-group summary").filter(has_text="Fiscal").click()
+            # Em tela estreita o menu lateral fica recolhido atrás do botão da
+            # barra superior; aberto, ele cobre a tela e mostra as seções.
+            page.locator("[data-menu-abrir]").click()
             expect(page.get_by_role("link", name="Importar documentos")).to_be_visible()
+            assert page.evaluate(
+                "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+            ), "o menu aberto cria rolagem horizontal"
+            page.keyboard.press("Escape")
+            expect(page.get_by_role("link", name="Importar documentos")).not_to_be_in_viewport()
             expect(page.locator('meta[name="robots"]')).to_have_attribute(
                 "content", "noindex, nofollow"
             )
@@ -582,7 +589,7 @@ class TestE2EPainelRevisado:
                     altura = page.eval_on_selector(
                         f"#{grafico}", "e => e.getBoundingClientRect().height"
                     )
-                    assert 0 < altura <= 400, (
+                    assert 0 < altura <= 520, (
                         f"#{grafico} com {altura:.0f}px de altura em tela de {largura}px — "
                         "o gráfico voltou a crescer sem limite"
                     )

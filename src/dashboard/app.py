@@ -78,6 +78,7 @@ from src.auth import (
 )
 from src.cache.redis_cache import RedisCacheService
 from src.cnpj import formatar as formatar_cnpj
+from src.dashboard.destaques import gerar_destaques
 from src.dashboard.services import DashboardService
 from src.db.models import (
     ECD,
@@ -737,6 +738,7 @@ async def dashboard(request: Request, ecd_id: int | None = Query(None)):
         if ecd:
             svc = DashboardService(session, ecd.id)
             data = svc.get_dashboard_data()
+            destaques = gerar_destaques(data)
             evolucao = svc.get_evolucao_patrimonial()
             composicao = svc.get_composicao_ativo()
             dre_waterfall = svc.get_dre_waterfall()
@@ -745,6 +747,7 @@ async def dashboard(request: Request, ecd_id: int | None = Query(None)):
             comparativo = svc.get_comparativo_empresas(usuario) if len(ecds) > 1 else None
         else:
             data = None
+            destaques = []
             evolucao = None
             composicao = None
             dre_waterfall = None
@@ -757,6 +760,7 @@ async def dashboard(request: Request, ecd_id: int | None = Query(None)):
                     "request": request,
                     "usuario": usuario,
                     "data": data,
+                    "destaques": destaques,
                     "evolucao": evolucao,
                     "composicao": composicao,
                     "dre_waterfall": dre_waterfall,

@@ -24,6 +24,16 @@ vem de `reports/`.
 | Exportação | `/api/export/pdf`, `/xlsx` (os dois devolvem o arquivo como download), `/multi-formato` (ZIP), `/lote` |
 | Administração (admin) | `/api/audit/*`, `/api/email/*`, `/api/worker/status`, `/api/monitoring/*`, `/api/health/full` |
 
+`destaques.py` — `gerar_destaques(data)`: as frases do cartão "Destaques"
+(fechamento do balanço, resultado e margem, endividamento, variação contra o
+exercício anterior, movimento), calculadas sobre o mesmo `DashboardData` dos
+cartões.
+
+`static/app-shell.css` — o design system (tokens e componentes) e o shell
+com menu lateral; `static/app-shell.js` recolhe o menu em tela estreita;
+`templates/partials/icones.html` — os ícones de traço, em SVG inline
+(ADR 0010).
+
 `services.py` — `DashboardService` (KPIs, evolução patrimonial e
 multi-período, composição do ativo, waterfall DRE, DFC, comparativos, notas
 explicativas automáticas) e os dataclasses `KPICard`/`DashboardData`. Em
@@ -86,6 +96,16 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
 - **O login e o cadastro sabem se o registro público está aberto**
   (`AuthService.registro_publico_aberto`). Fechado, a tela avisa antes do
   formulário e o login deixa de oferecer "Criar conta".
+- **A cor do cartão vem de `tom`, não de `tendencia`.** `tendencia` está na
+  API e tem sentido diferente em cada cartão ("down" é bom no endividamento e
+  ruim no PL); colorir por ela pintava de vermelho um endividamento de 31%.
+  `tom` e `variacao` existem só para a tela.
+- **A receita chega da DRE com sinal de crédito (negativa).** O cartão de
+  margem exigia `receita_bruta > 0` e nunca aparecia; KPIs e destaques usam
+  o valor absoluto. O JSON da API segue com o sinal contábil.
+- **Os destaques são conta, não estimativa.** O único caso interpretado é o
+  balanço que não fecha pelo valor exato do resultado: vira "resultado ainda
+  fora do PL" (saldos anteriores ao encerramento) em vez de erro.
 - **O menu só mostra o que o usuário pode abrir.** Link que devolve 403 é pior
   que link ausente: a mensagem fala de permissão, e quem clicou não pediu
   permissão nenhuma.
