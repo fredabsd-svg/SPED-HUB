@@ -1,4 +1,4 @@
-"""O logo e o ícone do SPED-HUB (versão 0.20.0).
+"""O logo e o ícone do SPED-HUB.
 
 Três garantias:
 

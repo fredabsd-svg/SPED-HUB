@@ -353,7 +353,7 @@ class TestE2ELogin:
         Recusar sem dizer nada seria pior que não recusar: o visitante clica em
         "Criar Conta" e a tela fica parada, sem pista do que aconteceu.
 
-        Desde a 0.20.0 o aviso vem **antes** do formulário: a tela pergunta se
+        Agora o aviso vem **antes** do formulário: a tela pergunta se
         o registro está aberto e, fechado, nem oferece os campos — o visitante
         não preenche nada para só então descobrir que não havia como.
         """
@@ -560,7 +560,7 @@ def _enviar_ecd(context, live_server, caminho) -> int:
 
 
 class TestE2EPainelRevisado:
-    """O que só um navegador consegue medir no painel (versão 0.20.0)."""
+    """O que só um navegador consegue medir no painel."""
 
     def test_graficos_tem_altura_limitada(self, live_server, ecd_factory, contador):
         """Com `maintainAspectRatio: false` e sem pai de altura fixa, o canvas

@@ -424,6 +424,10 @@
     align-items: center;
     gap: 10px;
 }
+/* As páginas avulsas (comparar, webhooks, layout, chaves de API) não herdam
+   o base.html: sem esta regra, a marca saía como link comum, azul e
+   sublinhada. */
+.navbar .navbar-brand { color: #fff; font-weight: 600; text-decoration: none; }
 .navbar .navbar-brand > span { color: #fff; font-family: 'Source Serif 4', Georgia, serif; }
 .navbar .navbar-brand > span > span { color: #C9A75B; }
 .navbar-mark {

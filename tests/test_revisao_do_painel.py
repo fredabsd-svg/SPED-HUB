@@ -1,4 +1,4 @@
-"""Defeitos do painel contábil achados na revisão da 0.20.0.
+"""Defeitos do painel contábil achados na revisão de setembro de 2026.
 
 Todos pela porta de entrada — `TestClient` sobre a aplicação montada, com
 sessão, middleware e escopo de escritório no caminho (§7.1).  O que se
