@@ -228,7 +228,10 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   `SPED_HUB_DB` era lido e `DATABASE_URL` era ignorada em silêncio.
 - **A tela de upload usa a importação assíncrona para ECD.** O arquivo é validado
   antes de ser salvo, processado fora do event loop e acompanhado por
-  `GET /api/jobs/{id}`. O resultado mostra quantas contas, lançamentos e
+  `GET /api/jobs/{id}`. A rota pega o serviço de jobs com
+  `get_async_job_service` — reinicializá-lo a cada upload zerava o progresso e
+  o cancelamento de quem já estava importando (ver
+  `docs/modules/async_jobs.md`). O resultado mostra quantas contas, lançamentos e
   partidas foram importadas; falhas e cancelamentos também aparecem no painel
   de status da página. Os painéis ECD, EFD e ECF ficam fora do flex da barra de
   abas, para que a área de seleção preserve sua largura.

@@ -1129,13 +1129,16 @@ async def api_audit_limpar(
 @app.post("/api/upload-async")
 async def api_upload_async(request: Request, file: UploadFile = File(...)):
     """Upload assíncrono de ECD com importação incremental e polling."""
-    from src.async_jobs import get_async_job_service, init_async_job_service
+    from src.async_jobs import get_async_job_service
 
     saved = await save_upload(file, (".txt", ".ecd"))
     escritorio_id = request.state.usuario.escritorio_id
     db_path = _db_reference()
-    init_async_job_service(db_path)
-    job_service = get_async_job_service()
+    # `get`, não `init`: o serviço guarda em memória o progresso e o token de
+    # cancelamento dos jobs em andamento.  Reinicializá-lo a cada upload
+    # trocava o serviço por um vazio, e o job que já rodava voltava a 0% e
+    # não podia mais ser cancelado.
+    job_service = get_async_job_service(db_path)
     job = job_service.criar(
         tipo="ecd_import",
         parametros={

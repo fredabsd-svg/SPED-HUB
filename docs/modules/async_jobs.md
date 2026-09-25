@@ -21,7 +21,7 @@ cancelamento dos jobs em execução.
 | `marcar_em_execucao(job_id, arquivo_temporario=None)` | Persiste `processing` e o caminho do upload. |
 | `recuperar_interrompidos()` | Encerra os jobs que o processo anterior deixou em aberto; roda na subida. |
 | `registrar_token` / `esquecer_token` / `cancelar` / `marcar_cancelado` | Cancelamento cooperativo: liga o token do job em execução ao pedido que chega por outra requisição. |
-| `init_async_job_service(db_path)` / `get_async_job_service(db_path=None)` | Instância global; sem `db_path`, usa `database_reference()`. |
+| `init_async_job_service(db_path)` / `get_async_job_service(db_path=None)` | Instância global; sem `db_path`, usa `database_reference()`. `init` **substitui** a instância (só na subida); rota usa `get`. |
 
 ## Depende de / quem depende
 
@@ -69,6 +69,13 @@ tracking paralelos e independentes.
   `cancelled` ficava de fora de todas, e a limpeza automática nunca removia
   job cancelado. `STATUS_TERMINAIS` e `STATUS_EM_ABERTO` cobrem o enum
   inteiro, e há teste que quebra se um estado novo ficar sem classificação.
+- **`init_async_job_service` descarta o estado em memória; rota usa `get`.**
+  O overlay de progresso e os tokens de cancelamento vivem na instância. A
+  rota `/api/upload-async` chamava `init` a cada upload: o serviço global
+  virava um novo, vazio, e o job que já rodava — cuja thread seguia gravando
+  no serviço antigo — aparecia a 0% e o cancelamento respondia 409 ("não está
+  em execução neste processo"). `init` fica para a subida (`lifespan`); em
+  rota, `get_async_job_service(db_path)`, que só recria se o banco mudar.
 - **Cancelamento é cooperativo e cruza requisições.** O token vive no
   processo que importa; o pedido chega por outra requisição HTTP. `cancelar`
   só sinaliza o token e retorna `False` se o job não estiver rodando neste
@@ -89,6 +96,7 @@ tracking paralelos e independentes.
 ```bash
 pytest tests/test_fase14.py -q                       # CRUD, progresso, limpeza, upload-async E2E
 pytest tests/test_ecd_grande.py -k Cancelamento -q   # token, cancelar, marcar_cancelado
+pytest tests/test_jobs_interrompidos.py -k Segundo -q # 2º upload não zera o 1º
 ```
 
 ## O que não faz
