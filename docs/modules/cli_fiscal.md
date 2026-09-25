@@ -113,7 +113,9 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   com nome errado não alcançaria nada, em silêncio, e pareceria "0 mudanças"
   — indistinguível de um filtro que não casou.
 - **O filtro usa dois-pontos, não `=`.** Valor fiscal — NCM, CFOP, CST, CNPJ —
-  não tem dois-pontos dentro; o `=` apareceria em descrição de produto.
+  não tem dois-pontos dentro; o `=` apareceria em descrição de produto. A lista
+  de `em`/`nao_em` é separada por vírgula (`cfop:em:5102,6102`), no
+  `--filtro` e no `--se`.
 - **Conflitos de classificação aparecem em bloco próprio.** O motor se recusa
   a resolver empate de prioridade por sorteio; esconder isso faria a
   classificação parecer completa quando ela parou no meio.

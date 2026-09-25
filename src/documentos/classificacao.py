@@ -56,8 +56,17 @@ def _texto(valor: Any) -> str:
 
 
 def _lista(valor: Any) -> list[str]:
-    if isinstance(valor, str | bytes):
-        return [_texto(valor)]
+    """Os valores de `em`/`nao_em` — lista de verdade ou texto com vírgulas.
+
+    Pela CLI a condição chega como texto: `cfop:em:5102,6102`. Lido como um
+    valor só, "5102,6102" não contém CFOP nenhum, e `em` nunca casava pela
+    linha de comando. Código fiscal não tem vírgula dentro, então separar
+    nela não parte valor nenhum.
+    """
+    if isinstance(valor, bytes):
+        valor = valor.decode()
+    if isinstance(valor, str):
+        return [parte.strip() for parte in valor.split(",")]
     if isinstance(valor, Iterable):
         return [_texto(v) for v in valor]
     return [_texto(valor)]
@@ -323,8 +332,9 @@ class MotorDeClassificacao:
         ajustes: Sequence,
         resultado: ResultadoClassificacao,
     ) -> None:
-        # campo -> (prioridade, [regras que o disputam], sugestão vencedora)
-        vencedoras: dict[str, tuple[int, list[str], Sugestao]] = {}
+        # campo -> (prioridade, [regras que o disputam], valor reivindicado,
+        #          sugestão — ou `None` quando o valor já é o atual)
+        vencedoras: dict[str, tuple[int, list[str], Any, Sugestao | None]] = {}
 
         for regra in regras:
             if not _casa(regra, documento, item, ajustes):
@@ -340,18 +350,27 @@ class MotorDeClassificacao:
                     continue
                 anterior = _valor_do_campo(campo, documento, item, ajustes)
                 sugerido = _valor_da_acao(acao, regra)
-                if _texto(anterior) == _texto(sugerido):
+
+                # A reivindicação é registrada ANTES de ver se muda alguma
+                # coisa. A regra de cima que já está cumprida continua sendo a
+                # de cima: pulá-la deixava o campo livre para a de baixo, e um
+                # CFOP certo era "corrigido" para o errado por uma regra que
+                # ninguém mandou valer ali. Empate só é conflito quando as duas
+                # dizem coisas diferentes — concordar não é disputa.
+                if campo in vencedoras:
+                    prioridade, nomes, reivindicado, _ = vencedoras[campo]
+                    if regra.prioridade == prioridade and _texto(sugerido) != _texto(reivindicado):
+                        nomes.append(regra.nome)
                     continue
 
-                if campo in vencedoras:
-                    prioridade, nomes, _ = vencedoras[campo]
-                    if regra.prioridade == prioridade:
-                        nomes.append(regra.nome)
+                if _texto(anterior) == _texto(sugerido):
+                    vencedoras[campo] = (regra.prioridade, [regra.nome], sugerido, None)
                     continue
 
                 vencedoras[campo] = (
                     regra.prioridade,
                     [regra.nome],
+                    sugerido,
                     Sugestao(
                         documento_id=documento.id,
                         item_id=item.id if item is not None else None,
@@ -366,7 +385,7 @@ class MotorDeClassificacao:
                     ),
                 )
 
-        for campo, (prioridade, nomes, sugestao) in vencedoras.items():
+        for campo, (prioridade, nomes, _, sugestao) in vencedoras.items():
             if len(nomes) > 1:
                 resultado.conflitos.append(
                     Conflito(
@@ -377,7 +396,8 @@ class MotorDeClassificacao:
                     )
                 )
                 continue
-            resultado.sugestoes.append(sugestao)
+            if sugestao is not None:  # a regra que manda já está cumprida
+                resultado.sugestoes.append(sugestao)
 
 
 def aplicar(

@@ -269,7 +269,16 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 - **Empate de prioridade no mesmo campo é conflito, não escolha.** Decidir por
   ordem de chegada faria a mesma importação produzir resultados diferentes
   entre execuções, sem ninguém desconfiar. O motor denuncia e deixa o campo
-  como está.
+  como está. Duas regras empatadas que dizem **o mesmo** valor não disputam
+  nada, e não são conflito.
+- **A regra de cima já cumprida continua segurando o campo.** O motor pulava a
+  regra cujo valor já era o atual *antes* de registrar que ela reivindicava o
+  campo, e a de prioridade menor virava sugestão: um CFOP certo era
+  "corrigido" para o errado por uma regra que ninguém mandou valer ali. A
+  reivindicação agora é registrada primeiro; só não vira sugestão.
+- **`em` e `nao_em` aceitam lista ou texto com vírgulas.** Pela CLI a condição
+  chega como texto (`cfop:em:5102,6102`), que era lido como um valor só — e
+  nunca casava. Código fiscal não tem vírgula dentro.
 - **A regra lê o efetivo, não o normalizado.** Uma regra que roda depois de
   outra precisa enxergar o que a primeira decidiu, senão a ordem das regras
   deixa de significar o que aparenta.
@@ -309,6 +318,7 @@ pytest tests/test_documentos_fiscais.py -q  # adaptador, reforma, XML hostil, du
 pytest tests/test_camada_efetiva.py -q      # ajustes, tipos, reversão por lote
 pytest tests/test_valor_digitado_no_formato_brasileiro.py -q  # "1.234,56" aceito, texto recusado
 pytest tests/test_classificacao_fiscal.py -q  # regras, prioridade, conflito, vigência
+pytest tests/test_classificacao_prioridade_e_listas.py -q  # regra cumprida segura o campo; `em` pela CLI
 pytest tests/test_alteracoes_em_massa.py -q   # seleção, simulação, proteções, reversão
 pytest tests/test_migrations.py -q          # o schema da migração bate com os modelos
 pytest tests/test_tabelas_ibscbs.py -q      # geração, conteúdo oficial e conferência
