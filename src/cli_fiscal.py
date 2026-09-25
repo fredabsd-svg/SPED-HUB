@@ -56,6 +56,7 @@ from src.documentos import (
     simular,
     valor_tipado,
 )
+from src.documentos.ajustes import numero_digitado
 from src.documentos.classificacao import aplicar as aplicar_classificacao
 from src.documentos.classificacao import criar_regra
 from src.documentos.tabelas_ibscbs import tabelas as tabelas_oficiais
@@ -447,14 +448,12 @@ def _ajuste(sessao: Session, args) -> int:
 
 
 def _numero_do_terminal(bruto: str) -> float:
-    """`1.234,56` ou `1234.56` — quem digita usa o formato que conhece."""
-    texto = str(bruto).strip()
-    if "," in texto:
-        texto = texto.replace(".", "").replace(",", ".")
-    try:
-        return float(texto)
-    except ValueError as erro:
-        raise ValueError(f"{bruto!r} não é um valor numérico") from erro
+    """`1.234,56` ou `1234.56` — quem digita usa o formato que conhece.
+
+    A mesma conversão de `alterar` e da planilha (`numero_digitado`): duas
+    regras para ler um número digitado acabariam aceitando coisas diferentes.
+    """
+    return numero_digitado(bruto, campo="--valor")
 
 
 def _apurar(sessao: Session, args) -> int:

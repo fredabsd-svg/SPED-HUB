@@ -29,6 +29,9 @@ As três camadas que a suíte separa:
 | `Desfecho` | `importado`, `duplicado`, `substituido`, `rejeitado`. |
 | `Sentido` | `entrada` / `saida`, relativo à empresa que escritura. |
 | `valor_efetivo(alvo, campo, ajustes)` | O valor que vai para o SPED. Recebe os ajustes já carregados. |
+| `ajustes.converter(texto, coluna)` / `ajustes.tipar(valor, coluna)` | Valor de fora no tipo da coluna; levanta `ValueError` quando não é. Aceita "1.234,56". |
+| `ajustes.numero_digitado(bruto, campo=)` | "1.234,56", "190,00" ou "1234.56" → `float`; o resto levanta, nomeando o campo. |
+| `valor_tipado(campo, bruto)` | O texto do terminal ou da tela no tipo da coluna — `converter`, achando a coluna pelo nome. |
 | `efetivo(session, documento)` | `VisaoEfetiva` do documento inteiro, numa consulta só. |
 | `aplicar_ajuste(session, ...)` | Registra a alteração; devolve `None` se o valor já era o efetivo. |
 | `desfazer_lote(session, lote)` | Apaga os ajustes do lote; devolve quantos saíram. |
@@ -178,8 +181,22 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 - **`valor_anterior` é o efetivo, não o normalizado.** O segundo ajuste de um
   campo parte de onde o primeiro deixou; gravar o normalizado faria o
   histórico mentir.
-- **Valor de ajuste que não converte para o tipo da coluna vira aviso, não
-  exceção.** Um ajuste corrompido não pode impedir o mês inteiro de sair.
+- **Valor que não converte é recusado na gravação, e só tolerado na leitura.**
+  Até a correção, "190,00" digitado num campo de valor virava ajuste de
+  **texto**: o recálculo do cabeçalho o lia como zero, e a geração quebrava
+  no fechamento (`TypeError` na EFD ICMS/IPI, `InvalidOperation` na
+  EFD-Contribuições). Hoje `converter`/`tipar` aceitam o formato brasileiro
+  ("1.234,56", "190,00") e o ponto decimal ("1234.56"), e levantam
+  `ValueError` com o campo e o valor para o resto — no terminal, na tela, na
+  planilha (a linha é recusada inteira, com o motivo), na ação de regra
+  (`RegraInvalida` no cadastro) e, por último, em `aplicar_ajuste`, por onde
+  toda escrita passa. O ajuste é gravado já convertido (`"190.0"`). A
+  leitura (`desserializar`) continua tolerante: entende o `"190,00"` que o
+  defeito gravou, e o que nem assim converte vira aviso no log, não exceção —
+  um ajuste antigo corrompido não pode impedir o mês inteiro de sair.
+- **A ação de regra é comparada já no tipo da coluna.** Como texto, "180" e o
+  `180.0` do banco pareciam diferentes e a regra sugeria trocar o ICMS por
+  ele mesmo; e a sugestão em texto não tinha impacto em reais.
 - **O recálculo recompõe o que é soma de parcela e para aí.** Alterar em massa
   o valor dos itens sem mexer no cabeçalho gera um arquivo em que o `C100` diz
   uma coisa e a soma dos `C170` diz outra — que é justamente o que o validador
@@ -278,6 +295,7 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
 ```bash
 pytest tests/test_documentos_fiscais.py -q  # adaptador, reforma, XML hostil, duplicidade
 pytest tests/test_camada_efetiva.py -q      # ajustes, tipos, reversão por lote
+pytest tests/test_valor_digitado_no_formato_brasileiro.py -q  # "1.234,56" aceito, texto recusado
 pytest tests/test_classificacao_fiscal.py -q  # regras, prioridade, conflito, vigência
 pytest tests/test_alteracoes_em_massa.py -q   # seleção, simulação, proteções, reversão
 pytest tests/test_migrations.py -q          # o schema da migração bate com os modelos

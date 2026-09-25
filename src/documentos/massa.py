@@ -34,7 +34,7 @@ from src.db.models import AjusteFiscal, DocumentoFiscal, ItemDocumentoFiscal
 from src.documentos.ajustes import (
     ORIGEM_USUARIO,
     aplicar_ajuste,
-    desserializar,
+    converter,
     novo_lote,
     valor_efetivo,
 )
@@ -376,14 +376,16 @@ def valor_tipado(campo: str, bruto: str):
     porque a diferença entre `0.0` e `"1000"` não é numérica —, e a simulação
     existe exatamente para mostrar o impacto financeiro antes de confirmar.
 
-    A conversão é a mesma que a camada efetiva usa para ler ajustes
-    (`desserializar`): duas conversões diferentes para o mesmo campo acabariam
-    divergindo, e a que divergisse seria a menos usada.
+    A conversão é a de quem grava (`converter`), a mesma que `aplicar_ajuste`
+    aplica por último: duas conversões diferentes para o mesmo campo acabariam
+    divergindo, e a que divergisse seria a menos usada. Aceita "1.234,56" e
+    recusa com `ValueError` o que não é número — antes da simulação, e não no
+    fechamento, como acontecia quando o texto era guardado.
     """
     for modelo in (ItemDocumentoFiscal, DocumentoFiscal):
         colunas = modelo.__table__.columns
         if campo in colunas:
-            return desserializar(bruto, colunas[campo])
+            return converter(bruto, colunas[campo])
     raise ValueError(
         f"campo {campo!r} não existe em documento nem em item — "
         "alteração em massa com nome errado não alcançaria nada"

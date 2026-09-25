@@ -34,10 +34,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
+from sqlalchemy import Float, Integer
 from sqlalchemy.orm import Session
 
 from src.db.models import ItemDocumentoFiscal
-from src.documentos.ajustes import desserializar, valor_efetivo
+from src.documentos.ajustes import converter, tipar, valor_efetivo
 from src.documentos.massa import Mudanca, Selecao, Simulacao, _ajustes_de
 
 # As colunas que identificam a linha.  Vão para a planilha e voltam dela, mas
@@ -229,10 +230,22 @@ def _ler_linha(session: Session, valores: dict, numero_linha: int, resultado: Re
         if a.item_id == item.id
     ]
 
+    # A linha inteira é convertida antes de propor qualquer coisa: uma célula
+    # que não converte recusa a linha, com o motivo. Aceitar metade dela
+    # deixaria o item num estado que ninguém pediu.
+    novos: dict[str, Any] = {}
     for campo in EDITAVEIS:
         if campo not in valores:
             continue  # coluna que a pessoa apagou da planilha: não é alteração
-        novo = _tipado(campo, valores[campo])
+        try:
+            novos[campo] = _tipado(campo, valores[campo])
+        except ValueError as erro:
+            resultado.divergencias.append(
+                Divergencia(numero_linha, f"{erro} — linha ignorada inteira")
+            )
+            return
+
+    for campo, novo in novos.items():
         atual = valor_efetivo(item, campo, ajustes)
         if _igual(atual, novo):
             continue
@@ -287,10 +300,13 @@ def _achar_item(
 
 
 def _tipado(campo: str, bruto: Any) -> Any:
-    """O valor da célula no tipo da coluna.
+    """O valor da célula no tipo da coluna — ou `ValueError`.
 
-    A conversão passa pelo mesmo `desserializar` que os ajustes usam — o
-    mesmo texto tem de virar o mesmo valor, venha da planilha ou da tela.
+    A conversão é a mesma de `alterar` e da tela (`tipar`/`converter`): o
+    mesmo texto tem de virar o mesmo valor, venha da planilha ou da tela. É
+    comum a célula de valor voltar como **texto** "190,00", quando quem edita
+    digita com vírgula numa coluna que o Excel não reconheceu como número; o
+    formato brasileiro é aceito, e o que não é número recusa a linha.
 
     **Não há coerção de `float` para `int` aqui**, e a ausência é deliberada.
     O risco óbvio seria um CFOP numérico voltar como `2102.0` e virar a string
@@ -307,7 +323,9 @@ def _tipado(campo: str, bruto: Any) -> Any:
     coluna = ItemDocumentoFiscal.__table__.columns[campo]
     if bruto is None or bruto == "":
         return None
-    return desserializar(str(bruto), coluna)
+    if isinstance(bruto, int | float) and isinstance(coluna.type, Float | Integer):
+        return tipar(bruto, coluna)
+    return converter(str(bruto), coluna)
 
 
 def _igual(atual: Any, novo: Any) -> bool:

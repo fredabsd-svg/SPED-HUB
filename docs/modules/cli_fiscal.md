@@ -103,8 +103,12 @@ dos valores. Quem depende: `cli.py`, que registra o parser e despacha.
   sempre `str`; sem converter, alterar `base_icms` para `1000` mostraria
   **impacto R$ 0,00** na simulação, porque a diferença entre `0.0` e `"1000"`
   não é numérica — e é justamente o impacto que decide se a alteração passa. A
-  conversão reusa o `desserializar` da camada efetiva: duas conversões
-  diferentes para o mesmo campo acabariam divergindo.
+  conversão é a mesma da tela, da planilha e de `aplicar_ajuste`
+  (`documentos.ajustes.converter`): duas conversões diferentes para o mesmo
+  campo acabariam divergindo. Aceita `190,00`, `1.234,56` e `1234.56`; o que
+  não é número sai com código 1 e a mensagem nomeando campo e valor, **antes**
+  de simular. Até a correção, `--valor "190,00"` era gravado como texto e a
+  geração quebrava no fechamento.
 - **Campo inexistente é recusado antes de simular.** Uma alteração em massa
   com nome errado não alcançaria nada, em silêncio, e pareceria "0 mudanças"
   — indistinguível de um filtro que não casou.

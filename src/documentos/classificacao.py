@@ -25,7 +25,13 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from src.db.models import DocumentoFiscal, ItemDocumentoFiscal, RegraFiscal
-from src.documentos.ajustes import ORIGEM_REGRA, aplicar_ajuste, novo_lote, valor_efetivo
+from src.documentos.ajustes import (
+    ORIGEM_REGRA,
+    aplicar_ajuste,
+    novo_lote,
+    tipar,
+    valor_efetivo,
+)
 from src.documentos.tabelas_ibscbs import conferir_valor
 
 logger = logging.getLogger("sped-hub.documentos")
@@ -179,6 +185,33 @@ def validar_regra(regra: RegraFiscal) -> None:
         # com origem `regra`, sem que ninguém tenha digitado nenhuma delas.
         for problema in conferir_valor(acao["campo"], acao.get("valor")):
             raise RegraInvalida(f"ação inválida: {problema}")
+        # Pelo mesmo motivo, valor que não é do tipo da coluna é recusado
+        # aqui: "abc" num campo de valor viraria mil ajustes de texto.
+        _valor_da_acao(acao, regra)
+
+
+def _coluna_da_acao(campo: str):
+    """A coluna que a ação escreve — no item ou no cabeçalho, onde existir."""
+    for modelo in (ItemDocumentoFiscal, DocumentoFiscal):
+        if campo in modelo.__table__.columns:
+            return modelo.__table__.columns[campo]
+    return None
+
+
+def _valor_da_acao(acao: dict, regra: RegraFiscal) -> Any:
+    """O valor da ação no tipo da coluna, ou `RegraInvalida` dizendo qual regra.
+
+    Comparado como texto, "180" e o `180.0` do banco pareciam diferentes e a
+    regra sugeria trocar o ICMS por ele mesmo; e "190,00" chegava à
+    sugestão como texto, sem impacto em reais.
+    """
+    coluna = _coluna_da_acao(acao["campo"])
+    if coluna is None:
+        return acao.get("valor")
+    try:
+        return tipar(acao.get("valor"), coluna)
+    except ValueError as erro:
+        raise RegraInvalida(f"regra {regra.nome!r}, ação inválida: {erro}") from erro
 
 
 def _valor_do_campo(
@@ -306,7 +339,7 @@ class MotorDeClassificacao:
                     # tem o campo.
                     continue
                 anterior = _valor_do_campo(campo, documento, item, ajustes)
-                sugerido = acao.get("valor")
+                sugerido = _valor_da_acao(acao, regra)
                 if _texto(anterior) == _texto(sugerido):
                     continue
 
