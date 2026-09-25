@@ -8,6 +8,7 @@ Fornece a infraestrutura comum para todos os relatórios:
 
 import datetime
 from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Decimal
 
 # ── Convenção de Sinais ────────────────────────────────────────────────────
 
@@ -43,18 +44,24 @@ def saldo_por_natureza(vl_sinalizado: float, cod_nat: str) -> float:
 
 
 def fmt_moeda(valor: float) -> str:
-    """Formata valor como moeda pt-BR: 1.234.567,89."""
-    if valor == 0:
+    """Formata valor como moeda pt-BR: 1.234.567,89; negativo entre parênteses.
+
+    O arredondamento é feito uma vez, no valor inteiro, em `Decimal` e com
+    meio para cima (a regra de centavo que o contador espera).  A versão
+    anterior arredondava os centavos à parte: 1,999 virava "1,100" — o
+    vai-um nunca chegava à parte inteira.  `Decimal(str(valor))` parte da
+    representação curta do float (0.125 → "0.125"), e não do binário
+    (0.12499999…), senão o meio-para-cima arredondaria para baixo.
+
+    Valor que arredonda para zero sai "0,00", nunca "(0,00)": um saldo
+    credor de zero centavos não existe.
+    """
+    centavos = Decimal(str(valor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if centavos == 0:
         return "0,00"
-    # Usa locale-independent formatting
-    negativo = valor < 0
-    v = abs(valor)
-    inteiro = int(v)
-    decimal = int(round((v - inteiro) * 100))
-    # Formata parte inteira com separadores de milhar
-    s_int = f"{inteiro:,}".replace(",", ".")
-    s = f"{s_int},{decimal:02d}"
-    if negativo:
+    inteiro, _, fracao = f"{abs(centavos):f}".partition(".")
+    s = f"{int(inteiro):,}".replace(",", ".") + "," + fracao
+    if centavos < 0:
         return f"({s})"  # negativos entre parênteses
     return s
 

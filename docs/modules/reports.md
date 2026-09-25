@@ -49,6 +49,9 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard` e
   (`valor_sinalizado`); a natureza da conta (`saldo_por_natureza`) decide a
   exibição. Relatório novo deve passar por essas funções, nunca refazer o
   sinal na mão.
+- **`fmt_moeda` arredonda uma vez, em `Decimal`, meio para cima.** Arredondar
+  os centavos à parte fazia 1,999 sair "1,100" (o vai-um não chegava à parte
+  inteira). Valor que arredonda para zero sai "0,00", nunca "(0,00)".
 - **Números idênticos em SQLite e Postgres** é garantia da §6.3, coberta por
   `tests/test_multibackend.py::TestRelatoriosIdenticos`.
 - O XLSX usa Calibri de propósito: a planilha abre na máquina do cliente,

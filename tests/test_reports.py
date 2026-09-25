@@ -140,6 +140,41 @@ class TestFormatacao:
     def test_fmt_moeda_zero(self):
         assert fmt_moeda(0) == "0,00"
 
+    @pytest.mark.parametrize(
+        ("valor", "esperado"),
+        [
+            (1.999, "2,00"),
+            (0.999, "1,00"),
+            (1.995, "2,00"),
+            (2.9999999999, "3,00"),
+            (sum([0.1] * 10), "1,00"),
+            (1234.565, "1.234,57"),
+            (0.125, "0,13"),
+            (-1.999, "(2,00)"),
+        ],
+    )
+    def test_fmt_moeda_centavos_nunca_passam_de_99(self, valor, esperado):
+        """Centavo arredondado à parte chegava a 100: 1,999 saía "1,100".
+
+        Num relatório contábil isso é um valor errado com aparência de certo —
+        "1,100" lê-se um real e dez centavos, quando o valor é quase dois reais.
+        """
+        assert fmt_moeda(valor) == esperado, (
+            f"fmt_moeda({valor!r}) = {fmt_moeda(valor)!r}: o arredondamento dos centavos "
+            f"precisa levar o vai-um para a parte inteira (esperado {esperado!r})"
+        )
+
+    @pytest.mark.parametrize("valor", [-0.004, -0.0, -1e-12, 0.004])
+    def test_fmt_moeda_zero_negativo_nao_vira_parenteses(self, valor):
+        """-0,004 arredonda para zero: "(0,00)" sugere um saldo credor que não existe."""
+        assert fmt_moeda(valor) == "0,00", (
+            f"fmt_moeda({valor!r}) = {fmt_moeda(valor)!r}: valor que arredonda para zero "
+            "não pode aparecer como negativo"
+        )
+
+    def test_fmt_moeda_negativo_com_milhar(self):
+        assert fmt_moeda(-1234567.891) == "(1.234.567,89)"
+
     def test_valor_sinalizado_debito(self):
         assert valor_sinalizado(100.0, "D") == 100.0
 
