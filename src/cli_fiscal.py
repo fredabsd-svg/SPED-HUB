@@ -917,9 +917,11 @@ def _planilha_de_volta(sessao: Session, args) -> int:
     print(f"  impacto       {fmt_moeda(simulacao.impacto_total)}")
 
     for mudanca in simulacao.mudancas[:20]:
+        # O total do cabeçalho recomposto a partir dos itens não tem item:
+        # "item None" faria parecer um item sem número.
+        onde = f"item {mudanca.numero_item}" if mudanca.numero_item else "cabeçalho (recalculado)"
         print(
-            f"    item {mudanca.numero_item}: {mudanca.campo} "
-            f"{mudanca.valor_anterior!r} → {mudanca.valor_novo!r}"
+            f"    {onde}: {mudanca.campo} " f"{mudanca.valor_anterior!r} → {mudanca.valor_novo!r}"
         )
     if simulacao.total_mudancas > 20:
         print(f"    … e mais {simulacao.total_mudancas - 20}")
@@ -929,11 +931,23 @@ def _planilha_de_volta(sessao: Session, args) -> int:
         for divergencia in resultado.divergencias:
             print(f"    · {divergencia}")
 
+    # As mesmas travas de `alterar`, e impressas do mesmo jeito: quem lê a
+    # volta precisa ver o problema antes de pedir para gravar.
+    if simulacao.avisos:
+        print("\n  avisos:")
+        for aviso in simulacao.avisos:
+            print(f"    {aviso}")
+
     if not args.confirmar:
         print("\n  nada foi gravado — use --confirmar para aplicar\n")
         return 0
 
-    lote = confirmar(sessao, simulacao, motivo=args.motivo or f"planilha {args.arquivo}")
+    lote = confirmar(
+        sessao,
+        simulacao,
+        motivo=args.motivo or f"planilha {args.arquivo}",
+        forcar=args.forcar,
+    )
     sessao.commit()
     print(f"\n  gravado no lote {lote}")
     print(f"  desfaça com: sped-hub fiscal desfazer --lote {lote}\n")

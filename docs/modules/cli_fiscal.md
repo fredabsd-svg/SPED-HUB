@@ -45,7 +45,7 @@ Ações:
 | `alterar --empresa --campo --valor [--filtro --apenas-vazios --confirmar --forcar --motivo]` | Alteração em massa. Sem `--confirmar`, **só simula**. |
 | `desfazer --lote` | Reverte um lote inteiro de ajustes. |
 | `planilha --empresa [--de --ate --filtro --saida]` | Exporta os itens do recorte em `.xlsx`, já com a camada efetiva. |
-| `planilha --arquivo [--confirmar --motivo]` | Lê a planilha corrigida. Sem `--confirmar`, **só mostra**. |
+| `planilha --arquivo [--confirmar --motivo --forcar]` | Lê a planilha corrigida, com as mesmas travas e o mesmo recálculo de cabeçalho de `alterar`. Sem `--confirmar`, **só mostra**; aviso impeditivo recusa a gravação (código 1) sem `--forcar`. |
 | `ajuste --empresa --de --ate [--codigo --valor --descricao]` | Ajustes de apuração (E111). Sem `--codigo`, lista. |
 | `apurar --empresa --de --ate` | CBS, IBS e IS do período. Só leitura: **não grava nada**. |
 | `espelho --empresa --de --ate [--tipo --saida]` | O arquivo em forma de leitura, **antes** de gerar. Não arquiva. |

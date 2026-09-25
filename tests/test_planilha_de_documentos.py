@@ -403,7 +403,10 @@ def test_meio_centavo_de_diferenca_ainda_e_alteracao(sessao, escritorio, empresa
     """A tolerância é do arredondamento, não uma licença para ignorar centavo."""
     conteudo = editar(exportar(sessao, recorte(escritorio, empresa)), "valor_total", 1000.01)
 
-    assert reimportar(sessao, conteudo).total_mudancas == 1
+    mudancas = reimportar(sessao, conteudo).simulacao.mudancas
+    # Os totais do cabeçalho que o item compõe vêm recompostos junto — é o que
+    # `simular` faz —, e por isso a contagem é só das que a planilha pediu.
+    assert len([m for m in mudancas if not m.recalculada]) == 1
 
 
 def test_celula_esvaziada_apaga_o_campo(sessao, escritorio, empresa, com_documento):

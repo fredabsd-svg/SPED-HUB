@@ -54,7 +54,9 @@ As três camadas que a suíte separa:
 | `Simulacao` | Contagens, `impacto_total` em reais, `por_campo()`, `avisos`. |
 | `Aviso` | Problema detectado, com `impeditivo` separando recusa de sinalização. |
 | `exportar(session, selecao)` | Os itens do recorte como `.xlsx`, com a camada **efetiva** aplicada. |
-| `reimportar(session, conteudo)` | Lê a planilha corrigida e devolve o que ela mudaria — **sem gravar**. |
+| `reimportar(session, conteudo)` | Lê a planilha corrigida e devolve o que ela mudaria — **sem gravar**, com as travas e o recálculo de `simular`. |
+| `massa.proteger(documento, item, campo, valor)` | Os avisos impeditivos de uma mudança (formato, documento cancelado). |
+| `massa.recompor_cabecalhos(session, documentos, simulacao)` | Acrescenta à simulação os totais do cabeçalho que os itens mudaram. |
 | `Reimportacao` | `simulacao` (a mesma de `simular`), `divergencias` e `linhas_lidas`. |
 | `Divergencia` | Linha que não virou alteração, com o número da linha e o motivo. |
 | `COLUNAS` / `EDITAVEIS` | As colunas da planilha, e quais delas a volta aceita. |
@@ -157,6 +159,13 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   planilha que gravasse ao ser lida seria a única escrita do sistema sem que
   ninguém visse o que vai mudar, e é a que mais tem como dar errado: passou
   por um programa que não é este.
+- **A volta da planilha passa pelas mesmas travas de `simular`.** Até a
+  correção, `reimportar` montava as mudanças sem `_verificar`, sem a trava de
+  documento cancelado e sem `recalcular`: NCM de sete dígitos e CST "1" — o
+  zero à esquerda que o Excel come — passavam, e o ICMS de um item mudava sem
+  o C100 acompanhar (360,00 no cabeçalho, 430,00 nos C190, e o espelho dizia
+  "ok"). Hoje as duas usam `massa.proteger` e `massa.recompor_cabecalhos`:
+  uma trava que só uma delas tivesse seria contornada pela outra.
 - **A identidade viaja e é reconferida.** Cada linha leva `documento_id` e
   `item_id`, e a volta confere a chave da nota contra o banco. Planilha
   reordenada, com linha apagada ou colada de outro mês é o caso normal, não o
@@ -283,7 +292,8 @@ e, só na planilha, de `openpyxl` — que o projeto já usava para os relatório
   `desfazer_lote` seria a única saída depois do estrago.
 - **As proteções são deliberadamente poucas.** Só o que dá para checar sem
   cadastro que ainda não existe: CFOP contra o sentido do documento, formato de
-  NCM/CEST/CST, documento cancelado. CSOSN em empresa não optante exigiria o
+  NCM (oito dígitos), CEST (sete), CST (dois) e CSOSN (três), documento
+  cancelado. CSOSN em empresa não optante exigiria o
   regime tributário cadastrado — fingir que verifica seria pior que não
   verificar.
 - **O ICMS vem embrulhado na variante** (`ICMS00`, `ICMS60`, `ICMSSN102`…). O

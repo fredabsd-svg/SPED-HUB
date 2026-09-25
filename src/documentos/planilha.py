@@ -37,9 +37,16 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy import Float, Integer
 from sqlalchemy.orm import Session
 
-from src.db.models import ItemDocumentoFiscal
+from src.db.models import DocumentoFiscal, ItemDocumentoFiscal
 from src.documentos.ajustes import converter, tipar, valor_efetivo
-from src.documentos.massa import Mudanca, Selecao, Simulacao, _ajustes_de
+from src.documentos.massa import (
+    Mudanca,
+    Selecao,
+    Simulacao,
+    _ajustes_de,
+    proteger,
+    recompor_cabecalhos,
+)
 
 # As colunas que identificam a linha.  Vão para a planilha e voltam dela, mas
 # como conferência: são o que liga a linha ao banco.
@@ -183,6 +190,15 @@ def reimportar(session: Session, conteudo: bytes) -> Reimportacao:
             continue  # linha em branco no fim da planilha é o normal
         resultado.linhas_lidas += 1
         _ler_linha(session, dict(zip(cabecalho, linha, strict=False)), numero_linha, resultado)
+
+    # O que `simular` faz depois de montar as mudanças, a volta também faz: o
+    # cabeçalho acompanha os itens. Sem isso o C100 saía com o ICMS de antes e
+    # os C190 com o novo — a divergência que o validador confere.
+    documentos = {
+        m.documento_id: session.get(DocumentoFiscal, m.documento_id)
+        for m in resultado.simulacao.mudancas
+    }
+    recompor_cabecalhos(session, list(documentos.values()), resultado.simulacao)
     return resultado
 
 
@@ -249,6 +265,11 @@ def _ler_linha(session: Session, valores: dict, numero_linha: int, resultado: Re
         atual = valor_efetivo(item, campo, ajustes)
         if _igual(atual, novo):
             continue
+        # As mesmas travas de `simular`: formato (NCM, CEST, CST, CFOP contra o
+        # sentido, tabela da Reforma) e documento cancelado. A planilha passou
+        # por um programa que não é este, e é a entrada que mais tem como vir
+        # errada — o zero à esquerda que o Excel come é o caso de todo mês.
+        resultado.simulacao.avisos.extend(proteger(item.documento, item, campo, novo))
         resultado.simulacao.mudancas.append(
             Mudanca(
                 documento_id=item.documento_id,
