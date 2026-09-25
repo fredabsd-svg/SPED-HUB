@@ -554,13 +554,27 @@ jinja_env.filters["percentual"] = _percentual
 # ── Rotas: Autenticação ────────────────────────────────────────────────────
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Navegador que ignora o `<link rel="icon">` pede este caminho fixo.
+
+    Sem a rota, cada página aberta rendia um 404 no log de acesso e um erro
+    no console do navegador.
+    """
+    return RedirectResponse("/static/marca.svg", status_code=301)
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Página de login."""
     usuario = await get_usuario_atual(request)
     if usuario:
         return RedirectResponse(url="/", status_code=302)
-    return HTMLResponse(jinja_env.get_template("login.html").render({"request": request}))
+    return HTMLResponse(
+        jinja_env.get_template("login.html").render(
+            {"request": request, "registro_aberto": get_auth().registro_publico_aberto()}
+        )
+    )
 
 
 @app.post("/api/login")
@@ -639,8 +653,12 @@ async def logout(request: Request):
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    """Página de registro."""
-    return HTMLResponse(jinja_env.get_template("register.html").render({"request": request}))
+    """Página de registro — ou o aviso de que ele está fechado."""
+    return HTMLResponse(
+        jinja_env.get_template("register.html").render(
+            {"request": request, "registro_aberto": get_auth().registro_publico_aberto()}
+        )
+    )
 
 
 @app.post("/api/register")

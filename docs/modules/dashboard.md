@@ -17,6 +17,7 @@ vem de `reports/`.
 | Grupo | Rotas |
 |---|---|
 | Autenticação | `/login`, `/register`, `POST /api/login`, `POST /api/register`, `/logout` |
+| Marca | `/favicon.ico` (redireciona para `/static/marca.svg`) |
 | Páginas | `/` (aceita `?ecd_id=`), `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/classificar/exportar.csv`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
 | Upload | `POST /api/upload` (ECD síncrona, compatibilidade), `/api/upload-async` + `/api/jobs/*` (importação com progresso usada pela tela), `/api/upload-efd`, `/api/upload-ecf` (só resumo) |
 | Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
@@ -82,6 +83,9 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
 - **Alpine chama `init()` sozinho.** `x-data` com objeto que tem `init()` já o
   executa; `x-init="init()"` repetia a chamada e, no monitoramento, criava
   dois laços de consulta ao servidor.
+- **O login e o cadastro sabem se o registro público está aberto**
+  (`AuthService.registro_publico_aberto`). Fechado, a tela avisa antes do
+  formulário e o login deixa de oferecer "Criar conta".
 - **O menu só mostra o que o usuário pode abrir.** Link que devolve 403 é pior
   que link ausente: a mensagem fala de permissão, e quem clicou não pediu
   permissão nenhuma.

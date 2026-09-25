@@ -220,6 +220,21 @@ class AuthService:
             somente_se_vazio=not get_settings().registro_aberto,
         )
 
+    def registro_publico_aberto(self) -> bool:
+        """Se o `/register` aceitaria um cadastro agora.
+
+        A tela pergunta antes de mostrar o formulário: com o registro fechado,
+        o visitante preenchia tudo e só então descobria que não havia como
+        criar a conta por ali.
+        """
+        if get_settings().registro_aberto:
+            return True
+        session = self._get_session()
+        try:
+            return session.execute(select(func.count(Usuario.id))).scalar_one() == 0
+        finally:
+            session.close()
+
     def criar_usuario(
         self,
         email: str,

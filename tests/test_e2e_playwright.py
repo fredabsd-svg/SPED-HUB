@@ -352,6 +352,10 @@ class TestE2ELogin:
 
         Recusar sem dizer nada seria pior que não recusar: o visitante clica em
         "Criar Conta" e a tela fica parada, sem pista do que aconteceu.
+
+        Desde a 0.20.0 o aviso vem **antes** do formulário: a tela pergunta se
+        o registro está aberto e, fechado, nem oferece os campos — o visitante
+        não preenche nada para só então descobrir que não havia como.
         """
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -361,15 +365,17 @@ class TestE2ELogin:
             page = browser.new_context().new_page()
 
             page.goto(f"{live_server}/register")
-            page.fill("input[name='email']", "estranho@gmail.com")
-            page.fill("input[name='nome']", "Estranho")
-            page.fill("input[name='senha']", "senha123")
-            page.click("button[type='submit']")
-            page.wait_for_selector("#register-result .alert-error", timeout=10000)
 
-            mensagem = page.inner_text("#register-result").strip()
+            mensagem = page.inner_text(".auth-card .alert").strip()
             assert "fechado" in mensagem.lower(), mensagem
-            assert page.url.endswith("/register"), "não deveria ter navegado"
+            assert (
+                page.locator("input[name='senha']").count() == 0
+            ), "registro fechado e o formulário continua oferecendo os campos"
+
+            page.goto(f"{live_server}/login")
+            assert (
+                page.locator("a[href='/register']").count() == 0
+            ), "o login ainda oferece 'Criar conta' com o registro fechado"
 
             browser.close()
 

@@ -13,7 +13,7 @@ orquestração.
 
 | Símbolo | Para quê |
 |---|---|
-| `AuthService` | `registrar`, `login`, `logout`, `validar_token`, `get_empresas_usuario`. |
+| `AuthService` | `registrar`, `registro_publico_aberto`, `login`, `logout`, `validar_token`, `get_empresas_usuario`. |
 | `init_auth(db_path)` / `get_auth()` | Singleton do serviço, inicializado no app. |
 | `get_usuario_atual(request)` | Extrai usuário do cookie `sped_hub_session` ou de `Authorization: Bearer`. |
 | `aplicar_escopo_empresas(stmt, usuario)` | `WHERE escritorio_id = ?` (admin passa sem filtro). |
