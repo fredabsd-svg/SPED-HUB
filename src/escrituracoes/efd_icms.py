@@ -47,9 +47,12 @@ from src.escrituracoes.arquivadas import (
     ultima_transmitida_antes,
 )
 from src.escrituracoes.base import (
+    COD_SIT_REGULAR,
     CampoObrigatorioAusente,
     GeradorBase,
     ResultadoGeracao,
+    cancelado,
+    denegado,
     formatar_data,
     formatar_valor,
     formatar_valor_obrigatorio,
@@ -164,7 +167,12 @@ def leva_itens_no_arquivo(cabecalho: dict) -> bool:
     terceiros".  É a entrada que pede o item, não a saída.
 
     Emissão própria aqui é a saída, como no `IND_EMIT` do `C100`.
+
+    Documento cancelado não leva item nenhum: a Exceção 1 do mesmo `C100`
+    manda "não informar registros filhos".
     """
+    if cancelado(cabecalho):
+        return False
     if cabecalho["modelo"] == NFCE:
         return False
     if cabecalho["modelo"] == "55":
@@ -198,15 +206,19 @@ class GeradorEFDICMS(GeradorBase):
     def gerar(self) -> ResultadoGeracao:
         self._conferir_cadastro()
         documentos = self._documentos()
-        visoes = [self._visao(d) for d in documentos]
+        todas = [self._visao(d) for d in documentos]
 
-        self._reiniciar([d.id for d in documentos])
+        # O denegado não entra no arquivo, e por isso também não entra na lista
+        # do que foi escriturado: a terceira camada responde "em que arquivo esta
+        # nota entrou", e a resposta para ele é "em nenhum".
+        self._reiniciar([v["documento"].id for v in todas if not denegado(v["cabecalho"])])
+        visoes = self._no_arquivo(todas)
         self._bloco_0(visoes)
         self._bloco_c(visoes)
         self._bloco_e(visoes)
         self._bloco_9()
 
-        if not documentos:
+        if not visoes:
             self._resultado.avisos.append(
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
@@ -315,6 +327,11 @@ class GeradorEFDICMS(GeradorBase):
             # `COD_PART` da NFC-e sai vazio, então não há o que referenciar.
             if c["modelo"] == NFCE:
                 continue
+            # O C100 do documento cancelado sai sem `COD_PART` (Exceção 1), e
+            # "o valor informado no campo COD_PART deve existir em, pelo menos,
+            # um registro dos demais blocos" — quem só aparece nele não entra.
+            if cancelado(c):
+                continue
             if c["sentido"] == "entrada":
                 cnpj, nome, uf, ie = (
                     c["emitente_cnpj"],
@@ -402,6 +419,11 @@ class GeradorEFDICMS(GeradorBase):
 
     def _documento_c100(self, visao: dict) -> None:
         c = visao["cabecalho"]
+        if cancelado(c):
+            # Sem C170 nem C190, e o C190 é o que alimenta o E110: a nota
+            # cancelada não apura nada.
+            self._c100_cancelado(c)
+            return
         entrada = c["sentido"] == "entrada"
         participante = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
         # "Quando se tratar de NFC-e (modelo 65), o campo não deve ser
@@ -415,7 +437,7 @@ class GeradorEFDICMS(GeradorBase):
             "1" if entrada else "0",  # IND_EMIT: 0=própria, 1=terceiros
             _texto(participante),
             _texto(c["modelo"]),
-            "00" if c["situacao"] == "autorizado" else "02",  # COD_SIT
+            COD_SIT_REGULAR,  # cancelado e denegado já saíram acima
             _texto(c["serie"]),
             _texto(c["numero"]),
             _texto(c["chave"]),
@@ -649,6 +671,8 @@ class GeradorEFDICMS(GeradorBase):
         """
         debitos = credito = 0.0
         for visao in visoes:
+            if cancelado(visao["cabecalho"]):
+                continue  # o C100 dele não tem C190, e o E110 é a soma dos C190
             valor = sum(i["valor_icms"] or 0.0 for i in visao["itens"])
             if visao["cabecalho"]["sentido"] == "saida":
                 debitos += valor

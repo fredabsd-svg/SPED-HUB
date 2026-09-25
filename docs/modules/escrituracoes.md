@@ -108,9 +108,11 @@ Muito, e é preciso saber antes de usar.
   destacado, não uma base calculada;
 - **retenções na fonte**.
 
-A apuração da EFD ICMS/IPI soma os documentos, carrega o saldo credor da
-escrituração transmitida do período anterior e aplica os ajustes cadastrados
-(E111). A da EFD-Contribuições é soma direta, respeitando o CST de cada item.
+A apuração da EFD ICMS/IPI soma os documentos autorizados, carrega o saldo
+credor da escrituração transmitida do período anterior e aplica os ajustes
+cadastrados (E111). A da EFD-Contribuições é soma direta dos autorizados,
+respeitando o CST de cada item. Cancelado e denegado ficam fora das duas — e
+da apuração do IBS/CBS.
 Em ambas, o `ResultadoGeracao` traz aviso explícito do que não cobre.
 
 ## Depende de / quem depende
@@ -178,6 +180,19 @@ a porta de entrada humana de tudo isto.
   não presumido: o leiaute 006 vale para períodos a partir de abril de 2021.
 
 
+- **A situação do documento decide se ele entra, não só o `COD_SIT`.** Até a
+  correção, a nota cancelada e a denegada saíam com C170/C190 e somavam no
+  E110, no M200 e na apuração do IBS/CBS — uma venda autorizada, uma
+  cancelada e uma denegada apuravam o triplo do ICMS. Hoje, pela situação
+  **efetiva**: a cancelada sai no C100 só com os campos da Exceção 1 do C100
+  do Guia Prático da EFD ICMS/IPI 3.2.2 (IND_OPER, IND_EMIT, COD_MOD, COD_SIT,
+  SER, NUM_DOC, CHV_NFE), sem registro filho e fora de toda apuração — e o
+  participante que só aparece nela não vira 0150, porque o COD_PART dela sai
+  vazio. A denegada **não entra no arquivo**, com aviso nomeando o número: o
+  COD_SIT 04 foi descontinuado em 01/2023 e o Guia manda não informar
+  documento denegado; como o leiaute mais antigo que o gerador conhece é de
+  2024, não existe período em que o 04 valha. O mesmo C100 serve à
+  EFD-Contribuições, cujo Guia delega o registro e também veda os filhos.
 - **O espelho é lido dos registros, não do banco.** É a decisão que dá sentido
   ao módulo. Um espelho montado a partir dos documentos responderia "o que eu
   acredito que vai sair" — e concordaria com o banco mesmo quando o gerador
@@ -362,5 +377,6 @@ a porta de entrada humana de tudo isto.
 
 ```bash
 pytest tests/test_gerador_efd_icms.py tests/test_gerador_efd_contribuicoes.py \
-       tests/test_escrituracao_arquivada.py -q
+       tests/test_escrituracao_arquivada.py \
+       tests/test_documentos_cancelados_e_denegados.py -q
 ```

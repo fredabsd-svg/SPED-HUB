@@ -55,6 +55,7 @@ from sqlalchemy.orm import Session, selectinload
 from src.db.models import AjusteFiscal, DocumentoFiscal, Empresa
 from src.documentos.ajustes import valor_efetivo
 from src.documentos.tabelas_ibscbs import TabelaAusente, conferir, tabelas
+from src.escrituracoes.base import CANCELADO, DENEGADO
 
 # O ano em que CBS e IBS são destacados em alíquota de teste, com compensação
 # e dispensa que este módulo não modela.
@@ -113,6 +114,10 @@ NAO_CONSUMIDOS = {
 # Desde a IT 2025.002 v1.50 os nomes vêm da tabela oficial (`tabelas_ibscbs`),
 # não de fonte secundária.
 CST_TRIBUTACAO_INTEGRAL = "000"
+
+# Situações em que não houve operação — e portanto não há tributo.  As mesmas
+# que tiram o documento da apuração da EFD ICMS/IPI e da EFD-Contribuições.
+FORA_DA_APURACAO = {CANCELADO, DENEGADO}
 
 
 def _nome_do_cst(cst: str) -> str:
@@ -224,15 +229,23 @@ class ApuracaoIBSCBS:
 
     def apurar(self) -> ResultadoApuracao:
         documentos = self._documentos()
-        resultado = ResultadoApuracao(
-            data_inicio=self.data_inicio,
-            data_fim=self.data_fim,
-            documentos=len(documentos),
-        )
+        resultado = ResultadoApuracao(data_inicio=self.data_inicio, data_fim=self.data_fim)
 
+        fora: list[str] = []
         for documento in documentos:
-            self._somar(documento, resultado)
+            if self._somar(documento, resultado):
+                resultado.documentos += 1
+            else:
+                fora.append(documento.numero or "?")
 
+        # Antes dos demais avisos: explica por que o número de documentos da
+        # apuração é menor que o da Central.
+        if fora:
+            resultado.avisos.append(
+                f"{len(fora)} documento(s) cancelado(s) ou denegado(s) ficaram FORA da "
+                f"apuração (nº {', '.join(fora)}): não houve operação, e portanto não há "
+                "tributo"
+            )
         self._avisar(resultado)
         return resultado
 
@@ -249,7 +262,14 @@ class ApuracaoIBSCBS:
         )
         return list(self.session.execute(consulta).scalars().unique().all())
 
-    def _somar(self, documento: DocumentoFiscal, resultado: ResultadoApuracao) -> None:
+    def _somar(self, documento: DocumentoFiscal, resultado: ResultadoApuracao) -> bool:
+        """Soma o documento; devolve `False` quando ele não entra na apuração.
+
+        Cancelado e denegado não entram: a situação decide se houve operação,
+        e sem operação não há débito nem crédito. A situação é a **efetiva**,
+        como o resto — quem marcou a nota como cancelada na tela está dizendo
+        exatamente isso.
+        """
         ajustes = (
             self.session.execute(
                 select(AjusteFiscal).where(AjusteFiscal.documento_id == documento.id)
@@ -258,6 +278,8 @@ class ApuracaoIBSCBS:
             .all()
         )
         do_cabecalho = [a for a in ajustes if a.item_id is None]
+        if valor_efetivo(documento, "situacao", do_cabecalho) in FORA_DA_APURACAO:
+            return False
         saida = valor_efetivo(documento, "sentido", do_cabecalho) == "saida"
 
         for item in documento.itens:
@@ -284,6 +306,7 @@ class ApuracaoIBSCBS:
 
             self._medir_o_que_nao_cobre(item, do_item, resultado)
             self._conferir_classificacao(documento, item, do_item, resultado)
+        return True
 
     def _conferir_classificacao(
         self, documento, item, ajustes: list, resultado: ResultadoApuracao

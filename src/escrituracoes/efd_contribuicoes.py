@@ -41,9 +41,12 @@ from sqlalchemy.orm import Session, selectinload
 from src.db.models import AjusteFiscal, DocumentoFiscal, Empresa
 from src.documentos.ajustes import valor_efetivo
 from src.escrituracoes.base import (
+    COD_SIT_REGULAR,
     CampoObrigatorioAusente,
     GeradorBase,
     ResultadoGeracao,
+    cancelado,
+    denegado,
     formatar_data,
     formatar_valor,
 )
@@ -162,15 +165,16 @@ class GeradorEFDContribuicoes(GeradorBase):
     def gerar(self) -> ResultadoGeracao:
         self._conferir_cadastro()
         documentos = self._documentos()
-        visoes = [self._visao(d) for d in documentos]
+        todas = [self._visao(d) for d in documentos]
 
-        self._reiniciar([d.id for d in documentos])
+        self._reiniciar([v["documento"].id for v in todas if not denegado(v["cabecalho"])])
+        visoes = self._no_arquivo(todas)
         self._bloco_0(visoes)
         self._bloco_c(visoes)
         self._bloco_m(visoes)
         self._bloco_9()
 
-        if not documentos:
+        if not visoes:
             self._resultado.avisos.append(
                 "nenhum documento no período — o arquivo sai só com os blocos de abertura"
             )
@@ -258,7 +262,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             itens.append(
                 {c.name: valor_efetivo(item, c.name, do_item) for c in item.__table__.columns}
             )
-        return {"cabecalho": cabecalho, "itens": itens}
+        return {"documento": documento, "cabecalho": cabecalho, "itens": itens}
 
     # ── Bloco 0 ────────────────────────────────────────────────────────────
 
@@ -298,6 +302,9 @@ class GeradorEFDContribuicoes(GeradorBase):
         vistos: dict[str, list[str]] = {}
         for visao in visoes:
             c = visao["cabecalho"]
+            # O C100 do cancelado não cita participante: não há o que cadastrar.
+            if cancelado(c):
+                continue
             entrada = c["sentido"] == "entrada"
             cnpj = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
             nome = c["emitente_nome"] if entrada else c["destinatario_nome"]
@@ -320,11 +327,22 @@ class GeradorEFDContribuicoes(GeradorBase):
         return list(vistos.values())
 
     def _unidades(self, visoes: Sequence[dict]) -> list[str]:
-        return sorted({i["unidade"] for v in visoes for i in v["itens"] if i["unidade"]})
+        # Só as dos itens que vão para o C170 — o cancelado não leva nenhum.
+        return sorted(
+            {
+                i["unidade"]
+                for v in visoes
+                if not cancelado(v["cabecalho"])
+                for i in v["itens"]
+                if i["unidade"]
+            }
+        )
 
     def _itens(self, visoes: Sequence[dict]) -> list[list[str]]:
         vistos: dict[str, list[str]] = {}
         for visao in visoes:
+            if cancelado(visao["cabecalho"]):
+                continue
             for item in visao["itens"]:
                 codigo = item["codigo"]
                 if not codigo or codigo in vistos:
@@ -362,6 +380,12 @@ class GeradorEFDContribuicoes(GeradorBase):
 
     def _documento_c100(self, visao: dict) -> None:
         c = visao["cabecalho"]
+        if cancelado(c):
+            # "Não devem ser escriturados os registros filhos de C100" para a
+            # nota cancelada (Guia Prático da EFD-Contribuições 1.35, C100).  O
+            # registro em si é o da EFD ICMS/IPI, a que o Guia delega.
+            self._c100_cancelado(c)
+            return
         entrada = c["sentido"] == "entrada"
         participante = c["emitente_cnpj"] if entrada else c["destinatario_cnpj"]
 
@@ -371,7 +395,7 @@ class GeradorEFDContribuicoes(GeradorBase):
             "1" if entrada else "0",
             _texto(participante),
             _texto(c["modelo"]),
-            "00" if c["situacao"] == "autorizado" else "02",
+            COD_SIT_REGULAR,
             _texto(c["serie"]),
             _texto(c["numero"]),
             _texto(c["chave"]),
@@ -523,6 +547,8 @@ class GeradorEFDContribuicoes(GeradorBase):
         self._descartados: list[tuple[str, float]] = []
 
         for visao in visoes:
+            if cancelado(visao["cabecalho"]):
+                continue  # venda cancelada não é receita, nem compra cancelada é crédito
             saida = visao["cabecalho"]["sentido"] == "saida"
             pis = sum(self._somar_item(i, "valor_pis", i["cst_pis"], saida) for i in visao["itens"])
             cofins = sum(

@@ -135,6 +135,32 @@ SEM_FRETE = "9"
 INDICADORES_DE_PAGAMENTO = {"0", "1", "2", "9"}
 PAGAMENTO_OUTROS = "2"
 
+# A situação do documento — o que o protocolo da SEFAZ disse — e o que ela faz
+# com a escrituração.  Não é só o `COD_SIT`: é se o documento entra no arquivo
+# e na apuração.
+#
+#   * **cancelado** entra no C100 só com os campos da Exceção 1 do Guia
+#     Prático da EFD ICMS/IPI 3.2.2 (REG, IND_OPER, IND_EMIT, COD_MOD, COD_SIT,
+#     SER, NUM_DOC e CHV_NFE), sem registro filho, e fora da apuração;
+#   * **denegado** não entra no arquivo: "a partir de janeiro de 2023, os
+#     códigos de situação de documento 04 (NF-e denegada) e 05 [...] serão
+#     descontinuados", e o B020/C100 dizem que "não deverão ser informados os
+#     documentos fiscais eletrônicos denegados".  O leiaute mais antigo que o
+#     gerador conhece é de 2024, então não há período em que o 04 valha.
+CANCELADO = "cancelado"
+DENEGADO = "denegado"
+COD_SIT_REGULAR = "00"
+COD_SIT_CANCELADO = "02"
+
+
+def cancelado(cabecalho: dict) -> bool:
+    """O documento foi cancelado — pela camada efetiva, não pelo XML."""
+    return cabecalho.get("situacao") == CANCELADO
+
+
+def denegado(cabecalho: dict) -> bool:
+    return cabecalho.get("situacao") == DENEGADO
+
 
 class GeradorBase:
     """A mecânica de montar registros e fechar as contagens."""
@@ -158,6 +184,44 @@ class GeradorBase:
         self._resultado = ResultadoGeracao(documentos_ids=documentos_ids)
         self._frete_sem_modalidade = []
         self._pagamento_sem_indicador: list[str] = []
+
+    def _no_arquivo(self, visoes: Sequence[dict]) -> list[dict]:
+        """Os documentos que entram no arquivo — todos menos os denegados.
+
+        O denegado sai com aviso nomeando o documento: sumir do arquivo em
+        silêncio faria parecer que a importação o perdeu. Chamar depois de
+        `_reiniciar`, que zera os avisos.
+        """
+        denegados = [v for v in visoes if denegado(v["cabecalho"])]
+        if denegados:
+            numeros = ", ".join(texto(v["cabecalho"].get("numero")) or "?" for v in denegados)
+            self._resultado.avisos.append(
+                f"{len(denegados)} documento(s) denegado(s) ficaram FORA do arquivo "
+                f"(nº {numeros}): o COD_SIT 04 foi descontinuado em 01/2023 e o Guia "
+                "Prático manda não informar documento denegado. O XML continua na Central"
+            )
+        return [v for v in visoes if not denegado(v["cabecalho"])]
+
+    def _c100_cancelado(self, cabecalho: dict) -> None:
+        """O C100 da Exceção 1 do Guia: só a identificação, sem valor nenhum.
+
+        Monta pelo NOME dos campos do leiaute, não pela posição: são sete
+        campos preenchidos entre vinte e oito, e um deslocamento aqui não seria
+        visto por ninguém — é justamente o erro que `leiaute.py` existe para
+        impedir.
+        """
+        entrada = cabecalho["sentido"] == "entrada"
+        campos = dict.fromkeys(self.LEIAUTE["C100"], "")
+        campos.update(
+            IND_OPER="0" if entrada else "1",
+            IND_EMIT="1" if entrada else "0",
+            COD_MOD=texto(cabecalho["modelo"]),
+            COD_SIT=COD_SIT_CANCELADO,
+            SER=texto(cabecalho["serie"]),
+            NUM_DOC=texto(cabecalho["numero"]),
+            CHV_NFE=texto(cabecalho["chave"]),
+        )
+        self._add("C100", *campos.values())
 
     def _ind_frt(self, cabecalho: dict) -> str:
         """O `IND_FRT` do C100 — do documento, não de dedução.
@@ -248,6 +312,8 @@ class GeradorBase:
         """
         somas: dict[str, float] = {}
         for visao in visoes:
+            if cancelado(visao["cabecalho"]):
+                continue  # não houve operação, e portanto não há tributo de fora
             for item in visao["itens"]:
                 for campo, rotulo in self.FORA_DA_EFD.items():
                     if valor := item.get(campo) or 0.0:
