@@ -299,8 +299,10 @@ class DRE:
                 # receita e para despesa.  O `abs()` de antes mostrava uma
                 # despesa com saldo credor (recuperação maior que o gasto)
                 # como despesa, e o resultado não batia com o I355.
-                vl_dre = -vl
-                vl_dre_ant = -vl_ant
+                # `+ 0.0` normaliza o -0.0 da categoria vazia (sairia "-0.0"
+                # na API).
+                vl_dre = -vl + 0.0
+                vl_dre_ant = -vl_ant + 0.0
 
                 running += vl_dre
                 running_ant += vl_dre_ant

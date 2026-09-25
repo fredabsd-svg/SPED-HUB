@@ -190,6 +190,11 @@ def _normalizar(nome: str) -> str:
     return unidecode(nome or "").upper()
 
 
+def _r(valor: float) -> float:
+    """Centavos, sem o -0.0 que a troca de sinal de uma variação nula produz."""
+    return round(valor, 2) + 0.0
+
+
 @dataclass
 class _Fluxos:
     """O resultado do método indireto para uma ECD."""
@@ -337,22 +342,22 @@ class DFC:
             elif degrau["tipo"] == "total":
                 valor, valor_ant = total, total_ant
             else:
-                valor = round(atual.categorias.get(degrau["categoria"], 0.0), 2)
-                valor_ant = round(anterior.categorias.get(degrau["categoria"], 0.0), 2)
+                valor = _r(atual.categorias.get(degrau["categoria"], 0.0))
+                valor_ant = _r(anterior.categorias.get(degrau["categoria"], 0.0))
                 secao += valor
                 secao_ant += valor_ant
             linhas.append(
                 LinhaDFC(
                     tipo=degrau["tipo"],
                     descricao=degrau["descricao"],
-                    valor=round(valor, 2),
-                    valor_anterior=round(valor_ant, 2),
+                    valor=_r(valor),
+                    valor_anterior=_r(valor_ant),
                     ordem=i,
                 )
             )
 
-        diferenca = round(total - atual.variacao_saldos, 2)
-        diferenca_ant = round(total_ant - anterior.variacao_saldos, 2)
+        diferenca = _r(total - atual.variacao_saldos)
+        diferenca_ant = _r(total_ant - anterior.variacao_saldos)
         conciliacao = [
             ("section", "Conciliação com caixa e equivalentes", 0.0, 0.0),
             (
@@ -380,32 +385,32 @@ class DFC:
                 LinhaDFC(
                     tipo=tipo,
                     descricao=descricao,
-                    valor=round(valor, 2),
-                    valor_anterior=round(valor_ant, 2),
+                    valor=_r(valor),
+                    valor_anterior=_r(valor_ant),
                     ordem=len(linhas),
                 )
             )
 
         (fco, fco_ant), (fci, fci_ant), (fcf, fcf_ant) = subtotais
         totais = {
-            "variacao_caixa": round(total, 2),
-            "variacao_caixa_anterior": round(total_ant, 2),
-            "operacional": round(fco, 2),
-            "operacional_anterior": round(fco_ant, 2),
-            "investimento": round(fci, 2),
-            "investimento_anterior": round(fci_ant, 2),
-            "financiamento": round(fcf, 2),
-            "financiamento_anterior": round(fcf_ant, 2),
-            "lucro_liquido": round(atual.lucro, 2),
-            "lucro_liquido_anterior": round(anterior.lucro, 2),
-            "caixa_inicial": round(atual.caixa_inicial, 2),
-            "caixa_final": round(atual.caixa_final, 2),
-            "variacao_caixa_saldos": round(atual.variacao_saldos, 2),
+            "variacao_caixa": _r(total),
+            "variacao_caixa_anterior": _r(total_ant),
+            "operacional": _r(fco),
+            "operacional_anterior": _r(fco_ant),
+            "investimento": _r(fci),
+            "investimento_anterior": _r(fci_ant),
+            "financiamento": _r(fcf),
+            "financiamento_anterior": _r(fcf_ant),
+            "lucro_liquido": _r(atual.lucro),
+            "lucro_liquido_anterior": _r(anterior.lucro),
+            "caixa_inicial": _r(atual.caixa_inicial),
+            "caixa_final": _r(atual.caixa_final),
+            "variacao_caixa_saldos": _r(atual.variacao_saldos),
             "diferenca_conciliacao": diferenca,
             "conciliado": abs(diferenca) <= TOLERANCIA_CONCILIACAO,
-            "caixa_inicial_anterior": round(anterior.caixa_inicial, 2),
-            "caixa_final_anterior": round(anterior.caixa_final, 2),
-            "variacao_caixa_saldos_anterior": round(anterior.variacao_saldos, 2),
+            "caixa_inicial_anterior": _r(anterior.caixa_inicial),
+            "caixa_final_anterior": _r(anterior.caixa_final),
+            "variacao_caixa_saldos_anterior": _r(anterior.variacao_saldos),
             "diferenca_conciliacao_anterior": diferenca_ant,
             "tem_anterior": ecd_ant_id is not None,
         }
