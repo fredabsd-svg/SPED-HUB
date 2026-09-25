@@ -76,6 +76,17 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard`,
   (`valor_sinalizado`); a natureza da conta (`saldo_por_natureza`) decide a
   exibição. Relatório novo deve passar por essas funções, nunca refazer o
   sinal na mão.
+- **Razão: uma linha por partida, saldo desde o I155.** O saldo corrente
+  parte do SI do I155 (sem data inicial, o do primeiro período; com data,
+  o do período em que ela cai mais as partidas anteriores a ela dentro
+  dele) — `Razao.saldo_inicial` guarda esse valor, e a CLI o imprime como
+  "Saldo anterior". As contrapartidas vêm das outras partidas do mesmo
+  lançamento, numa consulta à parte (a do filtro só traz a conta
+  razonada). Duas partidas do lançamento na mesma conta são duas linhas.
+  O `criterios` recebido não é alterado.
+- **Razão e diário ordenam por data e, no mesmo dia, pelo número lido como
+  número** (`chave_num_lcto`): como texto, "10" vinha antes de "9", e o
+  razão chegava a ordenar pelo número antes da data.
 - **`fmt_moeda` arredonda uma vez, em `Decimal`, meio para cima.** Arredondar
   os centavos à parte fazia 1,999 sair "1,100" (o vai-um não chegava à parte
   inteira). Valor que arredonda para zero sai "0,00", nunca "(0,00)".
@@ -89,7 +100,7 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard`,
 
 ```bash
 pytest tests/test_reports.py tests/test_fase2.py tests/test_identidade_export.py -q
-pytest tests/test_saldos_consolidados.py -q   # três I150, sintéticas, centro de custo
+pytest tests/test_saldos_consolidados.py tests/test_razao_diario.py -q   # ECD trimestral
 pytest tests/test_cli.py -q -k exportar
 ```
 

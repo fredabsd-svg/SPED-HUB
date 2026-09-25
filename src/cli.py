@@ -188,6 +188,7 @@ def _cmd_razao(session, ecd, criterios, args):
         f"{'Data':<12} {'Nº Lcto':<15} {'Histórico':<30} {'Contrapartidas':<25} {'Débito':>14} {'Crédito':>14} {'Saldo':>14}"
     )
     print(f"{'-'*12} {'-'*15} {'-'*30} {'-'*25} {'-'*14} {'-'*14} {'-'*14}")
+    print(f"{'Saldo anterior':<116} {razao.saldo_inicial:>14,.2f}")
 
     for ln in linhas:
         print(

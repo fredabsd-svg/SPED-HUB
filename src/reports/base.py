@@ -7,6 +7,7 @@ Fornece a infraestrutura comum para todos os relatórios:
 """
 
 import datetime
+import re
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -38,6 +39,18 @@ def saldo_por_natureza(vl_sinalizado: float, cod_nat: str) -> float:
     elif cod_nat == "04":  # Resultado — receitas (crédito) positivas, despesas (débito) negativas
         return -vl_sinalizado  # inverte: crédito vira positivo
     return vl_sinalizado
+
+
+def chave_num_lcto(num_lcto: str | None) -> tuple:
+    """Chave de ordenação do NUM_LCTO que respeita os números: "9" < "10".
+
+    O campo é texto no leiaute (pode ser "LCTO000123" ou "2024/15"); como
+    texto, "10" vem antes de "9". Os trechos de dígitos comparam como
+    inteiro, o resto como texto. `re.split` com grupo alterna sempre texto,
+    dígitos, texto…, então as posições nunca misturam tipos.
+    """
+    partes = re.split(r"(\d+)", (num_lcto or "").strip())
+    return tuple(int(p) if i % 2 else p.upper() for i, p in enumerate(partes))
 
 
 # ── Formatação ─────────────────────────────────────────────────────────────

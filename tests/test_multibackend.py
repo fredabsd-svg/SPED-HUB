@@ -199,6 +199,18 @@ class TestRelatoriosIdenticos:
         assert totais["resultado_liquido"] == 21_000
         assert totais["receita_bruta"] == 48_000
 
+    def test_razao_e_diario(self, sessao_trimestral):
+        from src.reports.diario import LivroDiario
+        from src.reports.razao import Razao
+
+        _, linhas = Razao(sessao_trimestral, sessao_trimestral.ecd_id).gerar("1.1.02")
+        assert [ln.num_lcto for ln in linhas] == ["3", "4", "6", "7", "8", "11", "14"]
+        assert linhas[0].contrapartidas == "1.1.03"
+        assert linhas[-1].saldo_corrente == 48_000
+
+        _, lancamentos, _totais = LivroDiario(sessao_trimestral, sessao_trimestral.ecd_id).gerar()
+        assert [lanc.num_lcto for lanc in lancamentos] == [str(n) for n in range(1, 16)]
+
 
 class TestBuscaTextualCaseInsensitive:
     """`LIKE` diverge entre os backends; `ilike` uniformiza."""
