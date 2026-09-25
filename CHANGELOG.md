@@ -21,11 +21,14 @@ signatários — importe-a de novo para que o contador saia na assinatura.
   os dois, a composição de caixa e equivalentes conta a conta e o critério
   aplicado. No painel, botões alternam o método.
 - **Índices para licitação** (Lei 14.133/2021, art. 69): liquidez geral,
-  solvência geral e liquidez corrente com a referência "maior que 1" e a
-  situação (atende / não atende), mais liquidez seca e imediata,
+  solvência geral, liquidez corrente, liquidez seca e imediata,
   endividamento, capital circulante líquido e patrimônio líquido, no
-  exercício e no anterior, com os grupos do balanço usados no cálculo. Nova
-  aba no painel, PDF, XLSX e TXT.
+  exercício e no anterior, com a fórmula de cada um e os grupos do balanço
+  usados no cálculo. Nova aba no painel, PDF, XLSX e TXT.
+- **Balancete de verificação no painel**, numa aba própria, com saldo
+  inicial, débitos, créditos e saldo final de cada conta, a conferência
+  SI + D − C = SF e download em PDF, XLSX e TXT. O relatório existia só
+  pela linha de comando.
 - **Linha de assinatura do contador e do sócio** no balanço, na DRE, na DFC,
   nos índices e no balancete. O contador (nome, CRC, CPF) vem da própria ECD
   (J930). A ECD assinada com e-CNPJ não diz quem é o sócio: informe no painel
@@ -60,6 +63,8 @@ signatários — importe-a de novo para que o contador saia na assinatura.
   DRE publicada na própria ECD quando a do ano anterior não foi importada.
 - **Planilhas com cabeçalho em português** e a data do balanço nas colunas
   de saldo.
+- **O balancete mostra o saldo com D ou C** ("15.540,00 C") em vez do sinal:
+  "(15.540,00)" não dizia se a conta estava credora ou devedora.
 
 ### Corrigido
 - **O balanço mostra o saldo anterior** mesmo sem a ECD do ano anterior

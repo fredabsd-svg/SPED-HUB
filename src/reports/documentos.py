@@ -67,8 +67,6 @@ ROTULOS = {
     "valor_anterior": "Período anterior",
     "indice": "Índice",
     "formula": "Fórmula",
-    "referencia": "Referência",
-    "situacao": "Situação",
     "num_lcto": "Lançamento",
     "data": "Data",
     "historico": "Histórico",
@@ -313,10 +311,6 @@ def _dfc(session, ecd, criterios, _visao) -> Documento:
     )
 
 
-def _situacao(atende: bool | None) -> str:
-    return "" if atende is None else ("Atende" if atende else "Não atende")
-
-
 def _indices(session, ecd, criterios, _visao) -> Documento:
     ctx_rel, indices, totais = IndicesFinanceiros(session, ecd.id).gerar(criterios)
     ctx = contexto(session, ecd, ctx_rel.titulo, criterios)
@@ -333,15 +327,13 @@ def _indices(session, ecd, criterios, _visao) -> Documento:
         rotulos=rotulos,
         ctx=ctx,
         dados={"indices": indices, "totais": totais},
-        colunas=["indice", "formula", "valor", *anterior, "referencia", "situacao"],
+        colunas=["indice", "formula", "valor", *anterior],
         linhas=[
             {
                 "indice": i.nome,
                 "formula": i.formula,
                 "valor": i.valor if i.valor is not None else "",
                 "valor_anterior": i.valor_anterior if i.valor_anterior is not None else "",
-                "referencia": i.referencia,
-                "situacao": _situacao(i.atende),
             }
             for i in indices
         ],

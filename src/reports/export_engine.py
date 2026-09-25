@@ -11,7 +11,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from src.reports.base import fmt_data, fmt_data_hora, fmt_moeda
+from src.reports.base import fmt_data, fmt_data_hora, fmt_moeda, fmt_saldo_dc
 
 logger = logging.getLogger("sped-hub.export")
 
@@ -87,6 +87,7 @@ class ExportEngine:
         )
         # Registra filtros customizados
         self.env.globals["fmt_moeda"] = fmt_moeda
+        self.env.globals["fmt_saldo_dc"] = fmt_saldo_dc
         self.env.globals["fmt_data"] = fmt_data
         self.env.globals["fmt_data_hora"] = fmt_data_hora
 

@@ -22,7 +22,7 @@ filtros e assinaturas, e a renderização fica com o `ExportEngine`.
 | `Balancete.totais(linhas)` / `Balancete.conferir(linhas)` | Totais sem dobrar a conta; conferência SI+D−C=SF linha a linha. |
 | `ExportEngine` | `render_html`, `export_pdf`, `export_xlsx`, `export_xlsx_to_buffer`. |
 | `WhiteLabel` | Marca do escritório: nome, cor primária, cor clara, logo. |
-| `base.py` | `ReportContext`, `valor_sinalizado`, `saldo_por_natureza`, `fmt_moeda/fmt_data/fmt_data_hora`. |
+| `base.py` | `ReportContext`, `valor_sinalizado`, `saldo_por_natureza`, `fmt_moeda/fmt_saldo_dc/fmt_data/fmt_data_hora`. |
 | `saldos.py` | A consolidação única de saldos: `consolidar(engine, criterios)` → `SaldosConsolidados`; `consolidar_periodos`, `saldos_por_periodo`, `somar_resultado`; `Hierarquia` (árvore `COD_CTA → COD_CTA_SUP`, à prova de ciclo: ancestrais, descendentes, ordem do plano, contas maximais, contas-base, rollup) e `Saldo`. |
 
 Templates em `templates/`: `base.html` (moldura comum), `_assinaturas.html`
@@ -134,11 +134,19 @@ Consumido por `cli`, `api.routes`, `api.graphql`, `dashboard`,
   direto. Mapeamento "dfc" antigo é traduzido para as categorias de fluxo.
   Dos filtros, vale o período (datas dos lançamentos).
 - **Índices para licitação (Lei 14.133/2021, art. 69).** LG = (AC + RLP) /
-  (PC + PNC), SG = AT / (PC + PNC), LC = AC / PC — os usuais, referência
-  maior que 1 —, mais liquidez seca e imediata, endividamento, CCL e PL. O
-  exercício anterior é o SI (ou a ECD anterior). Conta sem grupo
-  identificado é listada; passivo sem grupo vai para o circulante, o lado
-  prudente. Sem índice de rentabilidade (vedado pelo § 2º).
+  (PC + PNC), SG = AT / (PC + PNC), LC = AC / PC — os usuais —, mais
+  liquidez seca e imediata, endividamento, CCL e PL. O exercício anterior é
+  o SI (ou a ECD anterior). Conta sem grupo identificado é listada; passivo
+  sem grupo vai para o circulante, o lado prudente. Sem índice de
+  rentabilidade (vedado pelo § 2º). O relatório mostra só os valores e as
+  fórmulas — sem coluna de referência nem de situação, a pedido do
+  contador: o limite é o do edital. `Indice.atende` e
+  `totais["atende_usuais"]` continuam no retorno para a API.
+- **Balancete com indicador D/C** (`base.fmt_saldo_dc`): o saldo sai
+  "1.234,56 D" ou "1.234,56 C", no PDF, no painel, no TXT e na planilha.
+- **Balancete e plano de contas em A4 deitado** (`{% block pagina %}paisagem`
+  no template, `@page paisagem` no `print.css`): sete colunas em pé cortavam
+  a última. As demonstrações seguem em pé.
 - **Assinaturas.** Balancete, balanço, DRE, DFC e índices saem com a linha
   do responsável legal e a do contador. O contador vem do J930 (código 900 ou
   CRC); o responsável, do que for informado na exportação, do cadastro da

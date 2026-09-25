@@ -20,7 +20,7 @@ vem de `reports/`.
 | Marca | `/favicon.ico` (redireciona para `/static/marca.svg`) |
 | Páginas | `/` (aceita `?ecd_id=`), `/upload`, `/fiscal/importar`, `/fiscal/documentos`, `/fiscal/documentos/{id}`, `/fiscal/classificar`, `/fiscal/classificar/exportar.csv`, `/fiscal/corrigir`, `/fiscal/gerar`, `/fiscal/cadastro`, `/comparar`, `/layout`, `/api-keys`, `/webhooks`, `/auditoria`, `/monitoring` |
 | Upload | `POST /api/upload` (ECD síncrona, compatibilidade), `/api/upload-async` + `/api/jobs/*` (importação com progresso usada pela tela), `/api/upload-efd`, `/api/upload-ecf` (só resumo) |
-| Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc` (`?metodo=direto\|indireto`), `/api/indices`, `/api/plano`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
+| Dados (parciais HTMX/JSON) | `/api/kpis`, `/api/balanco`, `/api/dre`, `/api/dfc` (`?metodo=direto\|indireto`), `/api/balancete`, `/api/indices`, `/api/plano`, `/api/diario`, `/api/graficos`, `/api/ecds`, `/api/filtros/aplicar`, `/api/multi-ecd`, `/api/comparar`, `/api/notas` |
 | Assinaturas | `GET /api/assinaturas?ecd_id=` (formulário) e `POST /api/assinaturas?ecd_id=` (grava o responsável legal na empresa da ECD) |
 | Exportação | `/api/export/pdf`, `/xlsx`, `/txt` (devolvem o arquivo como download, por `src.reports.documentos`), `/multi-formato` (ZIP), `/lote` |
 | Administração (admin) | `/api/audit/*`, `/api/email/*`, `/api/worker/status`, `/api/monitoring/*` |
@@ -57,7 +57,7 @@ Ninguém importa o módulo em produção — quem o consome é o servidor ASGI
   chamam `src.reports.documentos.montar`: antes cada rota montava o próprio
   `ReportContext`, sem descrição de filtros — o PDF saía com o rótulo
   FILTROS vazio e o período em ISO. O cartão Relatórios ganhou as abas
-  Índices (licitação) e Plano de contas, a DFC com os botões de método
+  Balancete, Índices (licitação) e Plano de contas, a DFC com os botões de método
   direto e indireto, e o painel "Assinaturas", que mostra o contador do
   J930 e grava o sócio no cadastro da empresa. O `POST /api/assinaturas`
   recebe o `ecd_id` na query string justamente para passar pela conferência

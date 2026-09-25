@@ -454,6 +454,16 @@ class TestDocumentos:
         assert conteudo.startswith(b"%PDF") and media_type == "application/pdf"
         assert extensao == "pdf"
 
+    def test_indices_so_com_os_valores(self, sessao, ecd):
+        documento = documentos.montar(sessao, ecd, "indices")
+        assert documento.colunas == ["indice", "formula", "valor", "valor_anterior"]
+        html = documentos.html(documento)
+        assert "Liquidez Geral (LG)" in html
+        for removido in ("Situação", "Referência", "Não atende", "status-ok"):
+            assert f">{removido}" not in html and f'"{removido}"' not in html, removido
+        texto = documentos.texto(documento)
+        assert "Atende" not in texto and "> 1,00" not in texto
+
     def test_xlsx_com_rotulos_e_datas(self, sessao, ecd):
         import io
 
@@ -573,7 +583,11 @@ class TestPelaTela:
         painel = cliente.get("/").text
         assert "/api/indices?ecd_id=1" in painel and "/api/plano?ecd_id=1" in painel
         indices = cliente.get("/api/indices", params={"ecd_id": 1}).text
-        assert "Liquidez Geral (LG)" in indices and "Atende" in indices
+        assert "Liquidez Geral (LG)" in indices and "1,03" in indices
+        assert (
+            "Atende" not in indices and "Situação" not in indices
+        ), "a tabela mostra só os índices: sem situação nem referência"
+        assert "Referência" not in indices
         plano = cliente.get("/api/plano", params={"ecd_id": 1}).text
         assert "BANCO ALFA" in plano and "J100: sob 1.1.2" in plano
 
@@ -691,3 +705,58 @@ class TestRateio:
         assert "Juros e encargos financeiros pagos" not in _valores(direto)
         assert totais["operacional_indireto"] == totais["operacional_direto"] == 90
         assert totais["conciliado"] is True
+
+
+# ── Balancete de verificação ───────────────────────────────────────────────
+
+
+class TestBalancete:
+    def test_saldo_com_indicador_de_natureza(self):
+        from src.reports.base import fmt_saldo_dc
+
+        assert fmt_saldo_dc(1234.5) == "1.234,50 D"
+        assert fmt_saldo_dc(-1234.5) == "1.234,50 C"
+        assert fmt_saldo_dc(-0.004) == "0,00"
+
+    def test_pdf_mostra_d_e_c(self, sessao, ecd):
+        html = documentos.html(documentos.montar(sessao, ecd, "balancete"))
+        assert "10.040,00 D" in html, "disponível devedor"
+        assert "15.540,00 C" in html, "patrimônio líquido credor"
+        assert "(15.540,00)" not in html, "o sinal não diz se a conta está credora ou devedora"
+
+    @pytest.mark.parametrize("tipo", ["balancete", "plano"])
+    def test_relatorio_largo_sai_deitado(self, sessao, ecd, tipo):
+        """Sete colunas num A4 em pé cortavam a última e quebravam os valores."""
+        html = documentos.html(documentos.montar(sessao, ecd, tipo))
+        assert '<body class="paisagem">' in html
+        assert "size: A4 landscape" in html
+
+    def test_demonstracao_segue_em_pe(self, sessao, ecd):
+        assert '<body class="">' in documentos.html(documentos.montar(sessao, ecd, "balanco"))
+
+    def test_texto_e_planilha_com_d_e_c(self, sessao, ecd):
+        texto = documentos.texto(documentos.montar(sessao, ecd, "balancete"))
+        assert "BALANCETE DE VERIFICAÇÃO" in texto
+        assert "10.040,00 D" in texto and "15.540,00 C" in texto
+
+    def test_aba_do_painel(self, banco, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from src.auth import init_auth
+
+        monkeypatch.setenv("SPED_HUB_DB", banco)
+        from src.dashboard.app import app
+
+        init_auth(banco)
+        cliente = TestClient(app)
+        dados = {"email": "balancete@test.local", "nome": "B", "senha": "senha123"}
+        assert cliente.post("/api/register", data=dados).status_code == 200
+        del dados["nome"]
+        assert cliente.post("/api/login", data=dados).status_code == 200
+
+        painel = cliente.get("/").text
+        assert "/api/balancete?ecd_id=1" in painel, "o balancete não tinha aba no painel"
+        assert "/api/export/pdf?ecd_id=1&tipo=balancete" in painel
+        html = cliente.get("/api/balancete", params={"ecd_id": 1}).text
+        assert "BANCO ALFA" in html and "10.040,00 D" in html
+        assert "Conferência SI + D − C = SF: OK" in html

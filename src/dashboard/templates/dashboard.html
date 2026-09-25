@@ -321,6 +321,7 @@
         <div class="card-body">
             <div class="tabs" role="tablist" aria-label="Relatórios contábeis">
                 <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'balanco'" :class="{ active: tab === 'balanco' }" @click="tab = 'balanco'">Balanço</button>
+                <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'balancete'" :class="{ active: tab === 'balancete' }" @click="tab = 'balancete'">Balancete</button>
                 <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'dre'" :class="{ active: tab === 'dre' }" @click="tab = 'dre'">DRE</button>
                 <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'dfc'" :class="{ active: tab === 'dfc' }" @click="tab = 'dfc'">DFC</button>
                 <button type="button" class="tab-btn" role="tab" :aria-selected="tab === 'indices'" :class="{ active: tab === 'indices' }" @click="tab = 'indices'">Índices</button>
@@ -343,6 +344,18 @@
                 </div>
                 <div id="tab-balanco" hx-get="/api/balanco?ecd_id={{ ecd_ativo }}" hx-trigger="load">
                     <div class="carregando"><span class="spinner"></span> Carregando o balanço…</div>
+                </div>
+            </div>
+
+            <!-- Balancete de verificação -->
+            <div class="tab-content" role="tabpanel" :class="{ active: tab === 'balancete' }">
+                <div class="report-actions">
+                    <a class="btn btn-sm btn-outline" href="/api/export/pdf?ecd_id={{ ecd_ativo }}&tipo=balancete" download>{{ ic.icone("baixar") }} PDF</a>
+                    <a class="btn btn-sm btn-outline" href="/api/export/xlsx?ecd_id={{ ecd_ativo }}&tipo=balancete" download>{{ ic.icone("baixar") }} XLSX</a>
+                    <a class="btn btn-sm btn-outline" href="/api/export/txt?ecd_id={{ ecd_ativo }}&tipo=balancete" download>{{ ic.icone("baixar") }} TXT</a>
+                </div>
+                <div id="tab-balancete" hx-get="/api/balancete?ecd_id={{ ecd_ativo }}" hx-trigger="intersect once">
+                    <div class="carregando"><span class="spinner"></span> Carregando o balancete…</div>
                 </div>
             </div>
 

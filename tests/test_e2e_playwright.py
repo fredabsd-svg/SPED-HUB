@@ -635,8 +635,8 @@ class TestE2EPainelRevisado:
             browser.close()
 
     def test_abas_de_indices_plano_dfc_e_assinaturas(self, live_server, contador, tmp_path):
-        """As abas novas (índices, plano de contas), os dois métodos da DFC e
-        o painel de assinaturas, com o contador lido do J930, pela tela."""
+        """As abas novas (balancete, índices, plano de contas), os dois métodos
+        da DFC e o painel de assinaturas, com o contador lido do J930."""
         from tests.fixtures.ecd_demonstracoes import CONTADORA, gerar_ecd_demonstracoes
 
         with sync_playwright() as p:
@@ -651,6 +651,8 @@ class TestE2EPainelRevisado:
             page.get_by_role("button", name="Assinaturas").click()
             expect(page.locator("#painel-assinaturas")).to_contain_text(CONTADORA, timeout=15_000)
 
+            page.get_by_role("tab", name="Balancete").click()
+            expect(page.locator("#tab-balancete")).to_contain_text("10.040,00 D")
             page.get_by_role("tab", name="Índices").click()
             expect(page.locator("#tab-indices")).to_contain_text("Liquidez Geral (LG)")
             page.get_by_role("tab", name="Plano de contas").click()

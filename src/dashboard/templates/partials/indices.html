@@ -17,8 +17,6 @@
                 <th>Índice</th>
                 <th class="text-right">{{ atual }}</th>
                 {% if totais.tem_anterior %}<th class="text-right">{{ anterior }}</th>{% endif %}
-                <th class="text-center">Referência</th>
-                <th class="text-center">Situação</th>
             </tr>
         </thead>
         <tbody>
@@ -30,18 +28,12 @@
                 </td>
                 <td class="text-right font-mono">{{ '—' if i.valor is none else fmt_moeda(i.valor) }}</td>
                 {% if totais.tem_anterior %}<td class="text-right font-mono">{{ '—' if i.valor_anterior is none else fmt_moeda(i.valor_anterior) }}</td>{% endif %}
-                <td class="text-center">{{ i.referencia or '—' }}</td>
-                <td class="text-center">
-                    {% if i.atende is not none %}
-                    <span class="badge {{ 'badge-success' if i.atende else 'badge-danger' }}">{{ 'Atende' if i.atende else 'Não atende' }}</span>
-                    {% endif %}
-                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
 <p class="nota-relatorio">
-    Lei 14.133/2021, art. 69: LG, SG e LC maiores que 1 são os índices usuais (SICAF e guia do TCU); índices de rentabilidade são vedados (§ 2º) e o PL mínimo pode chegar a 10% do valor estimado do contrato (§ 4º){% if totais.contrato_maximo_pl_10 %} — com o PL atual, contratos de até {{ fmt_moeda(totais.contrato_maximo_pl_10) }}{% endif %}.
-    O PDF sai com a assinatura do contador, como pede o § 1º.
+    Lei 14.133/2021, art. 69: liquidez geral, solvência geral e liquidez corrente são os índices usuais (SICAF e guia do TCU); índices de rentabilidade são vedados (§ 2º).
+    O PDF sai com a assinatura do contador (§ 1º).
 </p>

@@ -140,8 +140,9 @@ from src.ratelimit import get_ip_limiter, init_limiter, ip_do_request
 from src.reports import documentos as relatorio_documentos
 from src.reports.assinaturas import assinaturas as assinaturas_da_ecd
 from src.reports.assinaturas import formatar_cpf
+from src.reports.balancete import Balancete
 from src.reports.balanco import BalancoPatrimonial
-from src.reports.base import fmt_data, fmt_moeda
+from src.reports.base import fmt_data, fmt_moeda, fmt_saldo_dc
 from src.reports.dfc import DFC
 from src.reports.diario import LivroDiario
 from src.reports.dre import DRE
@@ -534,6 +535,7 @@ async def require_dashboard_api_auth(request: Request, call_next):
 # ── Filtros Jinja2 ─────────────────────────────────────────────────────────
 
 jinja_env.globals["fmt_moeda"] = fmt_moeda
+jinja_env.globals["fmt_saldo_dc"] = fmt_saldo_dc
 jinja_env.globals["fmt_data"] = fmt_data
 jinja_env.globals["now"] = datetime.datetime.now
 jinja_env.globals["app_version"] = APP_VERSION
@@ -1030,6 +1032,29 @@ async def api_dfc(
                     "totais": totais,
                     "ecd_id": ecd_id,
                     "metodo": metodo,
+                }
+            )
+        )
+    finally:
+        session.close()
+
+
+@app.get("/api/balancete", response_class=HTMLResponse)
+async def api_balancete(request: Request, ecd_id: int = Query(...)):
+    """Balancete de verificação: SI, débitos, créditos e SF de cada conta."""
+    session = get_session(_get_engine())
+    try:
+        balancete = Balancete(session, ecd_id)
+        ctx, linhas = balancete.gerar()
+        return HTMLResponse(
+            jinja_env.get_template("partials/balancete.html").render(
+                {
+                    "request": request,
+                    "ctx": ctx,
+                    "linhas": linhas,
+                    "totais": balancete.totais(linhas),
+                    "conferencia": balancete.conferir(linhas),
+                    "ecd_id": ecd_id,
                 }
             )
         )
