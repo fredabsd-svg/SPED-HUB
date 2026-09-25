@@ -18,6 +18,7 @@ import weakref
 
 from sqlalchemy import (
     DateTime,
+    Float,
     ForeignKey,
     String,
     Text,
@@ -32,7 +33,12 @@ from src.settings import get_settings
 
 
 class Base(DeclarativeBase):
-    pass
+    # `Mapped[float]` vira `Float` de forma explícita.  O SQLAlchemy 2.1
+    # passou a traduzir `float` para `Double` por padrão; as migrações criam
+    # `Float`.  Sem este mapa, o mesmo `models.py` gerava schema diferente
+    # conforme a versão instalada, e o banco migrado deixava de bater com o
+    # dos modelos (§6.2) sem ninguém ter tocado em coluna nenhuma.
+    type_annotation_map = {float: Float}
 
 
 def _hash_sensivel(valor: str) -> str:
