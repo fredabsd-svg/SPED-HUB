@@ -75,9 +75,13 @@ Cada item abaixo tem teste passando; a evidência de cada fase está em
   sem CDN.
 - Login com sessão; o primeiro usuário vira administrador e o registro
   público fecha em seguida.
-- Indicadores e gráficos com tabela equivalente para leitura acessível;
-  importação em segundo plano com progresso e cancelamento.
-- Acesso rápido às telas com `Ctrl+K` ou `Cmd+K`.
+- Menu lateral com as telas agrupadas por área e acesso rápido com `Ctrl+K`
+  ou `Cmd+K`; em tela estreita o menu recolhe atrás de um botão.
+- Indicadores, gráficos com tabela equivalente para leitura acessível e um
+  cartão de destaques que lê a escrituração: se o balanço fecha, resultado e
+  margem, endividamento e variação contra o exercício anterior — calculados
+  dos saldos importados, sem estimativa.
+- Importação em segundo plano com progresso e cancelamento.
 - Auditoria, monitoramento, webhooks e chaves de API para administradores.
 
 ### APIs
