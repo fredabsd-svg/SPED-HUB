@@ -374,15 +374,48 @@ class EFDParser:
         return list(self.parse(caminho))
 
     def extrair_resumo(self, caminho: Path) -> dict:
-        """Extrai resumo da EFD-Contribuições: PIS/COFINS apurados, créditos, etc."""
-        resumo = {
+        """Extrai resumo da EFD-Contribuições: PIS/COFINS apurados, créditos, etc.
+
+        As posições seguem o Guia Prático da EFD-Contribuições (tabela de
+        campos de cada registro). `_campos` não traz o REG, então o campo nº N
+        do guia está em ``campos[N - 2]``:
+
+        * 0000 — 06 DT_INI, 07 DT_FIN, 08 NOME, 09 CNPJ;
+        * M100/M500 (crédito do período) — 08 VL_CRED, "valor total do
+          crédito apurado no período";
+        * M200/M600 (consolidação da contribuição) — 02 VL_TOT_CONT_NC_PER
+          (não cumulativa) + 09 VL_TOT_CONT_CUM_PER (cumulativa) é a
+          contribuição do período; 13 VL_TOT_CONT_REC é o total a recolher;
+        * 0111 — 06 REC_BRU_TOTAL, a receita bruta do mês.
+
+        A leitura anterior pegava o CNPJ no DT_FIN, as datas no
+        NUM_REC_ANTERIOR e no DT_INI, o débito de PIS no VL_TOT_CRED_DESC
+        (crédito descontado), o crédito no IND_CRED_ORI (um indicador 0/1) e
+        somava como "receita bruta" o DT_OPER do F100 — uma data.
+
+        Receita bruta só existe inteira no 0111, obrigatório apenas quando o
+        crédito comum é rateado pela receita (0110, IND_APRO_CRED = 2). Sem
+        0111, `receita_bruta` fica `None`: somar M210 daria só a receita
+        tributada, e o F100 só as "demais operações".
+        """
+        resumo: dict = {
             "empresa": {"cnpj": "", "nome": ""},
             "periodo": {"dt_ini": "", "dt_fin": ""},
-            "pis": {"debito": 0.0, "credito": 0.0, "saldo": 0.0},
-            "cofins": {"debito": 0.0, "credito": 0.0, "saldo": 0.0},
-            "receita_bruta": 0.0,
+            "pis": {"debito": 0.0, "credito": 0.0, "saldo": 0.0, "a_recolher": 0.0},
+            "cofins": {"debito": 0.0, "credito": 0.0, "saldo": 0.0, "a_recolher": 0.0},
+            "receita_bruta": None,
             "total_registros": 0,
         }
+
+        def campo(campos: list[str], numero: int) -> str:
+            """O campo nº `numero` do guia (o 01 é o REG, fora de `_campos`)."""
+            indice = numero - 2
+            return campos[indice].strip() if 0 <= indice < len(campos) else ""
+
+        def valor(campos: list[str], numero: int) -> float:
+            return _parse_valor(campo(campos, numero), "N") or 0.0
+
+        tributo_do_registro = {"M100": "pis", "M200": "pis", "M500": "cofins", "M600": "cofins"}
 
         for r in self.parse(caminho):
             resumo["total_registros"] += 1
@@ -390,38 +423,26 @@ class EFDParser:
             campos = r["_campos"]
 
             if reg == "0000":
-                if len(campos) >= 8:
-                    resumo["empresa"]["cnpj"] = campos[5] if len(campos) > 5 else ""
-                    resumo["empresa"]["nome"] = campos[6] if len(campos) > 6 else ""
-                    resumo["periodo"]["dt_ini"] = campos[3] if len(campos) > 3 else ""
-                    resumo["periodo"]["dt_fin"] = campos[4] if len(campos) > 4 else ""
+                resumo["empresa"]["cnpj"] = campo(campos, 9)
+                resumo["empresa"]["nome"] = campo(campos, 8)
+                resumo["periodo"]["dt_ini"] = campo(campos, 6)
+                resumo["periodo"]["dt_fin"] = campo(campos, 7)
 
-            elif reg == "M100":
-                # Crédito de PIS apurado
-                if len(campos) >= 2:
-                    resumo["pis"]["credito"] += _parse_valor(campos[1], "N") or 0.0
+            elif reg in ("M100", "M500"):
+                # Crédito apurado no período (08 VL_CRED)
+                resumo[tributo_do_registro[reg]]["credito"] += valor(campos, 8)
 
-            elif reg == "M200":
-                # Débito de PIS
-                if len(campos) >= 2:
-                    resumo["pis"]["debito"] += _parse_valor(campos[1], "N") or 0.0
+            elif reg in ("M200", "M600"):
+                # Contribuição do período: não cumulativa (02) + cumulativa (09)
+                tributo = resumo[tributo_do_registro[reg]]
+                tributo["debito"] += valor(campos, 2) + valor(campos, 9)
+                tributo["a_recolher"] += valor(campos, 13)
 
-            elif reg == "M500":
-                # Crédito de COFINS apurado
-                if len(campos) >= 2:
-                    resumo["cofins"]["credito"] += _parse_valor(campos[1], "N") or 0.0
+            elif reg == "0111":
+                # Receita bruta total do mês (06 REC_BRU_TOTAL)
+                resumo["receita_bruta"] = (resumo["receita_bruta"] or 0.0) + valor(campos, 6)
 
-            elif reg == "M600":
-                # Débito de COFINS
-                if len(campos) >= 2:
-                    resumo["cofins"]["debito"] += _parse_valor(campos[1], "N") or 0.0
-
-            elif reg == "F100":
-                # Receita bruta
-                if len(campos) >= 4:
-                    resumo["receita_bruta"] += _parse_valor(campos[3], "N") or 0.0
-
-        resumo["pis"]["saldo"] = resumo["pis"]["credito"] - resumo["pis"]["debito"]
-        resumo["cofins"]["saldo"] = resumo["cofins"]["credito"] - resumo["cofins"]["debito"]
+        for tributo in ("pis", "cofins"):
+            resumo[tributo]["saldo"] = resumo[tributo]["credito"] - resumo[tributo]["debito"]
 
         return resumo

@@ -13,8 +13,8 @@ dirigidos pelo YAML de leiaute — e herança pai→filho.
 | Classe | Para quê |
 |---|---|
 | `ECDParser` (`ecd.py`) | `parse` (iterador), `parse_todos`, `parse_em_lotes(n)`, `contar_registros`. Campos nomeados via `src/layouts/ecd_v9.yml`; anota `_linha` e `_offset_bytes`; filhos herdam campos do pai. |
-| `EFDParser` (`efd.py`) | `parse`, `parse_todos`, `extrair_resumo` (PIS/COFINS, receita bruta). Registros genéricos: `_reg` + `_campos` posicionais. |
-| `ECFParser` (`ecf.py`) | `parse`, `parse_todos`, `extrair_resumo` (IRPJ/CSLL, lucro). |
+| `EFDParser` (`efd.py`) | `parse`, `parse_todos`, `extrair_resumo` (identificação, PIS/COFINS: contribuição, crédito, saldo, a recolher; receita bruta do 0111). Registros genéricos: `_reg` + `_campos` posicionais. |
+| `ECFParser` (`ecf.py`) | `parse`, `parse_todos`, `extrair_resumo` (identificação e as linhas declaradas do N630/IRPJ e N670/CSLL). |
 | `detectar_encoding` | Nos três: UTF-8 ou ISO-8859-1 pelos primeiros 4096 bytes. |
 
 Cada parser filtra por seu `REGISTROS_INTERESSE` (frozenset).
@@ -46,7 +46,38 @@ Quem depende: `ecd_importer` (único caminho de persistência da ECD),
   reconstituir com `zfill(14)` (as fixtures fazem exatamente isso).
 - **Assimetria proposital**: só a ECD tem leiaute YAML e campos nomeados;
   EFD e ECF entregam `_campos` posicionais — quem consome conta posições na
-  mão (é o que `extrair_resumo` faz).
+  mão (é o que `extrair_resumo` faz). `_campos` não traz o REG: o campo nº
+  N do leiaute está em `_campos[N - 2]`, e os dois `extrair_resumo` leem
+  pelo número do campo (`campo(campos, N)`), não pelo índice.
+- **Posições do resumo da EFD-Contribuições**, conferidas no Guia Prático
+  da EFD-Contribuições (tabelas de campos dos registros, reproduzidas em
+  vriconsulting.com.br/guias, idGuia 351, 356, 492, 496, 508 e 512, em
+  2026-09-25): 0000 — 06 DT_INI, 07 DT_FIN, 08 NOME, 09 CNPJ; M100/M500 —
+  08 VL_CRED ("valor total do crédito apurado no período"); M200/M600 — 02
+  VL_TOT_CONT_NC_PER + 09 VL_TOT_CONT_CUM_PER (contribuição do período,
+  o "débito"), 13 VL_TOT_CONT_REC (a recolher); 0111 — 06 REC_BRU_TOTAL.
+  A leitura anterior tirava o CNPJ do DT_FIN, as datas do
+  NUM_REC_ANTERIOR/DT_INI, o débito de PIS do VL_TOT_CRED_DESC (crédito
+  descontado), o crédito do IND_CRED_ORI e a "receita bruta" do DT_OPER
+  do F100 — uma data.
+- **Receita bruta da EFD só com 0111.** O 0111 é o único registro com a
+  receita bruta total, e só é obrigatório no rateio proporcional do crédito
+  (0110, IND_APRO_CRED = 2). Sem ele, `receita_bruta` é `None`: o M210 só
+  tem a receita tributada, e o F100 só as "demais operações".
+- **Posições do resumo da ECF**, conferidas no Manual de Orientação do
+  Leiaute da ECF (0000: REG, NOME_ESC, COD_VER, CNPJ, NOME,
+  IND_SIT_INI_PER, SIT_ESPECIAL, PAT_REMAN_CIS, DT_SIT_ESP, DT_INI,
+  DT_FIN, RETIFICADORA, NUM_REC, TIP_ECF, COD_SCP — o exemplo do manual é
+  `|0000|LECF|1.00|11111111000191|EMPRESA TESTE|0|0|||01012014|31122014|N||0||`);
+  N630 (cálculo do IRPJ, lucro real) e N670 (cálculo da CSLL, lucro real):
+  02 CODIGO, 03 DESCRICAO, 04 VALOR. A leitura anterior tirava o CNPJ do
+  PAT_REMAN_CIS e somava todas as linhas do N670 (CSLL) como "irpj".
+- **A ECF não totaliza IRPJ, CSLL nem lucro.** Qual linha do N630/N670 é
+  "o imposto devido" depende do código da tabela dinâmica que a RFB publica
+  por leiaute e ano-calendário, e o leiaute do registro não diz; sem a
+  tabela embutida, `irpj`, `csll`, `lucro_contabil` e `lucro_tributavel`
+  são `None` e as linhas declaradas saem em `apuracao_irpj`/`apuracao_csll`
+  (código, descrição, valor, linha do arquivo).
 - O ECD anota `_offset_bytes` por registro — insumo para progresso em
   arquivos grandes.
 

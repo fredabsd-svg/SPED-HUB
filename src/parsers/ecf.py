@@ -243,16 +243,53 @@ class ECFParser:
         return list(self.parse(caminho))
 
     def extrair_resumo(self, caminho: Path) -> dict:
-        """Extrai resumo da ECF: IRPJ/CSLL apurados, lucro tributável, etc."""
-        resumo = {
+        """Extrai o resumo da ECF: identificação e as linhas da apuração declarada.
+
+        Posições do Manual de Orientação do Leiaute da ECF. `_campos` não traz
+        o REG, então o campo nº N está em ``campos[N - 2]``:
+
+        * 0000 — 01 REG, 02 NOME_ESC ("LECF"), 03 COD_VER, 04 CNPJ, 05 NOME,
+          06 IND_SIT_INI_PER, 07 SIT_ESPECIAL, 08 PAT_REMAN_CIS,
+          09 DT_SIT_ESP, 10 DT_INI, 11 DT_FIN, …;
+        * N630 (cálculo do IRPJ com base no lucro real) e N670 (cálculo da
+          CSLL com base no lucro real) — 02 CODIGO, 03 DESCRICAO, 04 VALOR,
+          uma linha da tabela dinâmica da RFB por registro.
+
+        A leitura anterior pegava o CNPJ no PAT_REMAN_CIS, o nome no
+        DT_SIT_ESP e as datas no SIT_ESPECIAL e no NOME; somava **todas** as
+        linhas do N670 — que é CSLL, não IRPJ — como "irpj", e todas as do
+        N630 (IRPJ) como "lucro contábil". Base, alíquota, adicional,
+        deduções e imposto a pagar viravam um número só, sem significado.
+
+        Qual linha é "o imposto devido" depende do código da tabela dinâmica,
+        que a RFB publica por leiaute e ano-calendário; o leiaute do registro
+        não diz. Sem a tabela embutida, `irpj`, `csll`, `lucro_contabil` e
+        `lucro_tributavel` ficam `None` e as linhas declaradas vêm em
+        `apuracao_irpj` e `apuracao_csll`, como estão no arquivo.
+        """
+        resumo: dict = {
             "empresa": {"cnpj": "", "nome": ""},
             "periodo": {"dt_ini": "", "dt_fin": ""},
-            "lucro_contabil": 0.0,
-            "lucro_tributavel": 0.0,
-            "irpj": 0.0,
-            "csll": 0.0,
+            "lucro_contabil": None,
+            "lucro_tributavel": None,
+            "irpj": None,
+            "csll": None,
+            "apuracao_irpj": [],
+            "apuracao_csll": [],
+            "observacao": (
+                "IRPJ, CSLL e lucros não são totalizados: a linha que representa cada "
+                "valor depende do código da tabela dinâmica da RFB, não do leiaute. "
+                "As linhas do N630 (IRPJ) e do N670 (CSLL) seguem como declaradas."
+            ),
             "total_registros": 0,
         }
+
+        def campo(campos: list[str], numero: int) -> str:
+            """O campo nº `numero` do manual (o 01 é o REG, fora de `_campos`)."""
+            indice = numero - 2
+            return campos[indice].strip() if 0 <= indice < len(campos) else ""
+
+        destino = {"N630": "apuracao_irpj", "N670": "apuracao_csll"}
 
         for r in self.parse(caminho):
             resumo["total_registros"] += 1
@@ -260,30 +297,19 @@ class ECFParser:
             campos = r["_campos"]
 
             if reg == "0000":
-                if len(campos) >= 8:
-                    resumo["empresa"]["cnpj"] = campos[5] if len(campos) > 5 else ""
-                    resumo["empresa"]["nome"] = campos[6] if len(campos) > 6 else ""
-                    resumo["periodo"]["dt_ini"] = campos[3] if len(campos) > 3 else ""
-                    resumo["periodo"]["dt_fin"] = campos[4] if len(campos) > 4 else ""
+                resumo["empresa"]["cnpj"] = campo(campos, 4)
+                resumo["empresa"]["nome"] = campo(campos, 5)
+                resumo["periodo"]["dt_ini"] = campo(campos, 10)
+                resumo["periodo"]["dt_fin"] = campo(campos, 11)
 
-            elif reg == "N630":
-                # Lucro contábil
-                if len(campos) >= 3:
-                    resumo["lucro_contabil"] += _parse_valor(campos[2], "N") or 0.0
-
-            elif reg == "N650":
-                # Lucro tributável
-                if len(campos) >= 3:
-                    resumo["lucro_tributavel"] += _parse_valor(campos[2], "N") or 0.0
-
-            elif reg == "N670":
-                # IRPJ devido
-                if len(campos) >= 3:
-                    resumo["irpj"] += _parse_valor(campos[2], "N") or 0.0
-
-            elif reg == "N660":
-                # CSLL devido
-                if len(campos) >= 3:
-                    resumo["csll"] += _parse_valor(campos[2], "N") or 0.0
+            elif reg in destino:
+                resumo[destino[reg]].append(
+                    {
+                        "linha": r["_linha"],
+                        "codigo": campo(campos, 2),
+                        "descricao": campo(campos, 3),
+                        "valor": _parse_valor(campo(campos, 4), "N"),
+                    }
+                )
 
         return resumo
